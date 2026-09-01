@@ -1,5 +1,5 @@
 #include "../../common/app_lcd.h"
-#include "../../common/elf_common.h"
+#include "elf_common.h"
 #include "../../system/system.h"
 #include "sys_adapter.h"
 #include "floatair_dbg.h"

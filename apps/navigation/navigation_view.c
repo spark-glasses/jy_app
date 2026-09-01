@@ -52,7 +52,7 @@ static bool navigation_drive_icon_valid(void) {
 }
 
 static bool navigation_drive_icon_ensure(void) {
-    lv_obj_t* status_bar = system_get_status_bar(STATUS_BAR_POS_BOTTOM);
+    lv_obj_t* status_bar = system_get_status_bar(STATUS_BAR_POS_TOP);
 
     if (status_bar == NULL || !lv_obj_is_valid(status_bar)) {
         s_img_drive = NULL;
@@ -241,7 +241,7 @@ static void navigation_page_appear(lv_obj_t* root) {
 }
 
 static void navigation_page_destroy(void) {
-    lv_obj_t* status_bar = system_get_status_bar(STATUS_BAR_POS_BOTTOM);
+    lv_obj_t* status_bar = system_get_status_bar(STATUS_BAR_POS_TOP);
 
     if (s_dir_icon_dsc) {
         if (s_dir_icon_buf) {

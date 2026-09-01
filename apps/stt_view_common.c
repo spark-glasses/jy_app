@@ -223,7 +223,7 @@ void stt_view_update_incremental_text_max_128(label_t* label, const char* text) 
 }
 
 void stt_view_update_waveicon(lv_obj_t* waveicon, bool show) {
-    lv_obj_t* status_bar = system_get_status_bar(STATUS_BAR_POS_BOTTOM);
+    lv_obj_t* status_bar = system_get_status_bar(STATUS_BAR_POS_TOP);
 
     if (status_bar == NULL || !lv_obj_is_valid(status_bar) ||
         waveicon == NULL || !lv_obj_is_valid(waveicon)) {

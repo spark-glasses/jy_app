@@ -66,7 +66,7 @@ static bool transcribe_status_bar_widgets_valid(void) {
 }
 
 static bool transcribe_status_bar_ensure_widgets(void) {
-    lv_obj_t* status_bar = system_get_status_bar(STATUS_BAR_POS_BOTTOM);
+    lv_obj_t* status_bar = system_get_status_bar(STATUS_BAR_POS_TOP);
 
     if (status_bar == NULL || !lv_obj_is_valid(status_bar)) {
         transcribe_audio_source = NULL;
@@ -622,7 +622,7 @@ static void transcribe_page_create(lv_obj_t* root, const app_page_data_t* data) 
     lv_obj_set_style_bg_color(root, lv_color_black(), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(root, LV_OPA_COVER, LV_PART_MAIN);
 
-    status_bar = system_get_status_bar(STATUS_BAR_POS_BOTTOM);
+    status_bar = system_get_status_bar(STATUS_BAR_POS_TOP);
     if (status_bar != NULL && lv_obj_is_valid(status_bar)) {
         status_bar_clear_custom_widgets(status_bar);
     }
@@ -729,7 +729,7 @@ static void transcribe_page_appear(lv_obj_t* root) {
 }
 
 static void transcribe_page_destroy(void) {
-    lv_obj_t* status_bar = system_get_status_bar(STATUS_BAR_POS_BOTTOM);
+    lv_obj_t* status_bar = system_get_status_bar(STATUS_BAR_POS_TOP);
 
     (void)system_request_keyword_spotting_enabled(system_config_get_keyword_spotting_enabled());
 

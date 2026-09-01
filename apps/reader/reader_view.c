@@ -119,7 +119,7 @@ static bool reader_status_bar_widgets_valid(void) {
 }
 
 static bool reader_status_bar_ensure_widgets(void) {
-    lv_obj_t* status_bar = system_get_status_bar(STATUS_BAR_POS_BOTTOM);
+    lv_obj_t* status_bar = system_get_status_bar(STATUS_BAR_POS_TOP);
 
     if (status_bar == NULL || !lv_obj_is_valid(status_bar)) {
         s_text_page_label = NULL;
@@ -709,7 +709,7 @@ static void text_build_ui(lv_obj_t* root) {
 
 static void reader_view_apply_visibility(void) {
     bool init_mode = (s_view_mode == READER_VIEW_MODE_INIT);
-    lv_obj_t* status_bar = system_get_status_bar(STATUS_BAR_POS_BOTTOM);
+    lv_obj_t* status_bar = system_get_status_bar(STATUS_BAR_POS_TOP);
 
     if (s_init_label) {
         if (init_mode && (s_doc_cnt <= 0 || s_docs == NULL)) {
@@ -793,7 +793,7 @@ void reader_view_reset(void) {
 }
 
 static void reader_page_destroy(void) {
-    lv_obj_t* status_bar = system_get_status_bar(STATUS_BAR_POS_BOTTOM);
+    lv_obj_t* status_bar = system_get_status_bar(STATUS_BAR_POS_TOP);
 
     free_file();
     if (status_bar != NULL && lv_obj_is_valid(status_bar)) {

@@ -1,6 +1,6 @@
 /**
  * @file status_bar.c
- * @brief Bottom status bar implementation
+ * @brief Shared status bar implementation
  */
 #include <stdio.h>
 #include <string.h>
@@ -255,54 +255,52 @@ lv_obj_t* status_bar_create_with_pos(lv_obj_t* parent, int32_t width, const lv_f
     lv_obj_t* battery_icon = NULL;
     lv_obj_t* battery_label = NULL;
     lv_obj_t* wear_detection_slot = NULL;
-    if (pos == STATUS_BAR_POS_BOTTOM) {
-        time_label = lv_label_create(status_bar);
-        lv_coord_t font_h = 0;
-        if (font != NULL) {
-            font_h = lv_font_get_line_height(font);
-        }
-        if (font_h <= 0 || font_h > STATUS_BAR_HEIGHT) {
-            font_h = STATUS_BAR_HEIGHT;
-        }
-        lv_obj_set_style_text_color(time_label, lv_color_white(), 0);
-        if (font != NULL) {
-            obj_set_text_font(time_label, font);
-        }
-        lv_obj_set_style_text_align(time_label, LV_TEXT_ALIGN_CENTER, 0);
-        lv_label_set_long_mode(time_label, LV_LABEL_LONG_SCROLL_CIRCULAR);
-        lv_label_set_text(time_label, DEFAULT_TIME);
-        lv_coord_t time_text_width =
-            lv_text_get_width(DEFAULT_TIME, (uint32_t)strlen(DEFAULT_TIME), font, 0);
-        lv_coord_t time_label_width =
-            time_text_width + STATUS_BAR_LABEL_SIDE_PADDING * 2;
-        lv_obj_set_size(time_label, time_label_width, font_h);
-        lv_obj_align(time_label, LV_ALIGN_LEFT_MID, 0, 0);
-        battery_icon = lv_image_create(status_bar);
-        lv_obj_remove_style_all(battery_icon);
-        lv_obj_set_size(battery_icon, STATUS_BAR_IMG_W, STATUS_BAR_IMG_H);
-        lv_obj_align(battery_icon, LV_ALIGN_RIGHT_MID, 0, 0);
-        lv_obj_set_style_bg_color(battery_icon, lv_color_black(), LV_PART_MAIN);
-        lv_obj_set_style_bg_opa(battery_icon, LV_OPA_COVER, LV_PART_MAIN);
-        battery_label = lv_label_create(status_bar);
-        lv_obj_remove_style_all(battery_label);
-        lv_obj_set_style_text_color(battery_label, lv_color_white(), 0);
-        if (font != NULL) {
-            obj_set_text_font(battery_label, font);
-        }
-        lv_obj_set_style_text_align(battery_label, LV_TEXT_ALIGN_RIGHT, 0);
-        lv_obj_set_style_bg_color(battery_label, lv_color_black(), LV_PART_MAIN);
-        lv_obj_set_style_bg_opa(battery_label, LV_OPA_COVER, LV_PART_MAIN);
-        lv_label_set_long_mode(battery_label, LV_LABEL_LONG_SCROLL_CIRCULAR);
-        lv_label_set_text(battery_label, "0%");
-        lv_coord_t battery_text_width = status_bar_get_battery_text_width(font);
-        lv_obj_set_size(battery_label, battery_text_width, font_h);
-
-        wear_detection_slot = lv_image_create(status_bar);
-        lv_obj_remove_style_all(wear_detection_slot);
-        lv_obj_set_size(wear_detection_slot, STATUS_BAR_IMG_W, STATUS_BAR_IMG_H);
-        lv_image_set_src(wear_detection_slot, FLOATAIR_SYS_IMG("touch.jpg"));
-        lv_obj_add_flag(wear_detection_slot, LV_OBJ_FLAG_HIDDEN);
+    time_label = lv_label_create(status_bar);
+    lv_coord_t font_h = 0;
+    if (font != NULL) {
+        font_h = lv_font_get_line_height(font);
     }
+    if (font_h <= 0 || font_h > STATUS_BAR_HEIGHT) {
+        font_h = STATUS_BAR_HEIGHT;
+    }
+    lv_obj_set_style_text_color(time_label, lv_color_white(), 0);
+    if (font != NULL) {
+        obj_set_text_font(time_label, font);
+    }
+    lv_obj_set_style_text_align(time_label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_long_mode(time_label, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    lv_label_set_text(time_label, DEFAULT_TIME);
+    lv_coord_t time_text_width =
+        lv_text_get_width(DEFAULT_TIME, (uint32_t)strlen(DEFAULT_TIME), font, 0);
+    lv_coord_t time_label_width =
+        time_text_width + STATUS_BAR_LABEL_SIDE_PADDING * 2;
+    lv_obj_set_size(time_label, time_label_width, font_h);
+    lv_obj_align(time_label, LV_ALIGN_LEFT_MID, 0, 0);
+    battery_icon = lv_image_create(status_bar);
+    lv_obj_remove_style_all(battery_icon);
+    lv_obj_set_size(battery_icon, STATUS_BAR_IMG_W, STATUS_BAR_IMG_H);
+    lv_obj_align(battery_icon, LV_ALIGN_RIGHT_MID, 0, 0);
+    lv_obj_set_style_bg_color(battery_icon, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(battery_icon, LV_OPA_COVER, LV_PART_MAIN);
+    battery_label = lv_label_create(status_bar);
+    lv_obj_remove_style_all(battery_label);
+    lv_obj_set_style_text_color(battery_label, lv_color_white(), 0);
+    if (font != NULL) {
+        obj_set_text_font(battery_label, font);
+    }
+    lv_obj_set_style_text_align(battery_label, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_style_bg_color(battery_label, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(battery_label, LV_OPA_COVER, LV_PART_MAIN);
+    lv_label_set_long_mode(battery_label, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    lv_label_set_text(battery_label, "0%");
+    lv_coord_t battery_text_width = status_bar_get_battery_text_width(font);
+    lv_obj_set_size(battery_label, battery_text_width, font_h);
+
+    wear_detection_slot = lv_image_create(status_bar);
+    lv_obj_remove_style_all(wear_detection_slot);
+    lv_obj_set_size(wear_detection_slot, STATUS_BAR_IMG_W, STATUS_BAR_IMG_H);
+    lv_image_set_src(wear_detection_slot, FLOATAIR_SYS_IMG("touch.jpg"));
+    lv_obj_add_flag(wear_detection_slot, LV_OBJ_FLAG_HIDDEN);
     status_bar_data_t* data = (status_bar_data_t*)lv_malloc(sizeof(status_bar_data_t));
     if (data == NULL) {
         lv_obj_delete(status_bar);
@@ -326,10 +324,8 @@ lv_obj_t* status_bar_create_with_pos(lv_obj_t* parent, int32_t width, const lv_f
     }
     lv_obj_set_user_data(status_bar, data);
     lv_obj_add_event_cb(status_bar, status_bar_on_delete, LV_EVENT_DELETE, NULL);
-    if (pos == STATUS_BAR_POS_BOTTOM) {
-        status_bar_align_right_widgets(data);
-        status_bar_update_battery(status_bar, 0);
-    }
+    status_bar_align_right_widgets(data);
+    status_bar_update_battery(status_bar, 0);
     return status_bar;
 }
 

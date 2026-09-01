@@ -24,7 +24,7 @@
 #if APP_BUILD_GUIDE
 #include "guide/guide.h"
 #endif
-#include "home/home.h"
+#include "spark/spark.h"
 #if APP_BUILD_NAVIGATION
 #include "navigation/navigation.h"
 #endif
@@ -69,7 +69,7 @@ static bool g_router_initialized = false;                            ///< 路由
  * @return 无返回值。
  */
 static void app_router_clear_status_bar_widgets(void) {
-    lv_obj_t* status_bar = system_get_status_bar(STATUS_BAR_POS_BOTTOM);
+    lv_obj_t* status_bar = system_get_status_bar(STATUS_BAR_POS_TOP);
 
     if (status_bar == NULL || !lv_obj_is_valid(status_bar)) {
         return;
@@ -123,8 +123,8 @@ static const char* app_router_resolve_home(void) {
  * @return `true` 表示全部注册成功，`false` 表示至少一个 App 注册失败。
  */
 static bool app_router_register_apps(void) {
-    if (!home_app_register()) {
-        floatair_err("home app register failed");
+    if (!spark_app_register()) {
+        floatair_err("Spark app register failed");
         return false;
     }
 #if APP_BUILD_PROMPTER
@@ -216,6 +216,7 @@ bool app_router_init(void) {
         return true;
     }
 
+    cfg.app_layer = system_ui_get_page_parent();
     cfg.page_host = app_page_host_default_config(
         (int32_t)config_lcd.ui_width,
         (int32_t)system_ui_get_page_content_height());

@@ -21,28 +21,28 @@ extern "C" {
 #endif
 
 /**
- * @brief 将电量值同步到底部状态栏。
+ * @brief 将电量值同步到顶部状态栏。
  * @param[in] battery 电量百分比。
  * @return 无返回值。
  */
 void system_ui_update_battery(uint8_t battery);
 
 /**
- * @brief 将充电状态同步到底部状态栏。
+ * @brief 将充电状态同步到顶部状态栏。
  * @param[in] charge_state 充电状态值。
  * @return 无返回值。
  */
 void system_ui_update_charge_state(uint8_t charge_state);
 
 /**
- * @brief 设置底部状态栏佩戴检测图标显隐。
+ * @brief 设置顶部状态栏佩戴检测图标显隐。
  * @param[in] visible `true` 表示显示图标占位，`false` 表示隐藏图标占位。
  * @return 无返回值。
  */
 void system_ui_set_wear_detection_visible(bool visible);
 
 /**
- * @brief 按指定时间戳刷新底部状态栏时间。
+ * @brief 按指定时间戳刷新顶部状态栏时间。
  * @param[in] time_now 需要显示的时间戳。
  * @return `true` 表示刷新成功，`false` 表示刷新失败。
  */
@@ -81,7 +81,7 @@ void system_ui_refresh_bt_disconnect_overlay_text(void);
 void system_ui_sync_shell_state(void);
 
 /**
- * @brief 初始化系统 LVGL 根节点、页面容器和底部状态栏。
+ * @brief 初始化系统 LVGL 根节点、页面容器和顶部状态栏。
  * @return 返回当前活动屏幕根对象。
  */
 lv_obj_t* system_init_lvgl_fb(void);
@@ -90,6 +90,8 @@ lv_obj_t* system_init_lvgl_fb(void);
  * @return 返回内容区高度。
  */
 lv_coord_t system_ui_get_page_content_height(void);
+/** Return the system-owned parent for normal app pages. */
+lv_obj_t* system_ui_get_page_parent(void);
 /**
  * @brief 立即刷新指定状态栏的缓存时间、电量和充电状态。
  * @param[in] status_bar 目标状态栏对象。
@@ -113,11 +115,11 @@ bool system_ui_refresh_screen_now(void);
  */
 lv_obj_t* system_get_status_bar(status_bar_widget_pos_t pos);
 /**
- * @brief 设置底部状态栏显示模式。
- * @param[in] show_bottom `true` 表示显示底部状态栏，`false` 表示隐藏。
+ * @brief 设置顶部状态栏显示模式。
+ * @param[in] show_top `true` 表示显示顶部状态栏，`false` 表示隐藏。
  * @return 无返回值。
  */
-void system_status_bar_set_mode(bool show_bottom);
+void system_status_bar_set_mode(bool show_top);
 
 #ifdef __cplusplus
 }

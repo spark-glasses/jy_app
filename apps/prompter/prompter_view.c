@@ -10,7 +10,7 @@
 
 #include "app_def.h"
 #include "common/app_framework/app_manager.h"
-#include "common/elf_common.h"
+#include "elf_common.h"
 #include "floatair_dbg.h"
 #include "floatair_fs.h"
 #include "system/system.h"

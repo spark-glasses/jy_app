@@ -1,6 +1,6 @@
 /**
  * @file status_bar.h
- * @brief Bottom status bar implementation
+ * @brief Shared status bar implementation
  */
 #ifndef STATUS_BAR_H
 #define STATUS_BAR_H

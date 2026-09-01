@@ -78,7 +78,7 @@ static bool translate_status_bar_widgets_valid(void) {
  * @return `true` 表示图标已就绪，`false` 表示状态栏不可用。
  */
 static bool translate_status_bar_ensure_widgets(void) {
-    lv_obj_t* status_bar = system_get_status_bar(STATUS_BAR_POS_BOTTOM);
+    lv_obj_t* status_bar = system_get_status_bar(STATUS_BAR_POS_TOP);
 
     if (status_bar == NULL || !lv_obj_is_valid(status_bar)) {
         translate_audio_source = NULL;
@@ -855,7 +855,7 @@ static void translate_page_create(lv_obj_t* root, const app_page_data_t* data) {
     lv_obj_set_style_bg_color(root, lv_color_black(), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(root, LV_OPA_COVER, LV_PART_MAIN);
 
-    status_bar = system_get_status_bar(STATUS_BAR_POS_BOTTOM);
+    status_bar = system_get_status_bar(STATUS_BAR_POS_TOP);
     if (status_bar != NULL && lv_obj_is_valid(status_bar)) {
         status_bar_clear_custom_widgets(status_bar);
     }
@@ -964,7 +964,7 @@ static void translate_page_appear(lv_obj_t* root) {
  * @return 无返回值。
  */
 static void translate_page_destroy(void) {
-    lv_obj_t* status_bar = system_get_status_bar(STATUS_BAR_POS_BOTTOM);
+    lv_obj_t* status_bar = system_get_status_bar(STATUS_BAR_POS_TOP);
 
     (void)system_request_keyword_spotting_enabled(system_config_get_keyword_spotting_enabled());
 

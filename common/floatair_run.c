@@ -23,7 +23,7 @@
 #include "app_lcd.h"
 #include "app_def.h"
 #include "common/app_framework/app_stereo.h"
-#include "common/elf_common.h"
+#include "elf_common.h"
 #include "system/system_timer.h"
 #include "mpack.h"
 #include "common/app_framework/app_router.h"

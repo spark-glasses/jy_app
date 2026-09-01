@@ -11,9 +11,9 @@
 
 #include "system/popups/assistant/assistant.h"
 #include "app_lcd.h"
+#include "app_def.h"
 #include "common/app_framework/app_manager.h"
 #include "common/app_framework/app_router.h"
-#include "home/home.h"
 #include "system/popups/notify/notify.h"
 #include "common/widgets/toast.h"
 #include "system/system_notification.h"
@@ -188,7 +188,6 @@ static void system_runtime_state_refresh_btconn_state(bool connected) {
         toast_dismiss_active();
         (void)notify_list_close();
         (void)assistant_close(false);
-        home_view_reset_selection();
 
         if (!langselection_finished) {
             app_t* active_app = app_manager_current();
@@ -227,11 +226,6 @@ static void system_runtime_state_refresh_btconn_state(bool connected) {
             (void)app_router_call_home();
             return;
         }
-    }
-
-    if (strcmp(current_app, APP_NAME_HOME) == 0) {
-        floatair_info("bt connection state changed: reload home view");
-        home_view_reload();
     }
 }
 
