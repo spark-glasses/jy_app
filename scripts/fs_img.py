@@ -495,6 +495,7 @@ def create_filesystem(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Cross-platform filesystem packaging for ARM builds")
     parser.add_argument("--source", default=str(DEFAULT_SOURCE), help="Path to the built ELF file")
+    parser.add_argument("--symbol-file", default=str(SYMBOL_FILE), help="OS SDK exported symbol table")
     parser.add_argument("--romfs-dir", default=str(ROMFS_DIR), help="ROMFS source directory")
     parser.add_argument("--max-size", type=int, default=MAX_FILE_SIZE, help="Maximum ELF file size in bytes")
     parser.add_argument("--no-symbol-check", action="store_true", help="Skip undefined symbol verification")
@@ -522,7 +523,7 @@ def main() -> int:
 
     try:
         if not args.no_symbol_check:
-            check_symbols(source_file, SYMBOL_FILE)
+            check_symbols(source_file, Path(args.symbol_file))
 
         check_file_size(source_file, args.max_size)
         create_filesystem(source_file, outputs, romfs_dir)

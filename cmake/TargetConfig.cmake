@@ -11,6 +11,7 @@ function(jy_app_configure_arm_target target_name)
                 "${CMAKE_CURRENT_BINARY_DIR}/romfs_staging"
         COMMAND "${Python3_EXECUTABLE}" "${PROJECT_ROOT}/scripts/fs_img.py"
                 --source "$<TARGET_FILE:${target_name}>"
+                --symbol-file "${JY_APP_OS_SDK_FLOATAIR_DIR}/SymbolTable.def"
                 --romfs-dir "${CMAKE_CURRENT_BINARY_DIR}/romfs_staging"
         WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
         VERBATIM
