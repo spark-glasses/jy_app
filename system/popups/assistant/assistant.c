@@ -180,6 +180,7 @@ static bool assistant_ensure_service(void) {
  */
 bool assistant_open(void) {
     const char* current_app = app_router_get_app();
+    bool was_open = assistant_is_open();
 
     if (assistant_should_ignore_open_request()) {
         floatair_info("ignore assistant open request in current_app=%s", current_app);
@@ -196,18 +197,24 @@ bool assistant_open(void) {
     }
 
     assistant_stt_clear();
+    if (!was_open && !system_report_assistant_open()) {
+        (void)assistant_close(false);
+        return false;
+    }
     return true;
 }
 
 /**
- * @brief 关闭 assistant 弹窗并释放依赖资源。
+ * @brief Start closing the popup; release resources after deletion.
  * @param[in] report_close 是否主动上报 assistant 已关闭。
- * @return `true` 表示关闭成功，`false` 表示关闭失败。
+ * @return `true` when close is accepted, `false` on failure.
  */
 bool assistant_close(bool report_close) {
-    (void)assistant_popup_close(report_close);
-    assistant_release_service();
-    return true;
+    bool result = assistant_popup_close(report_close);
+    if (!assistant_is_open()) {
+        assistant_release_service();
+    }
+    return result;
 }
 
 /**

@@ -346,6 +346,11 @@ bool system_report_kws_hit(void);
  */
 void system_report_kws_hit_response_finish(void);
 /**
+ * @brief Report that the assistant popup has opened.
+ * @return `true` if the message was sent, otherwise `false`.
+ */
+bool system_report_assistant_open(void);
+/**
  * @brief 上报 assistant 已关闭。
  * @return `true` 表示上报成功，`false` 表示上报失败。
  */

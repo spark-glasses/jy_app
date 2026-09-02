@@ -8,6 +8,7 @@
 #include "app_def.h"
 #include "stt_view_common.h"
 #include "common/app_framework/app_layers.h"
+#include "common/widgets/avatar.h"
 #include "common/widgets/container.h"
 #include "common/widgets/label.h"
 #include "system/stt_common.h"
@@ -28,6 +29,8 @@ typedef enum {
 } assistant_text_role_t;
 
 static assistant_popup_ui_t s_ui;
+static avatar_t* s_avatar = NULL;
+static bool s_closing = false;
 static bool s_report_close_on_delete = true; ///< 删除 popup 时是否主动上报 assistant 关闭。
 static assistant_text_role_t s_last_update_role = ASSISTANT_TEXT_ROLE_NONE; ///< 最近一次文本更新角色。
 
@@ -128,6 +131,9 @@ static void assistant_refresh_labels(void) {
         answer = stt_buffer_get_transcribe_by_index((size_t)answer_index);
     }
 
+    ui_widget_set_visible(UI_WIDGET(s_ui.frame), question != NULL && question[0] != '\0');
+    ui_widget_set_visible(UI_WIDGET(s_ui.speech_slot), answer != NULL && answer[0] != '\0');
+
     if (s_ui.question_label != NULL) {
         question_set_start_us = (uint32_t)GetTimeUs();
         stt_view_update_incremental_text(s_ui.question_label, next_question);
@@ -185,7 +191,7 @@ void assistant_stt_clear(void) {
 static void assistant_on_fontconfig_changed(void) {
     stt_style_init();
     assistant_apply_label_theme(s_ui.question_label, true);
-    assistant_apply_label_theme(s_ui.answer_label, false);
+    // The short reply bubble has its own font and padding from the UI definition.
 
     if (s_ui.scroll) {
         lv_obj_t* scroll_obj = container_get_obj(s_ui.scroll);
@@ -203,9 +209,18 @@ static void assistant_on_fontconfig_changed(void) {
 static void assistant_popup_delete_event_handle(lv_event_t* event) {
     (void)event;
     bool report_close = s_report_close_on_delete;
+    s_closing = false;
+    s_report_close_on_delete = true;
+    s_avatar = NULL;
     memset(&s_ui, 0, sizeof(s_ui));
     s_last_update_role = ASSISTANT_TEXT_ROLE_NONE;
     assistant_on_popup_deleted(report_close);
+}
+
+static void assistant_popup_exit_complete(avatar_t* avatar, void* user_data) {
+    (void)avatar;
+    lv_obj_t* root = user_data;
+    lv_obj_delete(root);
 }
 
 /**
@@ -232,6 +247,14 @@ bool assistant_is_open(void) {
     return root != NULL && lv_obj_is_valid(root);
 }
 
+void assistant_set_listening(bool listening) {
+    if (s_avatar == NULL) {
+        return;
+    }
+    avatar_set_state(s_avatar,
+                     listening ? AVATAR_STATE_LISTENING : AVATAR_STATE_NORMAL);
+}
+
 /**
  * @brief 将输入事件转发给 assistant popup。
  * @param[in] code LVGL 事件码。
@@ -240,6 +263,9 @@ bool assistant_is_open(void) {
 bool assistant_handle_event(lv_event_code_t code) {
     if (!assistant_is_open()) {
         return false;
+    }
+    if (s_closing) {
+        return true;
     }
 
     switch (code) {
@@ -273,6 +299,11 @@ bool assistant_popup_open(void) {
     lv_obj_t* parent = assistant_get_popup_parent();
 
     if (assistant_is_open()) {
+        if (s_closing) {
+            s_closing = false;
+            s_report_close_on_delete = true;
+            avatar_play_entrance(s_avatar, NULL, NULL);
+        }
         lv_obj_move_foreground(container_get_obj(s_ui.root));
         return true;
     }
@@ -288,15 +319,30 @@ bool assistant_popup_open(void) {
 
     lv_obj_add_event_cb(root, assistant_popup_delete_event_handle, LV_EVENT_DELETE, NULL);
 
+    lv_obj_add_flag(container_get_obj(s_ui.footer), LV_OBJ_FLAG_OVERFLOW_VISIBLE);
+    lv_obj_add_flag(container_get_obj(s_ui.avatar_slot), LV_OBJ_FLAG_OVERFLOW_VISIBLE);
+
+    s_avatar = avatar_create(container_get_obj(s_ui.avatar_slot), 40);
+    if (s_avatar == NULL) {
+        (void)assistant_popup_close(false);
+        return false;
+    }
+    ui_widget_set_size(UI_WIDGET(s_avatar), LV_PCT(100), LV_PCT(100));
+    avatar_play_entrance(s_avatar, NULL, NULL);
+
+    // Let short replies fit their text and wrap longer replies inside the footer.
+    lv_obj_set_style_max_width(label_get_obj(s_ui.answer_label), LV_PCT(100), LV_PART_MAIN);
+    lv_obj_set_style_min_width(label_get_obj(s_ui.answer_label), 80, LV_PART_MAIN);
+
     assistant_on_fontconfig_changed();
     lv_obj_move_foreground(root);
     return true;
 }
 
 /**
- * @brief 销毁 assistant popup 视图。
+ * @brief Roll out the avatar, then delete the assistant popup.
  * @param[in] report_close 是否主动上报 assistant 已关闭。
- * @return `true` 表示销毁成功，`false` 表示销毁失败。
+ * @return `true` when close is accepted or the popup is already absent.
  */
 bool assistant_popup_close(bool report_close) {
     if (!assistant_is_open()) {
@@ -305,8 +351,17 @@ bool assistant_popup_close(bool report_close) {
         return true;
     }
 
+    if (s_closing) {
+        // A phone close or disconnect can suppress a pending close report.
+        s_report_close_on_delete = s_report_close_on_delete && report_close;
+        return true;
+    }
+
+    lv_obj_t* root = container_get_obj(s_ui.root);
+    s_closing = true;
     s_report_close_on_delete = report_close;
-    lv_obj_delete(container_get_obj(s_ui.root));
-    s_report_close_on_delete = true;
+    if (!avatar_play_exit(s_avatar, assistant_popup_exit_complete, root)) {
+        lv_obj_delete(root);
+    }
     return true;
 }

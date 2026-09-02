@@ -264,7 +264,7 @@ bool system_update_device_state(JYT_ELF_MQ_MSG* msg) {
 }
 
 /**
- * @brief 处理 KWS 命中事件，并在蓝牙已连接时唤醒屏幕和上报关键词命中。
+ * @brief Handle a keyword hit and open the assistant when Bluetooth is connected.
  * @param[in] msg KWS 事件消息。
  * @return `true` 表示处理成功，`false` 表示处理失败。
  */
@@ -297,7 +297,7 @@ bool system_update_kws_state(JYT_ELF_MQ_MSG* msg) {
         app_sleep_timer_reset();
     }
 
-    (void)system_report_kws_hit();
+    (void)assistant_open();
     return true;
 }
 

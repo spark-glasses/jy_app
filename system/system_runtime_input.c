@@ -172,7 +172,7 @@ static bool system_runtime_input_try_top_event(lv_event_code_t code) {
 }
 
 /**
- * @brief 向普通 app 层当前页面根对象发送 LVGL 事件。
+ * @brief Open the assistant on long press, or send the event to the current app.
  * @param[in] raw_event 原始系统事件值，仅用于日志。
  * @param[in] code 待发送的 LVGL 事件码。
  * @return `true` 表示发送成功，`false` 表示当前页不可用。
@@ -183,6 +183,20 @@ static bool system_runtime_input_send_event_to_app(uint32_t raw_event, lv_event_
 
     if (current_app != NULL && current_app->use_top_layer) {
         return true;
+    }
+
+    if (code == LV_EVENT_LONG_PRESSED && system_get_btconn_state()) {
+        if (!assistant_open()) {
+            return false;
+        }
+        if (assistant_is_open()) {
+            if (floatair_lcd_get_state() == LCD_OFF) {
+                floatair_lcd_set_state(LCD_ON);
+                system_report_sys_state(1);
+            }
+            app_sleep_timer_reset();
+            return true;
+        }
     }
 
     obj = system_runtime_input_get_current_page_root();

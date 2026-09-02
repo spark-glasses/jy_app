@@ -73,6 +73,7 @@ static bool system_runtime_misc_system_control_allowed(const msg_pack_t* msg,
 static bool system_runtime_misc_assistant_msg_allowed(const msg_pack_t* msg) {
     static const char* const assistant_cmds[] = {
         "openAssistant",
+        "setAssistantState",
         "updateAssistantSttInfo",
         "closeAssistant",
     };

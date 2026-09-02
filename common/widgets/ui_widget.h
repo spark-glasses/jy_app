@@ -23,6 +23,7 @@ typedef enum {
     UI_WIDGET_TYPE_ROLLER,
     UI_WIDGET_TYPE_MSGBOX,
     UI_WIDGET_TYPE_PAGED_TEXT, ///< 分页文本组件。
+    UI_WIDGET_TYPE_AVATAR,
 } ui_widget_type_t;
 
 typedef struct ui_widget_t ui_widget_t;

@@ -134,6 +134,7 @@ app_cmd_func_t system_systemcontrol_cmd_funcs[] = {
     {"setView", system_systemcontrol_setview},
     {"sendTouchEvent", system_systemcontrol_sendtouchevent},
     {"openAssistant", assistant_open_cmd},
+    {"setAssistantState", assistant_set_state_cmd},
     {"updateAssistantSttInfo", assistant_update_stt_info_cmd},
     {"closeAssistant", assistant_close_cmd},
     {"sendHeartbeat", system_systemcontrol_sendheartbeat},
