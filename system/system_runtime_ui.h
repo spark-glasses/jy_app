@@ -21,28 +21,54 @@ extern "C" {
 #endif
 
 /**
- * @brief 将电量值同步到底部状态栏。
+ * @brief 自定义进度提示事件参数。
+ */
+typedef struct {
+    bool visible;      ///< 是否显示自定义提示遮罩。
+    const char* text;  ///< 提示文字；空字符串表示只显示加载图标。
+    uint8_t bg_opa;    ///< 遮罩背景透明度，范围 0~255。
+} system_progress_hint_param_t;
+
+/**
+ * @brief 获取自定义进度提示事件 ID。
+ *
+ * 页面可监听该事件，按需显示自己的提示遮罩。
+ *
+ * @return 返回 LVGL 自定义事件 ID。
+ */
+uint32_t system_ui_get_progress_hint_event(void);
+
+/**
+ * @brief 向当前页面发送自定义进度提示事件。
+ *
+ * @param[in] param 自定义提示参数。
+ * @return `true` 表示事件已发往当前页面，`false` 表示当前页面不可用。
+ */
+bool system_ui_send_progress_hint(const system_progress_hint_param_t* param);
+
+/**
+ * @brief 将电量值同步到顶部状态栏。
  * @param[in] battery 电量百分比。
  * @return 无返回值。
  */
 void system_ui_update_battery(uint8_t battery);
 
 /**
- * @brief 将充电状态同步到底部状态栏。
+ * @brief 将充电状态同步到顶部状态栏。
  * @param[in] charge_state 充电状态值。
  * @return 无返回值。
  */
 void system_ui_update_charge_state(uint8_t charge_state);
 
 /**
- * @brief 设置底部状态栏佩戴检测图标显隐。
+ * @brief 设置顶部状态栏佩戴检测图标显隐。
  * @param[in] visible `true` 表示显示图标占位，`false` 表示隐藏图标占位。
  * @return 无返回值。
  */
 void system_ui_set_wear_detection_visible(bool visible);
 
 /**
- * @brief 按指定时间戳刷新底部状态栏时间。
+ * @brief 按指定时间戳刷新顶部状态栏时间。
  * @param[in] time_now 需要显示的时间戳。
  * @return `true` 表示刷新成功，`false` 表示刷新失败。
  */
@@ -81,7 +107,7 @@ void system_ui_refresh_bt_disconnect_overlay_text(void);
 void system_ui_sync_shell_state(void);
 
 /**
- * @brief 初始化系统 LVGL 根节点、页面容器和底部状态栏。
+ * @brief 初始化系统 LVGL 根节点、页面容器和顶部状态栏。
  * @return 返回当前活动屏幕根对象。
  */
 lv_obj_t* system_init_lvgl_fb(void);
@@ -90,6 +116,8 @@ lv_obj_t* system_init_lvgl_fb(void);
  * @return 返回内容区高度。
  */
 lv_coord_t system_ui_get_page_content_height(void);
+/** Return the system-owned parent for normal app pages. */
+lv_obj_t* system_ui_get_page_parent(void);
 /**
  * @brief 立即刷新指定状态栏的缓存时间、电量和充电状态。
  * @param[in] status_bar 目标状态栏对象。
@@ -107,17 +135,22 @@ void system_ui_refresh_display_distance_level(void);
  */
 bool system_ui_refresh_screen_now(void);
 /**
+ * @brief 亮屏后统一补刷灭屏期间延迟的系统 UI 更新。
+ * @return 无返回值。
+ */
+void system_ui_flush_pending_after_screen_on(void);
+/**
  * @brief 获取指定位置的状态栏对象。
  * @param[in] pos 状态栏位置。
  * @return 返回对应位置的状态栏对象；不支持时返回 `NULL`。
  */
 lv_obj_t* system_get_status_bar(status_bar_widget_pos_t pos);
 /**
- * @brief 设置底部状态栏显示模式。
- * @param[in] show_bottom `true` 表示显示底部状态栏，`false` 表示隐藏。
+ * @brief 设置顶部状态栏显示模式。
+ * @param[in] show_top `true` 表示显示顶部状态栏，`false` 表示隐藏。
  * @return 无返回值。
  */
-void system_status_bar_set_mode(bool show_bottom);
+void system_status_bar_set_mode(bool show_top);
 
 #ifdef __cplusplus
 }

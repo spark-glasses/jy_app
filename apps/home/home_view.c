@@ -8,6 +8,7 @@
  * @ingroup app_home
  */
 #include "home.h"
+#include "home_guide.h"
 
 #include "app_def.h"
 #include "common/app_framework/app_layers.h"
@@ -16,9 +17,14 @@
 #include "message.h"
 #include "system/system.h"
 #include "common/app_framework/app_router.h"
-#include "system/system_config_json.h"
 #include "system/system_def.h"
 #include "sys_adapter.h"
+#include "ui_res.h"
+
+#include <stdlib.h>
+#include <string.h>
+
+#define HOME_ICON_BOTTOM_OFFSET 40 ///< Home 图标组距离底部的布局偏移。
 
 static lv_obj_t* idlepbl  = NULL;
 static lv_obj_t* idlepbr = NULL;
@@ -36,6 +42,7 @@ static bool s_home_route_pending = false;
 static char s_home_pending_app[MSG_STR_MAX_LEN] = {0};
 static size_t s_home_units_count = 0;
 static const app_home_unit_t* s_home_units_cur = NULL;
+static app_home_unit_t* s_home_units_filtered = NULL;
 
 /**
  * @brief 创建 Home 选中项浮层容器。
@@ -100,8 +107,8 @@ static void home_float_container_sync_layout(void) {
 static void home_layout_update(void) {
     if (!idle_img_center_anchor || !idle_img_center || !idle_img_left || !idle_img_right) return;
     home_float_container_sync_layout();
-    lv_obj_align(idle_img_center_anchor, LV_ALIGN_BOTTOM_MID, 0, -LVGL_UI_MARGIN_80);
-    lv_obj_align(idle_img_center, LV_ALIGN_BOTTOM_MID, 0, -LVGL_UI_MARGIN_80);
+    lv_obj_align(idle_img_center_anchor, LV_ALIGN_BOTTOM_MID, 0, -HOME_ICON_BOTTOM_OFFSET);
+    lv_obj_align(idle_img_center, LV_ALIGN_BOTTOM_MID, 0, -HOME_ICON_BOTTOM_OFFSET);
     lv_obj_align_to(idle_img_left, idle_img_center_anchor, LV_ALIGN_OUT_LEFT_MID, -layout_gap, 0);
     lv_obj_align_to(idle_img_right, idle_img_center_anchor, LV_ALIGN_OUT_RIGHT_MID, layout_gap, 0);
     if (lv_obj_is_valid(idle_text_center)) {
@@ -112,9 +119,90 @@ static void home_layout_update(void) {
     }
 }
 
+static void home_units_release_filtered(void) {
+    if (s_home_units_filtered != NULL) {
+        free(s_home_units_filtered);
+        s_home_units_filtered = NULL;
+    }
+}
+
+static const app_home_unit_t* home_units_find_supported(const char* name) {
+    if (!home_is_supported_app(name)) {
+        return NULL;
+    }
+    for (size_t i = 0; i < g_home_units_count; ++i) {
+        if (g_home_units_arr[i].name != NULL && strcmp(g_home_units_arr[i].name, name) == 0) {
+            return &g_home_units_arr[i];
+        }
+    }
+    return NULL;
+}
+
+static bool home_units_contains_name(const app_home_unit_t* units, size_t count, const char* name) {
+    if (units == NULL || name == NULL) {
+        return false;
+    }
+    for (size_t i = 0; i < count; ++i) {
+        if (units[i].name != NULL && strcmp(units[i].name, name) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool home_units_build_from_config(void) {
+    size_t configured_count = system_config_get_homeunits_count();
+    app_home_unit_t* filtered = NULL;
+    size_t filtered_count = 0;
+
+    if (configured_count == 0) {
+        return false;
+    }
+    filtered = (app_home_unit_t*)malloc(sizeof(app_home_unit_t) * configured_count);
+    if (filtered == NULL) {
+        floatair_warn("alloc home units filtered failed");
+        return false;
+    }
+    for (size_t i = 0; i < configured_count; ++i) {
+        const char* configured_name = system_config_get_homeunit(i);
+        const app_home_unit_t* unit = home_units_find_supported(configured_name);
+
+        if (unit == NULL) {
+            floatair_warn("home unit not supported: %s",
+                          configured_name != NULL ? configured_name : "NULL");
+            continue;
+        }
+        if (home_units_contains_name(filtered, filtered_count, unit->name)) {
+            continue;
+        }
+        filtered[filtered_count++] = *unit;
+    }
+    if (filtered_count == 0) {
+        free(filtered);
+        return false;
+    }
+    s_home_units_filtered = filtered;
+    s_home_units_cur = s_home_units_filtered;
+    s_home_units_count = filtered_count;
+    return true;
+}
+
 static const app_home_unit_t* home_units_at(size_t index) {
     if (!s_home_units_cur) return NULL;
     return (index < s_home_units_count) ? &s_home_units_cur[index] : NULL;
+}
+
+static bool home_select_app_by_name(const char* app_name) {
+    if (app_name == NULL || s_home_units_cur == NULL || s_home_units_count == 0) {
+        return false;
+    }
+    for (size_t i = 0; i < s_home_units_count; ++i) {
+        if (s_home_units_cur[i].name != NULL && strcmp(s_home_units_cur[i].name, app_name) == 0) {
+            home_select = (uint8_t)i;
+            return true;
+        }
+    }
+    return false;
 }
 
 static const app_home_unit_t* home_units_prev(size_t index) {
@@ -155,12 +243,13 @@ static void home_uints_update(void) {
         lv_image_set_src(idle_img_right, next->smallicon);
     }
     if (lv_obj_is_valid(idlepbl)) {
-        lv_image_set_src(idlepbl, FLOATAIR_SYS_IMG("idlemore_left.jpg"));
+        lv_image_set_src(idlepbl, UI_RES_IMAGE_IDLEMORE_LEFT);
     }
     if (lv_obj_is_valid(idlepbr)) {
-        lv_image_set_src(idlepbr, FLOATAIR_SYS_IMG("idlemore_right.jpg"));
+        lv_image_set_src(idlepbr, UI_RES_IMAGE_IDLEMORE_RIGHT);
     }
     if (lv_obj_is_valid(idle_text_center)) lv_label_set_text(idle_text_center, app_get_str(unit->icontext));
+    home_guide_layout_update();
     floatair_info("home_uints_update: %s", s_home_units_cur[home_select].name);
 }
 
@@ -169,13 +258,17 @@ static void home_view_update(void) {
     home_layout_update();
 }
 
-static void home_unit_left(void) {
+/**
+ * @brief 处理屏幕右滑，选中当前 Home 菜单左侧的应用。
+ * @return 无返回值。
+ */
+static void home_select_left_app(void) {
     if (!s_home_units_cur || s_home_units_count == 0) {
-        floatair_err("home_units_left %u failed", home_select);
+        floatair_err("home select left failed: %u", home_select);
         return;
     }
     if (home_select >= s_home_units_count) {
-        floatair_err("home_units_left %u failed", home_select);
+        floatair_err("home select left failed: %u", home_select);
         return;
     }
     if (home_select == 0) {
@@ -183,21 +276,25 @@ static void home_unit_left(void) {
     } else {
         home_select = (uint8_t)(home_select - 1);
     }
-    floatair_info("home_unit_left: %s", s_home_units_cur[home_select].name);
+    floatair_info("home select left app: %s", s_home_units_cur[home_select].name);
     home_view_update();
 }
 
-static void home_unit_right(void) {
+/**
+ * @brief 处理屏幕左滑，选中当前 Home 菜单右侧的应用。
+ * @return 无返回值。
+ */
+static void home_select_right_app(void) {
     if (!s_home_units_cur || s_home_units_count == 0) {
-        floatair_err("home_units_right %u failed", home_select);
+        floatair_err("home select right failed: %u", home_select);
         return;
     }
     if (home_select >= s_home_units_count) {
-        floatair_err("home_units_right %u failed", home_select);
+        floatair_err("home select right failed: %u", home_select);
         return;
     }
     home_select = (home_select + 1) % s_home_units_count;
-    floatair_info("home_unit_right: %s", s_home_units_cur[home_select].name);
+    floatair_info("home select right app: %s", s_home_units_cur[home_select].name);
     home_view_update();
 }
 
@@ -243,6 +340,11 @@ static void home_route_to_app(const char* app) {
 }
 
 static void home_unit_click(void) {
+    if (home_guide_is_step1()) {
+        home_route_to_app(APP_NAME_TRANSLATE);
+        return;
+    }
+
     if (!s_home_units_cur || s_home_units_count == 0) {
         floatair_err("home_units_click %u failed", home_select);
         return;
@@ -276,9 +378,31 @@ static void home_unit_dclick(void) {
     floatair_info("home_unit_dclick: %s", unit->name);
 }
 
+/**
+ * @brief 处理 Home 页面长按，上报触摸事件交由手机端决定目标功能。
+ * @return 无返回值。
+ */
+static void home_unit_long_press(void) {
+    if (!system_report_touch_event(LV_EVENT_LONG_PRESSED)) {
+        floatair_warn("home long press report touch event failed");
+    }
+}
+
 static bool home_uints_init(void) {
+    home_units_release_filtered();
     s_home_units_cur = g_home_units_arr;
     s_home_units_count = g_home_units_count;
+    if (!home_units_build_from_config()) {
+        s_home_units_cur = g_home_units_arr;
+        s_home_units_count = g_home_units_count;
+    }
+    if (s_home_units_count == 0) {
+        s_home_units_cur = NULL;
+        home_select = 0;
+        s_home_units_initialized = false;
+        floatair_err("home units init failed: no available units");
+        return false;
+    }
     home_select = 0;
     s_home_units_initialized = true;
     return true;
@@ -291,35 +415,75 @@ void home_view_reload(void) {
     home_view_update();
 }
 
+const char* home_view_get_selected_app_name(void) {
+    const app_home_unit_t* unit = NULL;
+
+    if (!s_home_units_initialized && !home_uints_init()) {
+        return NULL;
+    }
+    unit = home_units_at(home_select);
+    return unit != NULL ? unit->name : NULL;
+}
+
+bool home_view_select_app_by_name(const char* app_name) {
+    if (!s_home_units_initialized && !home_uints_init()) {
+        return false;
+    }
+    if (!home_select_app_by_name(app_name)) {
+        return false;
+    }
+    if (home_buttons_container != NULL && lv_obj_is_valid(home_buttons_container)) {
+        home_view_update();
+    }
+    return true;
+}
+
 /**
  * @brief 重置首页当前选中位置，并在视图已创建时立即刷新。
  */
 void home_view_reset_selection(void) {
     home_uints_init();
     if (home_buttons_container != NULL && lv_obj_is_valid(home_buttons_container)) {
-        home_view_update();
+        if (home_guide_is_step1()) {
+            home_guide_apply_step1_selection(home_select_app_by_name, true, home_view_update);
+        } else {
+            home_view_update();
+        }
     }
 }
 
 static void touch_event_handle(lv_event_t* event) {
     lv_event_code_t code = lv_event_get_code(event);
     static uint32_t s_last_gesture_tick = 0;
+    const home_guide_ops_t guide_ops = {
+        .refresh = home_view_update,
+        .reset_selection = home_view_reset_selection,
+        .screen_swipe_left = home_select_right_app,
+        .screen_swipe_right = home_select_left_app,
+    };
+
     if (code == LV_EVENT_GESTURE_LEFT || code == LV_EVENT_GESTURE_RIGHT) {
         if (lv_tick_elaps(s_last_gesture_tick) < 120) {
             return;
         }
         s_last_gesture_tick = lv_tick_get();
     }
+    if (home_guide_handle_touch(code, &guide_ops)) {
+        return;
+    }
+
     switch (code) {
         case LV_EVENT_GESTURE_LEFT:
-            home_unit_left();
+            home_select_right_app();
             break;
         case LV_EVENT_GESTURE_RIGHT:
-            home_unit_right();
+            home_select_left_app();
             break;
         case LV_EVENT_CLICKED:
-        case LV_EVENT_LONG_PRESSED:
             home_unit_click();
+            break;
+        case LV_EVENT_LONG_PRESSED:
+            home_unit_long_press();
             break;
         case LV_EVENT_DCLICKED:
             home_unit_dclick();
@@ -338,6 +502,7 @@ static void home_page_create(lv_obj_t* root, const app_page_data_t* data) {
     if (!s_home_units_initialized) {
         home_uints_init();
     }
+    home_guide_apply_step1_selection(home_select_app_by_name, false, NULL);
 
     home_buttons_container = lv_obj_create(root);
     lv_obj_remove_style_all(home_buttons_container);
@@ -351,7 +516,7 @@ static void home_page_create(lv_obj_t* root, const app_page_data_t* data) {
     floatair_assert(idle_img_center_anchor != NULL, "idle_img_center_anchor NULL");
     lv_obj_remove_style_all(idle_img_center_anchor);
     lv_obj_set_size(idle_img_center_anchor, LVGL_UI_ICONW_80, LVGL_UI_ICONH_80);
-    lv_obj_align(idle_img_center_anchor, LV_ALIGN_BOTTOM_MID, 0, -LVGL_UI_MARGIN_80);
+    lv_obj_align(idle_img_center_anchor, LV_ALIGN_BOTTOM_MID, 0, -HOME_ICON_BOTTOM_OFFSET);
     lv_obj_clear_flag(idle_img_center_anchor, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_clear_flag(idle_img_center_anchor, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_clear_flag(idle_img_center_anchor, LV_OBJ_FLAG_CLICK_FOCUSABLE);
@@ -363,7 +528,7 @@ static void home_page_create(lv_obj_t* root, const app_page_data_t* data) {
 
     idle_img_center = lv_image_create(home_float_container);
     floatair_assert(idle_img_center != NULL, "idle_img_center NULL");
-    lv_obj_align(idle_img_center, LV_ALIGN_BOTTOM_MID, 0, -LVGL_UI_MARGIN_80);
+    lv_obj_align(idle_img_center, LV_ALIGN_BOTTOM_MID, 0, -HOME_ICON_BOTTOM_OFFSET);
     lv_obj_set_size(idle_img_center, LVGL_UI_ICONW_80, LVGL_UI_ICONH_80);
     lv_obj_null_on_delete(&idle_img_center);
 
@@ -376,6 +541,8 @@ static void home_page_create(lv_obj_t* root, const app_page_data_t* data) {
     lv_obj_set_style_text_align(idle_text_center, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_long_mode(idle_text_center, LV_LABEL_LONG_CLIP);
     lv_obj_null_on_delete(&idle_text_center);
+
+    home_guide_create_controls(home_buttons_container, system_font, font_height);
 
     idle_img_left = lv_image_create(home_buttons_container);
     floatair_assert(idle_img_left != NULL, "idle_img_left NULL");
@@ -411,14 +578,33 @@ static void home_page_create(lv_obj_t* root, const app_page_data_t* data) {
 }
 
 static void home_page_appear(lv_obj_t* root) {
+    const home_guide_ops_t guide_ops = {
+        .refresh = home_view_update,
+        .reset_selection = home_view_reset_selection,
+        .screen_swipe_left = home_select_right_app,
+        .screen_swipe_right = home_select_left_app,
+    };
+
     floatair_assert(root != NULL, "root is NULL");
     system_status_bar_set_mode(true);
+    home_guide_set_ops(&guide_ops);
     lv_obj_add_event_cb(root, touch_event_handle, LV_EVENT_GESTURE_LEFT, NULL);
     lv_obj_add_event_cb(root, touch_event_handle, LV_EVENT_GESTURE_RIGHT, NULL);
     lv_obj_add_event_cb(root, touch_event_handle, LV_EVENT_CLICKED, NULL);
     lv_obj_add_event_cb(root, touch_event_handle, LV_EVENT_DCLICKED, NULL);
     lv_obj_add_event_cb(root, touch_event_handle, LV_EVENT_LONG_PRESSED, NULL);
+    home_guide_register_events(root);
     home_view_update();
+    home_guide_on_appear();
+}
+
+/**
+ * @brief 销毁 Home 页面在页面根节点之外持有的浮层控件。
+ * @return 无返回值。
+ */
+static void home_page_destroy(void) {
+    home_guide_destroy_controls();
+    home_float_container_delete();
 }
 
 static app_page_t s_home_page = {
@@ -426,7 +612,7 @@ static app_page_t s_home_page = {
     .on_create = home_page_create,
     .on_appear = home_page_appear,
     .on_disappear = NULL,
-    .on_destroy = home_float_container_delete,
+    .on_destroy = home_page_destroy,
     .on_unload = NULL,
     .on_back = NULL,
 };

@@ -50,6 +50,8 @@ static bool system_runtime_misc_system_control_allowed(const msg_pack_t* msg,
         "sendTouchEvent",
         "sendHeartbeat",
         "sendKeepAlive",
+        "setProgressVisible",
+        "setUploadProgressVisible",
     };
 
     if (msg == NULL || msg->id != APP_MSG_ID_SYSTEM) {
@@ -66,6 +68,70 @@ static bool system_runtime_misc_system_control_allowed(const msg_pack_t* msg,
 }
 
 /**
+ * @brief 判断 popup 期间是否允许处理指定 SystemInd 回包。
+ * @param[in] msg 已解析的 host 消息头。
+ * @return `true` 表示允许继续处理，`false` 表示应直接返回 `ErrNotReady`。
+ */
+static bool system_runtime_misc_system_ind_allowed(const msg_pack_t* msg) {
+    if (msg == NULL || msg->id != APP_MSG_ID_SYSTEM) {
+        return false;
+    }
+    if (strcmp(msg->biz, "SystemInd") != 0) {
+        return false;
+    }
+    if (strcmp(msg->cmd, "onKeywordSpotting") != 0) {
+        return false;
+    }
+
+    return msg->type == MSG_TYPE_ACK || msg->type == MSG_TYPE_NAK;
+}
+
+/**
+ * @brief 判断 LCD 灭屏时是否允许处理指定 host 消息。
+ * @param[in] msg 已解析的 host 消息头。
+ * @return `true` 表示允许继续处理，`false` 表示应直接返回 `ErrScreenOff`。
+ */
+bool system_host_message_allowed_when_lcd_off(const msg_pack_t* msg) {
+    static const char* const system_control_cmds[] = {
+        "getView",
+        "setView",
+        "sendHeartbeat",
+        "sendKeepAlive",
+        "sendHandshake",
+    };
+
+    if (msg == NULL) {
+        return false;
+    }
+    if (msg->type == MSG_TYPE_ACK || msg->type == MSG_TYPE_NAK) {
+        return true;
+    }
+    if (msg->id != APP_MSG_ID_SYSTEM) {
+        return false;
+    }
+    if (strcmp(msg->biz, "SystemStatus") == 0 ||
+        strcmp(msg->biz, "DeviceInfo") == 0 ||
+        strcmp(msg->biz, "Notification") == 0 ||
+        strcmp(msg->biz, "Toast") == 0 ||
+        strcmp(msg->biz, "File") == 0 ||
+        strcmp(msg->biz, "SystemInd") == 0) {
+        return true;
+    }
+    if (strcmp(msg->biz, "SystemControl") == 0) {
+        return system_runtime_misc_cmd_in_list(
+            msg->cmd,
+            system_control_cmds,
+            sizeof(system_control_cmds) / sizeof(system_control_cmds[0]));
+    }
+    if (strcmp(msg->biz, "SystemConfig") == 0) {
+        return strncmp(msg->cmd, "get", 3) == 0 ||
+               strcmp(msg->cmd, "setTimeConfig") == 0;
+    }
+
+    return false;
+}
+
+/**
  * @brief 判断 assistant popup 激活时是否允许处理指定消息。
  * @param[in] msg 已解析的 host 消息头。
  * @return `true` 表示允许处理，`false` 表示应直接返回 `ErrNotReady`。
@@ -73,14 +139,16 @@ static bool system_runtime_misc_system_control_allowed(const msg_pack_t* msg,
 static bool system_runtime_misc_assistant_msg_allowed(const msg_pack_t* msg) {
     static const char* const assistant_cmds[] = {
         "openAssistant",
+        "setAssistantState",
         "updateAssistantSttInfo",
         "closeAssistant",
     };
 
     return system_runtime_misc_system_control_allowed(
-        msg,
-        assistant_cmds,
-        sizeof(assistant_cmds) / sizeof(assistant_cmds[0]));
+               msg,
+               assistant_cmds,
+               sizeof(assistant_cmds) / sizeof(assistant_cmds[0])) ||
+           system_runtime_misc_system_ind_allowed(msg);
 }
 
 /**

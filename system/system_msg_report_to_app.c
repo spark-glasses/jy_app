@@ -61,6 +61,7 @@ value:  0-100
 report_pageinfo
 */
 
+
 static uint32_t s_report_sequence = 0;
 static uint32_t s_kws_response_timer_id = 0;
 
@@ -209,6 +210,26 @@ bool system_report_kws_hit(void) {
     return ret;
 }
 
+bool system_report_assistant_open(void) {
+    floatair_info("report assistant open");
+
+    msg_pack_t msgpack = {0};
+    msgpack.sequence = system_report_next_sequence();
+    msgpack.id = APP_MSG_ID_SYSTEM;
+    msgpack.type = MSG_TYPE_DATA_UNRELIABLE;
+    strncpy(msgpack.biz, "SystemInd", sizeof(msgpack.biz));
+    msgpack.biz[sizeof(msgpack.biz) - 1] = '\0';
+    strncpy(msgpack.cmd, "onAssistantOpen", sizeof(msgpack.cmd));
+    msgpack.cmd[sizeof(msgpack.cmd) - 1] = '\0';
+
+    msg_pack_writer_t* writer = app_mpack_create_writer(&msgpack, MSG_TYPE_DATA_UNRELIABLE);
+    floatair_assert(writer != NULL, "create writer failed");
+    mpack_start_map(&writer->writer, 0);
+    mpack_finish_map(&writer->writer);
+
+    return app_mpack_send_writer(writer);
+}
+
 bool system_report_assistant_close(void) {
     floatair_info("report assistant close");
 
@@ -219,6 +240,46 @@ bool system_report_assistant_close(void) {
     strncpy(msgpack.biz, "SystemInd", sizeof(msgpack.biz));
     msgpack.biz[sizeof(msgpack.biz) - 1] = '\0';
     strncpy(msgpack.cmd, "onAssistantClose", sizeof(msgpack.cmd));
+    msgpack.cmd[sizeof(msgpack.cmd) - 1] = '\0';
+
+    msg_pack_writer_t* writer = app_mpack_create_writer(&msgpack, MSG_TYPE_DATA_UNRELIABLE);
+    floatair_assert(writer != NULL, "create writer failed");
+    mpack_start_map(&writer->writer, 0);
+    mpack_finish_map(&writer->writer);
+
+    return app_mpack_send_writer(writer);
+}
+
+bool system_report_guide_open(void) {
+    floatair_info("report guide open");
+
+    msg_pack_t msgpack = {0};
+    msgpack.sequence = system_report_next_sequence();
+    msgpack.id = APP_MSG_ID_SYSTEM;
+    msgpack.type = MSG_TYPE_DATA_UNRELIABLE;
+    strncpy(msgpack.biz, "SystemInd", sizeof(msgpack.biz));
+    msgpack.biz[sizeof(msgpack.biz) - 1] = '\0';
+    strncpy(msgpack.cmd, "onGuideOpen", sizeof(msgpack.cmd));
+    msgpack.cmd[sizeof(msgpack.cmd) - 1] = '\0';
+
+    msg_pack_writer_t* writer = app_mpack_create_writer(&msgpack, MSG_TYPE_DATA_UNRELIABLE);
+    floatair_assert(writer != NULL, "create writer failed");
+    mpack_start_map(&writer->writer, 0);
+    mpack_finish_map(&writer->writer);
+
+    return app_mpack_send_writer(writer);
+}
+
+bool system_report_guide_close(void) {
+    floatair_info("report guide close");
+
+    msg_pack_t msgpack = {0};
+    msgpack.sequence = system_report_next_sequence();
+    msgpack.id = APP_MSG_ID_SYSTEM;
+    msgpack.type = MSG_TYPE_DATA_UNRELIABLE;
+    strncpy(msgpack.biz, "SystemInd", sizeof(msgpack.biz));
+    msgpack.biz[sizeof(msgpack.biz) - 1] = '\0';
+    strncpy(msgpack.cmd, "onGuideClose", sizeof(msgpack.cmd));
     msgpack.cmd[sizeof(msgpack.cmd) - 1] = '\0';
 
     msg_pack_writer_t* writer = app_mpack_create_writer(&msgpack, MSG_TYPE_DATA_UNRELIABLE);
@@ -290,6 +351,28 @@ bool system_report_battery(uint32_t battery) {
     mpack_start_map(&writer->writer, 1);
     mpack_write_cstr(&writer->writer, "battery");
     mpack_write_u32(&writer->writer, battery);
+    mpack_finish_map(&writer->writer);
+
+    return app_mpack_send_writer(writer);
+}
+
+bool system_report_brightness(uint8_t brightness) {
+    floatair_info("report brightness %u", (unsigned)brightness);
+
+    msg_pack_t msgpack = {0};
+    msgpack.sequence = system_report_next_sequence();
+    msgpack.id = APP_MSG_ID_SYSTEM;
+    msgpack.type = MSG_TYPE_DATA_UNRELIABLE;
+    strncpy(msgpack.biz, "SystemInd", sizeof(msgpack.biz));
+    msgpack.biz[sizeof(msgpack.biz) - 1] = '\0';
+    strncpy(msgpack.cmd, "onBrightnessChanged", sizeof(msgpack.cmd));
+    msgpack.cmd[sizeof(msgpack.cmd) - 1] = '\0';
+
+    msg_pack_writer_t* writer = app_mpack_create_writer(&msgpack, MSG_TYPE_DATA_UNRELIABLE);
+    floatair_assert(writer != NULL, "create writer failed");
+    mpack_start_map(&writer->writer, 1);
+    mpack_write_cstr(&writer->writer, "brightness");
+    mpack_write_u8(&writer->writer, brightness);
     mpack_finish_map(&writer->writer);
 
     return app_mpack_send_writer(writer);

@@ -5,6 +5,7 @@
 #include "assistant.h"
 
 #include "app_lcd.h"
+#include "common/app_framework/app_manager.h"
 #include "message.h"
 #include "system/stt_common.h"
 
@@ -23,6 +24,29 @@ bool assistant_open_cmd(mpack_node_t node, msg_pack_t* msg) {
         return app_mpack_send_ack(msg, ErrNotReady);
     }
 
+    return app_mpack_send_ack(msg, Dp_ErrNone);
+}
+
+/**
+ * @brief Set the avatar state: 0 is normal, 1 is listening.
+ * @param[in] node Message data with the required state field.
+ * @param[in,out] msg Message context used for the acknowledgement.
+ * @return Result of sending the acknowledgement.
+ */
+bool assistant_set_state_cmd(mpack_node_t node, msg_pack_t* msg) {
+    uint8_t state = 0;
+
+    floatair_assert(msg != NULL, "msg is NULL");
+
+    if (!app_msg_get_u8(node, false, "state", &state) ||
+        mpack_node_error(node) != mpack_ok || state > 1) {
+        return app_mpack_send_ack(msg, ErrBadParam);
+    }
+    if (!assistant_is_open()) {
+        return app_mpack_send_ack(msg, ErrNotReady);
+    }
+
+    assistant_set_listening(state == 1);
     return app_mpack_send_ack(msg, Dp_ErrNone);
 }
 
@@ -61,12 +85,18 @@ bool assistant_update_stt_info_cmd(mpack_node_t node, msg_pack_t* msg) {
  * @return `true` 表示处理成功，`false` 表示处理失败。
  */
 bool assistant_close_cmd(mpack_node_t node, msg_pack_t* msg) {
+    lv_obj_t* page_root = NULL;
+
     (void)node;
     floatair_assert(msg != NULL, "msg is NULL");
 
     if (!assistant_close(false)) {
         floatair_err("assistant close failed");
         return app_mpack_send_ack(msg, ErrNotReady);
+    }
+    page_root = app_manager_current_content_root();
+    if (page_root != NULL) {
+        (void)lv_obj_send_event(page_root, assistant_get_close_event(), NULL);
     }
     return app_mpack_send_ack(msg, Dp_ErrNone);
 }
