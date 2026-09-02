@@ -17,6 +17,7 @@
 #include "floatair_lcd.h"
 #include "common/app_framework/app_manager.h"
 #include "common/app_framework/app_layers.h"
+#include "common/app_framework/app_router.h"
 #include "common/app_framework/app_stereo.h"
 #include "system/popups/notify/notify.h"
 #include "common/widgets/toast.h"
@@ -41,15 +42,44 @@ static bool g_status_bar_wear_detection_visible = false; ///< 最近一次同步
 static time_t g_status_bar_time_epoch = 0;            ///< 最近一次收到的设备时间戳
 static bool g_status_bar_time_valid = false;          ///< 设备时间戳缓存是否有效
 static bool g_status_bar_time_reliable = false;       ///< 时间是否已通过手机对表确认可靠
+static bool g_status_bar_refresh_pending = false;     ///< 灭屏期间状态栏缓存变化后待亮屏刷新标记
+static bool g_screen_refresh_pending = false;         ///< 灭屏期间收到强制刷屏请求后的待刷新标记
+static uint32_t g_progress_hint_event_id = 0;         ///< 自定义进度提示事件 ID
 
 static void system_ui_sync_app_layer_scene(void);
+
+uint32_t system_ui_get_progress_hint_event(void) {
+    if (g_progress_hint_event_id == 0) {
+        g_progress_hint_event_id = lv_event_register_id();
+    }
+
+    return g_progress_hint_event_id;
+}
+
+bool system_ui_send_progress_hint(const system_progress_hint_param_t* param) {
+    lv_obj_t* root = NULL;
+
+    if (param == NULL) {
+        return false;
+    }
+
+    root = app_manager_current_content_root();
+    if (root == NULL || !lv_obj_is_valid(root)) {
+        floatair_err("current page root is NULL");
+        return false;
+    }
+
+    (void)lv_obj_send_event(root, system_ui_get_progress_hint_event(), (void*)param);
+    return true;
+}
 
 /**
  * @brief 判断蓝牙断连遮罩是否应按连接态显示。
  * @return `true` 表示允许显示断连遮罩，`false` 表示当前应让前置流程独占页面。
  */
 static bool system_bt_disconnect_overlay_should_show(void) {
-    return !system_get_btconn_state() && system_config_get_langselection_finish();
+    return system_config_get_langselection_finish() &&
+           (!system_get_btconn_state() || !app_router_has_app_config());
 }
 
 /**
@@ -221,9 +251,16 @@ static void system_ui_set_status_bar_time_visible(lv_obj_t* status_bar, bool vis
  * @return 无返回值。
  */
 void system_ui_set_time_reliable(bool reliable) {
-    lv_obj_t* status_bar = system_ui_get_current_status_bar();
+    lv_obj_t* status_bar = NULL;
 
     g_status_bar_time_reliable = reliable;
+    if (floatair_lcd_get_state() == LCD_OFF) {
+        g_status_bar_refresh_pending = true;
+        floatair_dbg("time reliable ui update deferred: lcd off");
+        return;
+    }
+
+    status_bar = system_ui_get_current_status_bar();
     system_ui_set_status_bar_time_visible(status_bar, reliable);
     system_ui_set_status_bar_time_visible(g_bt_disconnect_status_bar, reliable);
 }
@@ -324,6 +361,12 @@ static void system_bt_disconnect_overlay_create(lv_obj_t* parent) {
  * @return 无返回值。
  */
 void system_ui_refresh_status_bar(lv_obj_t* status_bar) {
+    if (floatair_lcd_get_state() == LCD_OFF) {
+        g_status_bar_refresh_pending = true;
+        floatair_dbg("status bar refresh deferred: lcd off");
+        return;
+    }
+
     if (status_bar == NULL || !lv_obj_is_valid(status_bar)) {
         return;
     }
@@ -363,8 +406,15 @@ void system_ui_refresh_display_distance_level(void) {
  * @return `true` 表示已触发刷屏，`false` 表示当前没有有效活动屏幕。
  */
 bool system_ui_refresh_screen_now(void) {
-    lv_obj_t* screen = lv_screen_active();
+    lv_obj_t* screen = NULL;
 
+    if (floatair_lcd_get_state() == LCD_OFF) {
+        g_screen_refresh_pending = true;
+        floatair_dbg("refresh screen deferred: lcd off");
+        return true;
+    }
+
+    screen = lv_screen_active();
     if (screen == NULL || !lv_obj_is_valid(screen)) {
         floatair_warn("refresh screen ignored: active screen invalid");
         return false;
@@ -382,10 +432,16 @@ bool system_ui_refresh_screen_now(void) {
  * @return 无返回值。
  */
 void system_ui_update_battery(uint8_t battery) {
-    lv_obj_t* status_bar = system_ui_get_current_status_bar();
+    lv_obj_t* status_bar = NULL;
 
     g_status_bar_battery = battery;
+    if (floatair_lcd_get_state() == LCD_OFF) {
+        g_status_bar_refresh_pending = true;
+        floatair_dbg("battery ui update deferred: lcd off");
+        return;
+    }
 
+    status_bar = system_ui_get_current_status_bar();
     if (status_bar != NULL && lv_obj_is_valid(status_bar)) {
         status_bar_update_battery(status_bar, battery);
     }
@@ -400,10 +456,16 @@ void system_ui_update_battery(uint8_t battery) {
  * @return 无返回值。
  */
 void system_ui_update_charge_state(uint8_t charge_state) {
-    lv_obj_t* status_bar = system_ui_get_current_status_bar();
+    lv_obj_t* status_bar = NULL;
 
     g_status_bar_charge_state = charge_state;
+    if (floatair_lcd_get_state() == LCD_OFF) {
+        g_status_bar_refresh_pending = true;
+        floatair_dbg("charge state ui update deferred: lcd off");
+        return;
+    }
 
+    status_bar = system_ui_get_current_status_bar();
     if (status_bar != NULL && lv_obj_is_valid(status_bar)) {
         status_bar_update_charge_state(status_bar, charge_state);
     }
@@ -418,9 +480,16 @@ void system_ui_update_charge_state(uint8_t charge_state) {
  * @return 无返回值。
  */
 void system_ui_set_wear_detection_visible(bool visible) {
-    lv_obj_t* status_bar = system_ui_get_current_status_bar();
+    lv_obj_t* status_bar = NULL;
 
     g_status_bar_wear_detection_visible = visible;
+    if (floatair_lcd_get_state() == LCD_OFF) {
+        g_status_bar_refresh_pending = true;
+        floatair_dbg("wear detection ui update deferred: lcd off");
+        return;
+    }
+
+    status_bar = system_ui_get_current_status_bar();
     if (status_bar != NULL && lv_obj_is_valid(status_bar)) {
         status_bar_set_wear_detection_visible(status_bar, visible);
     }
@@ -435,12 +504,18 @@ void system_ui_set_wear_detection_visible(bool visible) {
  * @return `true` 表示刷新成功，`false` 表示刷新失败。
  */
 bool system_ui_update_time_from_epoch(time_t time_now) {
-    lv_obj_t* status_bar = system_ui_get_current_status_bar();
+    lv_obj_t* status_bar = NULL;
 
     g_status_bar_time_epoch = time_now;
     g_status_bar_time_valid = true;
+    if (floatair_lcd_get_state() == LCD_OFF) {
+        g_status_bar_refresh_pending = true;
+        floatair_dbg("time ui update deferred: lcd off");
+        return true;
+    }
 
     bool ok = true;
+    status_bar = system_ui_get_current_status_bar();
     system_ui_set_status_bar_time_visible(status_bar, g_status_bar_time_reliable);
     system_ui_set_status_bar_time_visible(g_bt_disconnect_status_bar, g_status_bar_time_reliable);
     if (!g_status_bar_time_reliable) {
@@ -454,6 +529,29 @@ bool system_ui_update_time_from_epoch(time_t time_now) {
         ok = system_ui_refresh_status_bar_time(g_bt_disconnect_status_bar, time_now) && ok;
     }
     return ok;
+}
+
+/**
+ * @brief 亮屏后统一补刷灭屏期间延迟的系统 UI 更新。
+ * @return 无返回值。
+ */
+void system_ui_flush_pending_after_screen_on(void) {
+    bool refresh_screen = g_screen_refresh_pending;
+
+    if (floatair_lcd_get_state() == LCD_OFF) {
+        return;
+    }
+
+    if (g_status_bar_refresh_pending) {
+        g_status_bar_refresh_pending = false;
+        system_ui_refresh_status_bar(g_status_bar_top);
+        system_ui_refresh_status_bar(g_bt_disconnect_status_bar);
+    }
+
+    if (refresh_screen) {
+        g_screen_refresh_pending = false;
+        (void)system_ui_refresh_screen_now();
+    }
 }
 
 /**

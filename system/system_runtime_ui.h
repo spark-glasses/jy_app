@@ -21,6 +21,32 @@ extern "C" {
 #endif
 
 /**
+ * @brief 自定义进度提示事件参数。
+ */
+typedef struct {
+    bool visible;      ///< 是否显示自定义提示遮罩。
+    const char* text;  ///< 提示文字；空字符串表示只显示加载图标。
+    uint8_t bg_opa;    ///< 遮罩背景透明度，范围 0~255。
+} system_progress_hint_param_t;
+
+/**
+ * @brief 获取自定义进度提示事件 ID。
+ *
+ * 页面可监听该事件，按需显示自己的提示遮罩。
+ *
+ * @return 返回 LVGL 自定义事件 ID。
+ */
+uint32_t system_ui_get_progress_hint_event(void);
+
+/**
+ * @brief 向当前页面发送自定义进度提示事件。
+ *
+ * @param[in] param 自定义提示参数。
+ * @return `true` 表示事件已发往当前页面，`false` 表示当前页面不可用。
+ */
+bool system_ui_send_progress_hint(const system_progress_hint_param_t* param);
+
+/**
  * @brief 将电量值同步到顶部状态栏。
  * @param[in] battery 电量百分比。
  * @return 无返回值。
@@ -108,6 +134,11 @@ void system_ui_refresh_display_distance_level(void);
  * @return `true` 表示已触发刷屏，`false` 表示当前没有有效活动屏幕。
  */
 bool system_ui_refresh_screen_now(void);
+/**
+ * @brief 亮屏后统一补刷灭屏期间延迟的系统 UI 更新。
+ * @return 无返回值。
+ */
+void system_ui_flush_pending_after_screen_on(void);
 /**
  * @brief 获取指定位置的状态栏对象。
  * @param[in] pos 状态栏位置。

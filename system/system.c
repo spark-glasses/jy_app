@@ -10,6 +10,7 @@
 #include "system/system.h"
 #include "common/app_framework/app_router.h"
 #include "system/system_config_json.h"
+#include "system/system_runtime_ui.h"
 #include "system/system_timer.h"
 #include "app_lcd.h"
 #include "floatair_fs.h"
@@ -17,6 +18,11 @@
 
 #include <inttypes.h>
 #include <string.h>
+
+/** jy_app 应用版本号，默认由 CMake 根据 git describe 与产品名注入。 */
+#ifndef JY_APP_VERSION_STRING
+#define JY_APP_VERSION_STRING "unknown"
+#endif
 
 typedef struct {
     const char* name;
@@ -282,6 +288,7 @@ void system_set_sys_state(uint8_t state) {
     } else {
         floatair_lcd_set_state(LCD_ON);
         app_sleep_timer_reset();
+        system_ui_flush_pending_after_screen_on();
     }
  }
 
@@ -371,17 +378,15 @@ const char* system_get_bleaddr(void) { return g_bt_info.ble_addr; }
  * @return 返回应用固件版本字符串。
  */
 const char* system_get_fwver(void) {
-    return FLOATAIR_OS_VERSION_STRING;
+    return JY_APP_VERSION_STRING;
 }
-
-extern const char *floatair_os_version_string(void);
 
 /**
  * @brief 获取底层系统版本号。
  * @return 返回底层系统版本字符串。
  */
 const char* system_get_bthver(void) {
-    return floatair_os_version_string();
+    return FLOATAIR_OS_VERSION_STRING;
 }
 
 /**

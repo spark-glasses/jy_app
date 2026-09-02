@@ -24,6 +24,7 @@ static bool config_wear_detection_enabled = false;
 static bool config_touchpad_enabled       = false;
 static bool config_notification_enabled   = false;
 static bool config_keyword_spotting_enabled = true;
+static uint32_t config_kws_hit_value      = 5; ///< 当前产品需要响应的 KWS 命中值。
 static bool config_idle_detection_enabled = false;
 static system_head_gesture_config_t config_head_gesture = {0};
 static uint8_t config_display_mode        = 0;
@@ -33,7 +34,8 @@ static uint16_t config_inactivity_timeout = 0;
 static bool config_bl_auto                = false;
 static uint8_t config_brightness          = 0;
 static char* config_curlang               = NULL;
-static char* config_home_app              = NULL;
+static char** config_homeunits            = NULL;
+static size_t config_homeunits_count      = 0;
 system_lcd_t config_lcd                   = {
     .ui_x_begin = SYSTEM_LCD_UI_X_BEGIN,
     .ui_y_begin = SYSTEM_LCD_UI_Y_BEGIN,
@@ -42,8 +44,7 @@ system_lcd_t config_lcd                   = {
 };
 
 static bool simple_guide        = false;
-static bool user_guide          = false;
-static bool user_guide_finish   = false;
+static char* user_guide         = NULL;
 static bool play_audio          = false;
 static uint32_t display_level       = 0;
 static bool system_cfgfile_inited = false;
@@ -64,6 +65,139 @@ static bool system_cfgfile_mkdir_parent(const char* path) {
     memcpy(dir, path, n);
     dir[n] = '\0';
     return floatair_fs_mkdirs(dir) == FLOATAIR_FS_OK;
+}
+
+static void system_cfgfile_free_homeunits(void) {
+    if (config_homeunits != NULL) {
+        for (size_t i = 0; i < config_homeunits_count; ++i) {
+            free(config_homeunits[i]);
+        }
+        free(config_homeunits);
+    }
+    config_homeunits = NULL;
+    config_homeunits_count = 0;
+}
+
+static void system_cfgfile_set_userguide_runtime(const char* progress) {
+    const char* value = (progress != NULL && progress[0] != '\0') ? progress : SYSTEM_USERGUIDE_PROGRESS_FALSE;
+    char* copied = strdup(value);
+
+    floatair_assert(copied != NULL, "strdup userguide failed");
+    if (user_guide != NULL) {
+        free(user_guide);
+        user_guide = NULL;
+    }
+    user_guide = copied;
+}
+
+static bool system_cfgfile_is_valid_userguide(const char* progress) {
+    return progress != NULL &&
+           (strcmp(progress, SYSTEM_USERGUIDE_PROGRESS_FALSE) == 0 ||
+            strcmp(progress, SYSTEM_USERGUIDE_PROGRESS_STEP1) == 0 ||
+            strcmp(progress, SYSTEM_USERGUIDE_PROGRESS_STEP2) == 0 ||
+            strcmp(progress, SYSTEM_USERGUIDE_PROGRESS_STEP3) == 0 ||
+            strcmp(progress, SYSTEM_USERGUIDE_PROGRESS_STEP4) == 0 ||
+            strcmp(progress, SYSTEM_USERGUIDE_PROGRESS_STEP5) == 0 ||
+            strcmp(progress, SYSTEM_USERGUIDE_PROGRESS_TRUE) == 0);
+}
+
+static void system_cfgfile_parse_userguide(cJSON* root) {
+    cJSON* item = cJSON_GetObjectItemCaseSensitive(root, "userguide");
+    const char* progress = SYSTEM_USERGUIDE_PROGRESS_FALSE;
+
+    if (cJSON_IsString(item) && item->valuestring != NULL &&
+        system_cfgfile_is_valid_userguide(item->valuestring)) {
+        progress = item->valuestring;
+    }
+    system_cfgfile_set_userguide_runtime(progress);
+}
+
+static bool system_cfgfile_copy_homeunits(const char* const* homeunits,
+                                          size_t count,
+                                          char*** out_homeunits,
+                                          size_t* out_count) {
+    char** copied = NULL;
+    size_t copied_count = 0;
+
+    if (out_homeunits == NULL || out_count == NULL) {
+        return false;
+    }
+    *out_homeunits = NULL;
+    *out_count = 0;
+    if (count == 0) {
+        return true;
+    }
+    copied = (char**)calloc(count, sizeof(char*));
+    if (copied == NULL) {
+        return false;
+    }
+    for (size_t i = 0; i < count; ++i) {
+        const char* item = (homeunits != NULL) ? homeunits[i] : NULL;
+
+        if (item == NULL || item[0] == '\0') {
+            continue;
+        }
+        copied[copied_count] = strdup(item);
+        if (copied[copied_count] == NULL) {
+            for (size_t j = 0; j < copied_count; ++j) {
+                free(copied[j]);
+            }
+            free(copied);
+            return false;
+        }
+        copied_count++;
+    }
+    if (copied_count == 0) {
+        free(copied);
+        copied = NULL;
+    }
+    *out_homeunits = copied;
+    *out_count = copied_count;
+    return true;
+}
+
+static bool system_cfgfile_parse_homeunits(cJSON* root) {
+    cJSON* items = cJSON_GetObjectItemCaseSensitive(root, "homeunits");
+    char** parsed = NULL;
+    size_t parsed_count = 0;
+
+    if (!cJSON_IsArray(items)) {
+        system_cfgfile_free_homeunits();
+        return true;
+    }
+    size_t item_count = (size_t)cJSON_GetArraySize(items);
+    if (item_count == 0) {
+        system_cfgfile_free_homeunits();
+        return true;
+    }
+    parsed = (char**)calloc(item_count, sizeof(char*));
+    if (parsed == NULL) {
+        return false;
+    }
+    for (size_t i = 0; i < item_count; ++i) {
+        cJSON* item = cJSON_GetArrayItem(items, (int)i);
+
+        if (!cJSON_IsString(item) || item->valuestring == NULL || item->valuestring[0] == '\0') {
+            continue;
+        }
+        parsed[parsed_count] = strdup(item->valuestring);
+        if (parsed[parsed_count] == NULL) {
+            for (size_t j = 0; j < parsed_count; ++j) {
+                free(parsed[j]);
+            }
+            free(parsed);
+            return false;
+        }
+        parsed_count++;
+    }
+    system_cfgfile_free_homeunits();
+    if (parsed_count == 0) {
+        free(parsed);
+        return true;
+    }
+    config_homeunits = parsed;
+    config_homeunits_count = parsed_count;
+    return true;
 }
 
 static cJSON* system_cfgfile_create_default_root(void) {
@@ -87,7 +221,7 @@ static cJSON* system_cfgfile_create_default_root(void) {
         cJSON_Delete(root);
         return NULL;
     }
-    cJSON_AddItemToObject(head_gesture, "up_enabled", cJSON_CreateBool(true));
+    cJSON_AddItemToObject(head_gesture, "up_enabled", cJSON_CreateBool(false));
     cJSON_AddItemToObject(head_gesture, "down_enabled", cJSON_CreateBool(true));
     cJSON_AddItemToObject(head_gesture, "up_deg", cJSON_CreateNumber(25));
     cJSON_AddItemToObject(head_gesture, "down_deg", cJSON_CreateNumber(15));
@@ -96,6 +230,8 @@ static cJSON* system_cfgfile_create_default_root(void) {
     cJSON_AddItemToObject(root, "touchpadEnabled", cJSON_CreateBool(true));
     cJSON_AddItemToObject(root, "notificationEnabled", cJSON_CreateBool(true));
     cJSON_AddItemToObject(root, "keywordSpottingEnabled", cJSON_CreateBool(true));
+    cJSON_AddItemToObject(
+        root, "kwsHitValue", cJSON_CreateNumber((double)config_kws_hit_value));
     cJSON_AddItemToObject(root, "idleDetectionEnabled", cJSON_CreateBool(true));
     cJSON_AddItemToObject(root, "displayMode", cJSON_CreateNumber(0));
     cJSON_AddItemToObject(root, "lcd_sleep_timeout", cJSON_CreateNumber(30));
@@ -111,10 +247,9 @@ static cJSON* system_cfgfile_create_default_root(void) {
     cJSON_AddItemToObject(root, "brightness", cJSON_CreateNumber((double)brightness));
 
     cJSON_AddItemToObject(root, "curlang", cJSON_CreateString(""));
-    cJSON_AddItemToObject(root, "home_app", cJSON_CreateString("home"));
+    cJSON_AddItemToObject(root, "homeunits", cJSON_CreateArray());
     cJSON_AddItemToObject(root, "simpleguide", cJSON_CreateBool(true));
-    cJSON_AddItemToObject(root, "userguide", cJSON_CreateBool(false));
-    cJSON_AddItemToObject(root, "userguidefinish", cJSON_CreateBool(false));
+    cJSON_AddItemToObject(root, "userguide", cJSON_CreateString(SYSTEM_USERGUIDE_PROGRESS_FALSE));
     cJSON_AddItemToObject(root, "playaudio", cJSON_CreateBool(true));
     cJSON_AddItemToObject(root, "displaylevel", cJSON_CreateNumber(1));
     cJSON_AddItemToObject(root, "displaydistancelevel", cJSON_CreateNumber(1));
@@ -144,10 +279,11 @@ static void system_cfgfile_clear_runtime_state(void) {
         free(config_curlang);
         config_curlang = NULL;
     }
-    if (config_home_app) {
-        free(config_home_app);
-        config_home_app = NULL;
+    if (user_guide) {
+        free(user_guide);
+        user_guide = NULL;
     }
+    system_cfgfile_free_homeunits();
     system_cfgfile_inited = false;
 }
 
@@ -214,6 +350,10 @@ bool system_config_get_keyword_spotting_enabled(void) {
 bool system_config_set_keyword_spotting_enabled(bool keyword_spotting_enabled) {
     config_keyword_spotting_enabled = keyword_spotting_enabled;
     return system_cfgfile_update();
+}
+
+uint32_t system_config_get_kws_hit_value(void) {
+    return config_kws_hit_value;
 }
 
 bool system_config_get_idle_detection_enabled(void) {
@@ -345,22 +485,30 @@ bool system_config_set_curlang(char* curlang) {
     return saved;
 }
 
-char* system_config_get_home_app(void) {
-    floatair_dbg("home[%s]", config_home_app);
-    return config_home_app;
+size_t system_config_get_homeunits_count(void) {
+    return config_homeunits_count;
 }
 
-bool system_config_set_home_app(char* home_app) {
-    if (!home_app) {
+const char* system_config_get_homeunit(size_t index) {
+    if (index >= config_homeunits_count || config_homeunits == NULL) {
+        return NULL;
+    }
+    return config_homeunits[index];
+}
+
+bool system_config_set_homeunits(const char* const* homeunits, size_t count) {
+    char** copied = NULL;
+    size_t copied_count = 0;
+
+    if (homeunits == NULL && count > 0) {
         return false;
     }
-    char* dup_home = strdup(home_app);
-    floatair_assert(dup_home != NULL, "strdup home_app failed");
-    if (config_home_app) {
-        free(config_home_app);
-        config_home_app = NULL;
+    if (!system_cfgfile_copy_homeunits(homeunits, count, &copied, &copied_count)) {
+        return false;
     }
-    config_home_app = dup_home;
+    system_cfgfile_free_homeunits();
+    config_homeunits = copied;
+    config_homeunits_count = copied_count;
     return system_cfgfile_update();
 }
 
@@ -390,6 +538,7 @@ bool system_cfgfile_load(void) {
     parse_bool_key(root, "touchpadEnabled", &config_touchpad_enabled);
     parse_bool_key(root, "notificationEnabled", &config_notification_enabled);
     parse_bool_key(root, "keywordSpottingEnabled", &config_keyword_spotting_enabled);
+    parse_u32_key(root, "kwsHitValue", &config_kws_hit_value);
     parse_bool_key(root, "idleDetectionEnabled", &config_idle_detection_enabled);
     cJSON* head_gesture = cJSON_GetObjectItemCaseSensitive(root, "headGestureConfig");
     if (cJSON_IsObject(head_gesture)) {
@@ -447,14 +596,10 @@ bool system_cfgfile_load(void) {
             config_curlang = norm;
         }
     }
-    parse_string_key_dup(root, "home_app", &config_home_app);
-    if (config_home_app == NULL || config_home_app[0] == '\0') {
+    if (!system_cfgfile_parse_homeunits(root)) {
         cJSON_Delete(root);
         system_cfgfile_clear_runtime_state();
-        if (!system_cfgfile_rebuild_default()) {
-            return false;
-        }
-        return system_cfgfile_load();
+        return false;
     }
     config_lcd.ui_x_begin = SYSTEM_LCD_UI_X_BEGIN;
     config_lcd.ui_y_begin = SYSTEM_LCD_UI_Y_BEGIN;
@@ -462,11 +607,22 @@ bool system_cfgfile_load(void) {
     config_lcd.ui_height = SYSTEM_LCD_UI_HEIGHT;
 
     parse_bool_key(root, "simpleguide", &simple_guide);
-    parse_bool_key(root, "userguide", &user_guide);
-    parse_bool_key(root, "userguidefinish", &user_guide_finish);
+    system_cfgfile_parse_userguide(root);
     parse_bool_key(root, "playaudio", &play_audio);
     parse_u32_key(root, "displaylevel", &display_level);
     parse_u32_key(root, "displaydistancelevel", &display_level);
+    cJSON* platform = cJSON_GetObjectItemCaseSensitive(root, "platform");
+    if (platform != NULL && !cJSON_IsString(platform)) {
+        floatair_err("platform is invalid");
+        cJSON_Delete(root);
+        system_cfgfile_clear_runtime_state();
+        return false;
+    }
+    if (cJSON_IsString(platform) && !app_router_set_default_app_platform(platform->valuestring)) {
+        cJSON_Delete(root);
+        system_cfgfile_clear_runtime_state();
+        return false;
+    }
 
     cJSON_Delete(root);
     system_cfgfile_inited = true;
@@ -484,10 +640,7 @@ bool system_cfgfile_unload(void) {
         free(config_curlang);
         config_curlang = NULL;
     }
-    if (config_home_app) {
-        free(config_home_app);
-        config_home_app = NULL;
-    }
+    system_cfgfile_free_homeunits();
     system_cfgfile_inited = false;
     return true;
 }
@@ -524,6 +677,10 @@ bool system_cfgfile_update(void) {
     cJSON_DeleteItemFromObjectCaseSensitive(root, "keywordSpottingEnabled");
     cJSON_AddItemToObject(
         root, "keywordSpottingEnabled", cJSON_CreateBool(config_keyword_spotting_enabled));
+
+    cJSON_DeleteItemFromObjectCaseSensitive(root, "kwsHitValue");
+    cJSON_AddItemToObject(
+        root, "kwsHitValue", cJSON_CreateNumber((double)config_kws_hit_value));
 
     cJSON_DeleteItemFromObjectCaseSensitive(root, "idleDetectionEnabled");
     cJSON_AddItemToObject(
@@ -583,10 +740,16 @@ bool system_cfgfile_update(void) {
             cJSON_AddItemToObject(root, "curlang", cJSON_CreateString(v));
         }
     }
-
-    cJSON_DeleteItemFromObjectCaseSensitive(root, "home_app");
-    if (config_home_app) {
-        cJSON_AddItemToObject(root, "home_app", cJSON_CreateString(config_home_app));
+    cJSON_DeleteItemFromObjectCaseSensitive(root, "homeunits");
+    cJSON* homeunits = cJSON_AddArrayToObject(root, "homeunits");
+    if (homeunits == NULL) {
+        cJSON_Delete(root);
+        floatair_err("create homeunits failed");
+        return false;
+    }
+    for (size_t i = 0; i < config_homeunits_count; ++i) {
+        cJSON_AddItemToArray(homeunits,
+                             cJSON_CreateString(config_homeunits[i] != NULL ? config_homeunits[i] : ""));
     }
     cJSON_DeleteItemFromObjectCaseSensitive(root, "lcdinfo");
 
@@ -594,9 +757,8 @@ bool system_cfgfile_update(void) {
     cJSON_DeleteItemFromObjectCaseSensitive(root, "simpleguide");
     cJSON_AddItemToObject(root, "simpleguide", cJSON_CreateBool(simple_guide));
     cJSON_DeleteItemFromObjectCaseSensitive(root, "userguide");
-    cJSON_AddItemToObject(root, "userguide", cJSON_CreateBool(user_guide));
+    cJSON_AddItemToObject(root, "userguide", cJSON_CreateString(system_config_get_userguide()));
     cJSON_DeleteItemFromObjectCaseSensitive(root, "userguidefinish");
-    cJSON_AddItemToObject(root, "userguidefinish", cJSON_CreateBool(user_guide_finish));
     cJSON_DeleteItemFromObjectCaseSensitive(root, "playaudio");
     cJSON_AddItemToObject(root, "playaudio", cJSON_CreateBool(play_audio));
     cJSON_DeleteItemFromObjectCaseSensitive(root, "homestyle");
@@ -627,6 +789,7 @@ void system_cfgfile_dump(void) {
                   config_notification_enabled ? "true" : "false");
     floatair_dbg("config_keyword_spotting_enabled: %s",
                   config_keyword_spotting_enabled ? "true" : "false");
+    floatair_dbg("config_kws_hit_value: %" PRIu32, config_kws_hit_value);
     floatair_dbg("config_idle_detection_enabled: %s",
                   config_idle_detection_enabled ? "true" : "false");
     floatair_dbg("config_head_gesture.up_enabled: %s",
@@ -643,14 +806,13 @@ void system_cfgfile_dump(void) {
     floatair_dbg("config_bl_auto: %s", config_bl_auto ? "true" : "false");
     floatair_dbg("config_brightness: %u", config_brightness);
     floatair_dbg("config_curlang: %s", config_curlang ? config_curlang : "NULL");
-    floatair_dbg("config_home_app: %s", config_home_app ? config_home_app : "NULL");
+    floatair_dbg("config_homeunits_count: %u", (unsigned)config_homeunits_count);
     floatair_dbg("config_ui_x_begin: %" PRIu32, config_lcd.ui_x_begin);
     floatair_dbg("config_ui_y_begin: %" PRIu32, config_lcd.ui_y_begin);
     floatair_dbg("config_ui_width: %" PRIu32, config_lcd.ui_width);
     floatair_dbg("config_ui_height: %" PRIu32, config_lcd.ui_height);
     floatair_dbg("simple_guide: %d", simple_guide);
-    floatair_dbg("user_guide: %d", user_guide);
-    floatair_dbg("user_guide_finish: %d", user_guide_finish);
+    floatair_dbg("user_guide: %s", user_guide ? user_guide : "");
     floatair_dbg("play_audio: %d", play_audio);
     floatair_dbg("display_level: %" PRIu32, display_level);
     floatair_dbg("End");
@@ -666,24 +828,27 @@ void home_set_simple_guide(bool guide) {
     system_cfgfile_update();
 }
 
-bool system_config_get_userguide(void) {
-    floatair_dbg("user_guide %d", user_guide);
+const char* system_config_get_userguide(void) {
+    if (user_guide == NULL) {
+        system_cfgfile_set_userguide_runtime(SYSTEM_USERGUIDE_PROGRESS_FALSE);
+    }
+    floatair_dbg("user_guide %s", user_guide);
     return user_guide;
 }
 
-bool system_config_set_userguide(bool userguide) {
-    user_guide = userguide;
+bool system_config_set_userguide(const char* progress) {
+    if (!system_cfgfile_is_valid_userguide(progress)) {
+        floatair_err("invalid userguide progress: %s", progress != NULL ? progress : "NULL");
+        return false;
+    }
+    system_cfgfile_set_userguide_runtime(progress);
     return system_cfgfile_update();
 }
 
-bool system_config_get_userguide_finish(void) {
-    floatair_dbg("user_guide_finish %d", user_guide_finish);
-    return user_guide_finish;
-}
+bool system_config_is_userguide_finished(void) {
+    const char* progress = system_config_get_userguide();
 
-bool system_config_set_userguide_finish(bool finish) {
-    user_guide_finish = finish;
-    return system_cfgfile_update();
+    return strcmp(progress, SYSTEM_USERGUIDE_PROGRESS_TRUE) == 0;
 }
 
 bool system_config_get_langselection_finish(void) {

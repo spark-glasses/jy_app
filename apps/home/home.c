@@ -34,6 +34,18 @@ static app_message_t home_msg = {
     .cb   = home_msg_cb,
 };
 
+bool home_is_supported_app(const char* app_name) {
+    if (app_name == NULL || app_name[0] == '\0') {
+        return false;
+    }
+    for (size_t i = 0; i < g_home_units_count; ++i) {
+        if (g_home_units_arr[i].name != NULL && strcmp(g_home_units_arr[i].name, app_name) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 /**
  * @brief 注册 Home 消息处理器。
  * @return `true` 表示注册成功，`false` 表示注册失败。

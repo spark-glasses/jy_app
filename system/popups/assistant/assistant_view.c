@@ -8,11 +8,13 @@
 #include "app_def.h"
 #include "stt_view_common.h"
 #include "common/app_framework/app_layers.h"
+#include "common/app_framework/app_manager.h"
 #include "common/widgets/avatar.h"
 #include "common/widgets/container.h"
 #include "common/widgets/label.h"
 #include "system/stt_common.h"
 #include "system/system_def.h"
+#include "system/system.h"
 
 #include <string.h>
 
@@ -41,13 +43,17 @@ static assistant_text_role_t s_last_update_role = ASSISTANT_TEXT_ROLE_NONE; ///<
  * @return 无返回值。
  */
 static void assistant_apply_label_theme(label_t* label, bool emphasize) {
+    lv_base_dir_t base_dir = stt_config.sourceTextDirection == TEXT_DIRECTION_RTL
+                                 ? LV_BASE_DIR_RTL
+                                 : LV_BASE_DIR_LTR;
+    lv_obj_t* obj = NULL;
+
     if (label == NULL) {
         return;
     }
 
-    lv_obj_t* obj = label_get_obj(label);
-
-    stt_view_apply_text_theme(label, LABEL_ALIGN_LEFT, LABEL_OVERFLOW_WRAP);
+    obj = label_get_obj(label);
+    stt_view_apply_stt_label_text_theme(label, base_dir);
     if (obj == NULL) {
         return;
     }
@@ -273,9 +279,18 @@ bool assistant_handle_event(lv_event_code_t code) {
         case LV_EVENT_LONG_PRESSED:
             system_report_touch_event(code);
             return true;
-        case LV_EVENT_DCLICKED:
+        case LV_EVENT_DCLICKED: {
+            lv_obj_t* page_root = NULL;
+
             (void)assistant_close(true);
+            if (!system_config_is_userguide_finished()) {
+                page_root = app_manager_current_content_root();
+                if (page_root != NULL) {
+                    (void)lv_obj_send_event(page_root, assistant_get_close_event(), NULL);
+                }
+            }
             return true;
+        }
         case LV_EVENT_GESTURE_LEFT:
             if (s_ui.scroll) {
                 container_scroll_up(s_ui.scroll, 3.0f / 4.0f);
