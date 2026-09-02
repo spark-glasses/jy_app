@@ -135,6 +135,12 @@ void system_ui_refresh_display_distance_level(void);
  */
 bool system_ui_refresh_screen_now(void);
 /**
+ * @brief 请求在下一次 lv_timer_handler() 时立即出一帧，不等待刷新周期。
+ *        用于用户输入：状态已同步更新，尽早显示而动画仍按刷新周期节奏。
+ * @return 无返回值。
+ */
+void system_ui_request_frame(void);
+/**
  * @brief 亮屏后统一补刷灭屏期间延迟的系统 UI 更新。
  * @return 无返回值。
  */

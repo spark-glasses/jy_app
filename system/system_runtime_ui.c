@@ -426,6 +426,22 @@ bool system_ui_refresh_screen_now(void) {
     return true;
 }
 
+void system_ui_request_frame(void) {
+    lv_timer_t* refr_timer = NULL;
+
+    if (floatair_lcd_get_state() == LCD_OFF) {
+        return;
+    }
+
+    /* Only reschedules the refresh timer. If nothing was invalidated the
+     * refresh is a no-op, so this is safe to call on every input event. */
+    refr_timer = lv_display_get_refr_timer(NULL);
+    if (refr_timer == NULL) {
+        return;
+    }
+    lv_timer_ready(refr_timer);
+}
+
 /**
  * @brief 将电量值同步到顶部状态栏。
  * @param[in] battery 电量百分比。

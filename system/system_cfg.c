@@ -215,7 +215,7 @@ static cJSON* system_cfgfile_create_default_root(void) {
     cJSON_AddItemToObject(fontinfo, "wordSpace", cJSON_CreateNumber(0));
     cJSON_AddItemToObject(fontinfo, "rowSpace", cJSON_CreateNumber(0));
 
-    cJSON_AddItemToObject(root, "wearDetectionEnabled", cJSON_CreateBool(true));
+    cJSON_AddItemToObject(root, "wearDetectionEnabled", cJSON_CreateBool(false));
     cJSON* head_gesture = cJSON_AddObjectToObject(root, "headGestureConfig");
     if (!head_gesture) {
         cJSON_Delete(root);

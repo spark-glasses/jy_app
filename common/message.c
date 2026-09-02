@@ -24,6 +24,10 @@
 #include "sys_adapter.h"
 #include "app_lcd.h"
 
+/* Handler cost at or above this is logged. Logging runs on the UI thread and
+ * formats before the syslog mask applies, so the fast path stays silent. */
+#define MSG_HANDLE_SLOW_US 10000U
+
 /* ------------------
  * Version constraints check
  * ------------------ */
@@ -529,8 +533,10 @@ out:
     }
     {
         uint32_t cost_us = (uint32_t)GetTimeUs() - start_us;
-        if (header_valid) {
-            floatair_dbg("mpack cost %lu us/%lu ms ret=%d id=%" PRIu32 " seq=%" PRIu32 " type=%u biz=%s cmd=%s",
+        if (cost_us < MSG_HANDLE_SLOW_US) {
+            /* Formatting happens before the syslog mask, keep the fast path quiet. */
+        } else if (header_valid) {
+            floatair_info("mpack cost %lu us/%lu ms ret=%d id=%" PRIu32 " seq=%" PRIu32 " type=%u biz=%s cmd=%s",
                          (unsigned long)cost_us,
                          (unsigned long)(cost_us / 1000U),
                          ret,
@@ -540,7 +546,7 @@ out:
                          header.biz,
                          header.cmd);
         } else {
-            floatair_dbg("mpack cost %lu us/%lu ms ret=%d",
+            floatair_info("mpack cost %lu us/%lu ms ret=%d",
                          (unsigned long)cost_us,
                          (unsigned long)(cost_us / 1000U),
                          ret);
@@ -848,6 +854,27 @@ static bool system_handle_ancs_event(const JYT_ELF_MQ_MSG* msg) {
     return true;
 }
 
+/**
+ * @brief 判断系统事件是否为用户输入（触控、滑动、IMU 点击）。
+ * @param[in] event_type 系统事件类型。
+ * @return `true` 表示用户输入事件。
+ */
+static bool system_event_is_user_input(uint16_t event_type) {
+    switch (event_type) {
+        case SET_IMU_SINGLE_TAP:
+        case SET_IMU_DOUBLE_TAP:
+        case SET_SLIDE_FORWARD:
+        case SET_SLIDE_BACKWORD:
+        case SET_FORCE_SINGLE_CLICK:
+        case SET_FORCE_DOUBLE_CLICK:
+        case SET_FORCE_TRI_CLICK:
+        case SET_FORCE_LONG_PRESSED:
+            return true;
+        default:
+            return false;
+    }
+}
+
 bool app_system_msg_handle_payload(JYT_ELF_MQ_MSG* msg) {
     uint32_t start_us = (uint32_t)GetTimeUs();
     bool ret = true;
@@ -863,7 +890,6 @@ bool app_system_msg_handle_payload(JYT_ELF_MQ_MSG* msg) {
         ret = false;
         goto out;
     }
-    floatair_dbg("handle type (%d)(%s)", event_type, system_event_type_to_str(event_type));
     {
         app_t* current_app = app_manager_current();
         if (current_app != NULL &&
@@ -1032,15 +1058,23 @@ bool app_system_msg_handle_payload(JYT_ELF_MQ_MSG* msg) {
         }
     }
 out:
+    /* Input handlers update widget state synchronously. Draw it on the next
+     * lv_timer_handler() pass instead of waiting out the refresh period.
+     * Covers both the app's top-layer hook and the default dispatch. */
+    if (ret && msg != NULL && system_event_is_user_input(event_type)) {
+        system_ui_request_frame();
+    }
     {
         uint32_t cost_us = (uint32_t)GetTimeUs() - start_us;
         const char* evt = msg ? system_event_type_to_str(event_type) : "NULL_MSG";
-        floatair_dbg("system event payload cost %lu us/%lu ms, evt=%s(%u) ret=%d",
-                     (unsigned long)cost_us,
-                     (unsigned long)(cost_us / 1000U),
-                     evt,
-                     event_type,
-                     ret);
+        if (cost_us >= MSG_HANDLE_SLOW_US) {
+            floatair_info("system event payload cost %lu us/%lu ms, evt=%s(%u) ret=%d",
+                          (unsigned long)cost_us,
+                          (unsigned long)(cost_us / 1000U),
+                          evt,
+                          event_type,
+                          ret);
+        }
     }
     return ret;
 }
@@ -1754,7 +1788,6 @@ bool app_mpack_send_writer(msg_pack_writer_t* writer) {
     }
 
     if (writer->buffer && writer->size > 0) {
-        app_msg_dump_summary(writer->buffer, writer->size, "send phone msg");
         send2host(writer->buffer, (uint32_t) writer->size);
         app_mpack_writer_destroy(writer);
         return true;

@@ -4,7 +4,7 @@
         "wordSpace": 0,
         "rowSpace": 0
     },
-    "wearDetectionEnabled": true,
+    "wearDetectionEnabled": false,
     "headGestureConfig": {
         "up_enabled": false,
         "down_enabled": false,
