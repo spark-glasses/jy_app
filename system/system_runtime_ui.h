@@ -107,7 +107,7 @@ void system_ui_refresh_bt_disconnect_overlay_text(void);
 void system_ui_sync_shell_state(void);
 
 /**
- * @brief 初始化系统 LVGL 根节点、页面容器和顶部状态栏。
+ * @brief Initialize the system screen, page container, header, and footer.
  * @return 返回当前活动屏幕根对象。
  */
 lv_obj_t* system_init_lvgl_fb(void);
@@ -118,6 +118,12 @@ lv_obj_t* system_init_lvgl_fb(void);
 lv_coord_t system_ui_get_page_content_height(void);
 /** Return the system-owned parent for normal app pages. */
 lv_obj_t* system_ui_get_page_parent(void);
+/** Return the permanent footer container, or NULL before screen initialization. */
+lv_obj_t* system_ui_get_footer(void);
+/** Show the existing avatar with a roll-in, or hide it and stop its animations. */
+void system_ui_set_avatar_visible(bool visible);
+/** Update the permanent avatar's listening state. */
+void system_ui_set_avatar_listening(bool listening);
 /**
  * @brief 立即刷新指定状态栏的缓存时间、电量和充电状态。
  * @param[in] status_bar 目标状态栏对象。

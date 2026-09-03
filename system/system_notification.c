@@ -40,12 +40,7 @@ static notification_item_t s_active_notification = {0};
  * @return 无返回值。
  */
 static void system_notification_keep_screen_awake(void) {
-    bool was_screen_off = (system_get_sys_state() == 0);
-
     system_set_sys_state(1);
-    if (was_screen_off) {
-        system_report_sys_state(1);
-    }
 }
 
 /**

@@ -15,6 +15,10 @@ GROUPS = [
         ("TWS Broken", "SET_TWS_LINK_BROKEN"),
         ("KWS Hit (Configured)", "SET_KWS_HIT"),
     ]),
+    ("Avatar", [
+        ("Normal", "SET_AVATAR_NORMAL"),
+        ("Listening", "SET_AVATAR_LISTENING"),
+    ]),
     ("Battery", [
         ("Low Battery", "SET_JYT_LOW_BATTERY_WARNING"),
         ("Charging", "SET_CHARGER_ON"),
@@ -46,8 +50,6 @@ class EventPanel:
         self.fifo_path = fifo_path
         self.root = tk.Tk()
         self.root.title("Floatair OS Events")
-        self.root.geometry("760x760")
-        self.root.resizable(False, False)
         self.status_var = tk.StringVar(value=f"FIFO: {fifo_path}")
         self.battery_soc_value = tk.StringVar(value="80")
         self.time_text_value = tk.StringVar(value=dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
@@ -120,6 +122,9 @@ class EventPanel:
 
         status = ttk.Label(container, textvariable=self.status_var, foreground="#445")
         status.pack(anchor="w", pady=(10, 0))
+
+        self.root.update_idletasks()
+        self.root.minsize(max(760, self.root.winfo_reqwidth()), self.root.winfo_reqheight())
 
     def _write_line(self, line: str) -> None:
         try:

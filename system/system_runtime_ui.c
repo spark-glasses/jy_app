@@ -21,15 +21,19 @@
 #include "common/app_framework/app_stereo.h"
 #include "system/popups/notify/notify.h"
 #include "common/widgets/toast.h"
-#include "system/popups/assistant/assistant.h"
+#include "common/widgets/avatar.h"
 #include "system/popups/notify_list/notify_list.h"
 #include "app_lcd.h"
 
 #include <inttypes.h>
 #include <time.h>
 
+#define SYSTEM_FOOTER_HEIGHT 72
+
 static lv_obj_t* g_status_bar_top = NULL;          ///< app 层顶部状态栏对象
-static lv_obj_t* g_page_content = NULL;           ///< Page area below the status bar.
+static lv_obj_t* g_page_content = NULL;           ///< Page area between the header and footer.
+static lv_obj_t* g_footer = NULL;                 ///< System-owned footer outside the page roots.
+static avatar_t* g_footer_avatar = NULL;
 static lv_obj_t* g_bt_disconnect_status_bar = NULL;   ///< 蓝牙断连遮罩层顶部状态栏对象
 static bool g_status_bar_top_visible = true;       ///< 顶部状态栏期望显隐状态
 static lv_obj_t* g_bt_disconnect_overlay = NULL;      ///< 蓝牙断连全屏遮罩
@@ -78,8 +82,7 @@ bool system_ui_send_progress_hint(const system_progress_hint_param_t* param) {
  * @return `true` 表示允许显示断连遮罩，`false` 表示当前应让前置流程独占页面。
  */
 static bool system_bt_disconnect_overlay_should_show(void) {
-    return system_config_get_langselection_finish() &&
-           (!system_get_btconn_state() || !app_router_has_app_config());
+    return !system_get_btconn_state() || !app_router_has_app_config();
 }
 
 /**
@@ -90,10 +93,6 @@ void system_ui_refresh_bt_disconnect_overlay_text(void) {
     const char* bt_name = system_get_btname();
     lv_obj_t* notice_obj = NULL;
     lv_obj_t* name_obj = NULL;
-
-    if (!system_config_get_langselection_finish()) {
-        return;
-    }
 
     notice_obj = label_get_obj(g_bt_disconnect_overlay_ui.notice);
     name_obj = label_get_obj(g_bt_disconnect_overlay_ui.name);
@@ -131,12 +130,12 @@ static lv_obj_t* system_ui_get_current_status_bar(void) {
 }
 
 /**
- * @brief 依据状态栏模式计算页面内容区高度。
- * @param[in] show_top `true` 表示顶部状态栏占位，`false` 表示内容区铺满全屏。
- * @return 返回内容区高度。
+ * @brief Calculate page height between the optional header and permanent footer.
+ * @param[in] show_top Whether the top status bar reserves space.
+ * @return Page content height.
  */
 static lv_coord_t system_ui_calc_page_content_height(bool show_top) {
-    lv_coord_t height = (lv_coord_t)config_lcd.ui_height;
+    lv_coord_t height = (lv_coord_t)config_lcd.ui_height - SYSTEM_FOOTER_HEIGHT;
 
     if (show_top) {
         height -= STATUS_BAR_HEIGHT;
@@ -159,6 +158,31 @@ lv_coord_t system_ui_get_page_content_height(void) {
 
 lv_obj_t* system_ui_get_page_parent(void) {
     return g_page_content;
+}
+
+lv_obj_t* system_ui_get_footer(void) {
+    return g_footer;
+}
+
+void system_ui_set_avatar_visible(bool visible) {
+    if (g_footer_avatar == NULL ||
+        ui_widget_is_hidden(UI_WIDGET(g_footer_avatar)) == !visible) {
+        return;
+    }
+
+    avatar_set_visible(g_footer_avatar, visible);
+    if (visible) {
+        avatar_play_entrance(g_footer_avatar, NULL, NULL);
+    } else {
+        avatar_set_state(g_footer_avatar, AVATAR_STATE_NORMAL);
+    }
+}
+
+void system_ui_set_avatar_listening(bool listening) {
+    if (g_footer_avatar != NULL) {
+        avatar_set_state(g_footer_avatar,
+                         listening ? AVATAR_STATE_LISTENING : AVATAR_STATE_NORMAL);
+    }
 }
 
 static void system_ui_layout_page_content(void) {
@@ -316,6 +340,34 @@ static void system_status_bar_top_create(lv_obj_t* parent) {
     status_bar_set_visible(g_status_bar_top, g_status_bar_top_visible);
     lv_obj_move_foreground(g_status_bar_top);
     floatair_info("top status bar created: parent=%p status_bar=%p", parent, g_status_bar_top);
+}
+
+static void system_footer_avatar_deleted(lv_event_t* event) {
+    (void)event;
+    g_footer_avatar = NULL;
+}
+
+/** Create the footer and its avatar once, alongside the top status bar. */
+static void system_footer_create(lv_obj_t* parent) {
+    if (parent == NULL || g_footer != NULL) {
+        return;
+    }
+
+    g_footer = lv_obj_create(parent);
+    floatair_assert(g_footer != NULL, "footer create failed");
+    lv_obj_remove_style_all(g_footer);
+    lv_obj_remove_flag(g_footer, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE |
+                                    LV_OBJ_FLAG_CLICK_FOCUSABLE);
+    lv_obj_set_size(g_footer, LV_PCT(100), SYSTEM_FOOTER_HEIGHT);
+    lv_obj_align(g_footer, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+    lv_obj_null_on_delete(&g_footer);
+
+    g_footer_avatar = avatar_create(g_footer, 40);
+    floatair_assert(g_footer_avatar != NULL, "footer avatar create failed");
+    lv_obj_t* avatar_obj = ui_widget_get_obj(UI_WIDGET(g_footer_avatar));
+    lv_obj_align(avatar_obj, LV_ALIGN_BOTTOM_LEFT, 35, -16);
+    lv_obj_add_event_cb(avatar_obj, system_footer_avatar_deleted, LV_EVENT_DELETE, NULL);
+    avatar_set_visible(g_footer_avatar, false);
 }
 
 /**
@@ -575,9 +627,6 @@ void system_ui_flush_pending_after_screen_on(void) {
  * @return `true` 表示事件已被遮罩吞掉，`false` 表示应继续分发。
  */
 bool system_ui_try_intercept_bt_disconnect_overlay_input(void) {
-    if (!system_config_get_langselection_finish()) {
-        return false;
-    }
     if (!system_bt_disconnect_overlay_is_active()) {
         return false;
     }
@@ -612,10 +661,6 @@ void system_ui_set_bt_disconnect_overlay_visible(bool visible) {
     bool overlay_valid = g_bt_disconnect_overlay != NULL && lv_obj_is_valid(g_bt_disconnect_overlay);
     bool hidden_before = false;
 
-    if (!system_config_get_langselection_finish()) {
-        visible = false;
-    }
-
     if (overlay_valid) {
         hidden_before = lv_obj_has_flag(g_bt_disconnect_overlay, LV_OBJ_FLAG_HIDDEN);
     }
@@ -649,7 +694,6 @@ void system_ui_set_bt_disconnect_overlay_visible(bool visible) {
         system_notification_clear();
         toast_dismiss_active();
         (void)notify_list_close();
-        (void)assistant_close(false);
         jyt_dual_screen_set_root_distance((int)distance);
         g_display_level_applied = level;
         system_ui_sync_app_layer_scene();
@@ -674,7 +718,7 @@ void system_ui_set_bt_disconnect_overlay_visible(bool visible) {
 }
 
 /**
- * @brief 初始化系统 LVGL 根节点、页面容器和顶部状态栏。
+ * @brief Initialize the system screen, page container, header, and footer.
  * @return 返回当前活动屏幕根对象，失败时触发断言。
  */
 lv_obj_t* system_init_lvgl_fb(void) {
@@ -717,11 +761,13 @@ lv_obj_t* system_init_lvgl_fb(void) {
     system_ui_layout_page_content();
 
     system_status_bar_top_create(page_parent);
+    system_footer_create(page_parent);
     system_bt_disconnect_overlay_create(
         (app_layers_get_overlay() != NULL) ? app_layers_get_overlay() : p_root);
     floatair_info("init lvgl fb: defer shell sync until first page load");
     (void)system_ui_apply_display_distance_level_if_needed();
     system_ui_sync_app_layer_scene();
+    system_ui_set_avatar_visible(floatair_lcd_get_state() == LCD_ON);
     return p_root;
 }
 

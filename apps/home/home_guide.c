@@ -15,7 +15,6 @@
 #include "floatair_dbg.h"
 #include "guide_runtime.h"
 #include "home.h"
-#include "system/popups/assistant/assistant.h"
 #include "system/popups/notify/notify.h"
 #include "system/system.h"
 #include "system/system_runtime_input.h"
@@ -293,16 +292,6 @@ static void home_guide_sys_state_event_handle(lv_event_t* event) {
     if (*state != 0 && guide_runtime_is_home_step4_sleeping()) {
         home_guide_complete_step4();
     }
-}
-
-/**
- * @brief 处理 assistant closeAssistant 事件，用于教学步骤 5 完成。
- * @param[in] event LVGL 事件对象。
- * @return 无返回值。
- */
-static void home_guide_assistant_close_event_handle(lv_event_t* event) {
-    (void)event;
-    home_guide_finish_step5(false, &s_ops);
 }
 
 void home_guide_create_controls(lv_obj_t* parent, const lv_font_t* font, int font_height) {
@@ -584,7 +573,6 @@ void home_guide_register_events(lv_obj_t* root) {
                         home_guide_sys_state_event_handle,
                         system_runtime_input_get_sys_state_event(),
                         NULL);
-    lv_obj_add_event_cb(root, home_guide_assistant_close_event_handle, assistant_get_close_event(), NULL);
 }
 
 void home_guide_on_appear(void) {

@@ -19,6 +19,7 @@
 #include "simulator_platform.h"
 #include "sys_adapter.h"
 #include "system.h"
+#include "system/system_runtime_ui.h"
 
 /**
  * @brief 文本命令与系统事件类型映射表。
@@ -137,6 +138,23 @@ static void simulator_event_fifo_handle_line(char* line) {
         }
     } else {
         arg = NULL;
+    }
+
+    /* Preview the persistent avatar without a microphone or host connection. */
+    if (strcmp(line, "SET_AVATAR_NORMAL") == 0 ||
+        strcmp(line, "SET_AVATAR_LISTENING") == 0) {
+        bool listening = strcmp(line, "SET_AVATAR_LISTENING") == 0;
+
+        simulator_lvgl_enter_ui_critical();
+        if (system_ui_get_footer() != NULL) {
+            system_set_sys_state(1);
+            system_ui_set_avatar_listening(listening);
+            floatair_info("fifo avatar state: %s", listening ? "listening" : "normal");
+        } else {
+            floatair_warn("fifo avatar preview: UI not ready");
+        }
+        simulator_lvgl_leave_ui_critical();
+        return;
     }
 
     for (i = 0; i < sizeof(g_simulator_fifo_events) / sizeof(g_simulator_fifo_events[0]); ++i) {

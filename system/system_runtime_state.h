@@ -38,7 +38,7 @@ bool system_runtime_state_apply_auto_brightness(void);
  */
 uint8_t system_runtime_state_get_lcd_resume_brightness(void);
 /**
- * @brief 处理 KWS 命中事件，并按当前应用策略忽略、只上报或打开 assistant 弹窗。
+ * @brief Wake the screen on a matching keyword hit when Bluetooth is connected.
  * @param[in] msg KWS 事件消息。
  * @return `true` 表示处理成功，`false` 表示处理失败。
  */

@@ -502,6 +502,11 @@ static void execute_drawing(lv_draw_sw_unit_t * u)
     /*Render the draw task*/
     lv_draw_task_t * t = u->task_act;
     switch(t->type) {
+        case LV_DRAW_TASK_TYPE_CUSTOM: {
+            const lv_draw_custom_dsc_t * dsc = t->draw_dsc;
+            if(dsc->draw_cb) dsc->draw_cb((lv_draw_unit_t *)u, dsc, &t->area);
+            break;
+        }
         case LV_DRAW_TASK_TYPE_FILL:
             lv_draw_sw_fill((lv_draw_unit_t *)u, t->draw_dsc, &t->area);
             break;

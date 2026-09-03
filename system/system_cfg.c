@@ -101,17 +101,6 @@ static bool system_cfgfile_is_valid_userguide(const char* progress) {
             strcmp(progress, SYSTEM_USERGUIDE_PROGRESS_TRUE) == 0);
 }
 
-static void system_cfgfile_parse_userguide(cJSON* root) {
-    cJSON* item = cJSON_GetObjectItemCaseSensitive(root, "userguide");
-    const char* progress = SYSTEM_USERGUIDE_PROGRESS_FALSE;
-
-    if (cJSON_IsString(item) && item->valuestring != NULL &&
-        system_cfgfile_is_valid_userguide(item->valuestring)) {
-        progress = item->valuestring;
-    }
-    system_cfgfile_set_userguide_runtime(progress);
-}
-
 static bool system_cfgfile_copy_homeunits(const char* const* homeunits,
                                           size_t count,
                                           char*** out_homeunits,
@@ -222,7 +211,7 @@ static cJSON* system_cfgfile_create_default_root(void) {
         return NULL;
     }
     cJSON_AddItemToObject(head_gesture, "up_enabled", cJSON_CreateBool(false));
-    cJSON_AddItemToObject(head_gesture, "down_enabled", cJSON_CreateBool(true));
+    cJSON_AddItemToObject(head_gesture, "down_enabled", cJSON_CreateBool(false));
     cJSON_AddItemToObject(head_gesture, "up_deg", cJSON_CreateNumber(25));
     cJSON_AddItemToObject(head_gesture, "down_deg", cJSON_CreateNumber(15));
     cJSON_AddItemToObject(head_gesture, "base_deg", cJSON_CreateNumber(0));
@@ -246,10 +235,10 @@ static cJSON* system_cfgfile_create_default_root(void) {
     }
     cJSON_AddItemToObject(root, "brightness", cJSON_CreateNumber((double)brightness));
 
-    cJSON_AddItemToObject(root, "curlang", cJSON_CreateString(""));
+    cJSON_AddItemToObject(root, "curlang", cJSON_CreateString("en-US"));
     cJSON_AddItemToObject(root, "homeunits", cJSON_CreateArray());
-    cJSON_AddItemToObject(root, "simpleguide", cJSON_CreateBool(true));
-    cJSON_AddItemToObject(root, "userguide", cJSON_CreateString(SYSTEM_USERGUIDE_PROGRESS_FALSE));
+    cJSON_AddItemToObject(root, "simpleguide", cJSON_CreateBool(false));
+    cJSON_AddItemToObject(root, "userguide", cJSON_CreateString(SYSTEM_USERGUIDE_PROGRESS_TRUE));
     cJSON_AddItemToObject(root, "playaudio", cJSON_CreateBool(true));
     cJSON_AddItemToObject(root, "displaylevel", cJSON_CreateNumber(1));
     cJSON_AddItemToObject(root, "displaydistancelevel", cJSON_CreateNumber(1));
@@ -541,19 +530,10 @@ bool system_cfgfile_load(void) {
     parse_u32_key(root, "kwsHitValue", &config_kws_hit_value);
     parse_bool_key(root, "idleDetectionEnabled", &config_idle_detection_enabled);
     cJSON* head_gesture = cJSON_GetObjectItemCaseSensitive(root, "headGestureConfig");
+    /* Screen control uses double-tap, including with older saved settings. */
+    config_head_gesture.up_enabled = false;
+    config_head_gesture.down_enabled = false;
     if (cJSON_IsObject(head_gesture)) {
-        cJSON* up_enabled = cJSON_GetObjectItemCaseSensitive(head_gesture, "up_enabled");
-        cJSON* down_enabled = cJSON_GetObjectItemCaseSensitive(head_gesture, "down_enabled");
-        if (up_enabled || down_enabled) {
-            parse_bool_key(head_gesture, "up_enabled", &config_head_gesture.up_enabled);
-            parse_bool_key(head_gesture, "down_enabled", &config_head_gesture.down_enabled);
-        } else {
-            bool legacy_enable = false;
-            parse_bool_key(head_gesture, "enable", &legacy_enable);
-            config_head_gesture.up_enabled = legacy_enable;
-            config_head_gesture.down_enabled = legacy_enable;
-        }
-
         cJSON* item = cJSON_GetObjectItemCaseSensitive(head_gesture, "up_deg");
         if (cJSON_IsNumber(item)) {
             config_head_gesture.up_deg = (int32_t)item->valuedouble;
@@ -579,23 +559,10 @@ bool system_cfgfile_load(void) {
                             ? UINT8_MAX
                             : (uint8_t)g_section_data.jyt_default_brightness;
     parse_u8_key(root, "brightness", &config_brightness);
-    parse_string_key_dup(root, "curlang", &config_curlang);
-    if (config_curlang && config_curlang[0] == '\0') {
-        free(config_curlang);
-        config_curlang = NULL;
-    }
-    if (config_curlang) {
-        size_t n = strlen(config_curlang);
-        if (n >= 5 && strcmp(config_curlang + (n - 5), ".json") == 0) {
-            size_t m = n - 5;
-            char* norm = (char*)malloc(m + 1);
-            floatair_assert(norm != NULL, "malloc curlang failed");
-            memcpy(norm, config_curlang, m);
-            norm[m] = '\0';
-            free(config_curlang);
-            config_curlang = norm;
-        }
-    }
+    /* Spark starts in English without a language selection page. */
+    free(config_curlang);
+    config_curlang = strdup("en-US");
+    floatair_assert(config_curlang != NULL, "strdup curlang failed");
     if (!system_cfgfile_parse_homeunits(root)) {
         cJSON_Delete(root);
         system_cfgfile_clear_runtime_state();
@@ -606,8 +573,9 @@ bool system_cfgfile_load(void) {
     config_lcd.ui_width = SYSTEM_LCD_UI_WIDTH;
     config_lcd.ui_height = SYSTEM_LCD_UI_HEIGHT;
 
-    parse_bool_key(root, "simpleguide", &simple_guide);
-    system_cfgfile_parse_userguide(root);
+    /* Ignore saved progress from the unregistered guide apps. */
+    simple_guide = false;
+    system_cfgfile_set_userguide_runtime(SYSTEM_USERGUIDE_PROGRESS_TRUE);
     parse_bool_key(root, "playaudio", &play_audio);
     parse_u32_key(root, "displaylevel", &display_level);
     parse_u32_key(root, "displaydistancelevel", &display_level);

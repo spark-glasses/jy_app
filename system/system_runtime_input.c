@@ -11,7 +11,6 @@
 #include "system/system.h"
 
 #include "common/app_framework/app_manager.h"
-#include "system/popups/assistant/assistant.h"
 #include "app_def.h"
 #include "app_lcd.h"
 #include "system/popups/notify_list/notify_list.h"
@@ -58,29 +57,6 @@ static bool system_touch_input_blocked(uint8_t event, const char* source) {
 }
 
 /**
- * @brief 判断灭屏状态下是否应拦截触控输入。
- * @param[in] event 当前触控事件值。
- * @param[in] source 事件来源描述。
- * @param[in] double_click_wakes `true` 表示当前事件是可亮屏的双击事件。
- * @return `true` 表示已拦截，`false` 表示可继续分发。
- */
-static bool system_touch_lcd_off_blocked(uint8_t event, const char* source, bool double_click_wakes) {
-    if (floatair_lcd_get_state() != LCD_OFF) {
-        return false;
-    }
-
-    if (double_click_wakes) {
-        floatair_info("lcd off, wake by %s double-click event %u", source, (unsigned)event);
-        system_set_sys_state(1);
-        system_report_sys_state(1);
-        return true;
-    }
-
-    floatair_info("lcd off, ignore %s touch event %u", source, (unsigned)event);
-    return true;
-}
-
-/**
  * @brief 更新当前佩戴状态，用于在未佩戴时屏蔽触控板输入。
  * @param[in] worn `true` 表示已佩戴，`false` 表示未佩戴。
  * @return 无返回值。
@@ -105,10 +81,6 @@ static bool system_try_intercept_popup_event(lv_event_code_t code) {
     }
     if (notify_list_handle_event(code)) {
         floatair_info("notify_list popup intercepted event %d", code);
-        return true;
-    }
-    if (assistant_handle_event(code)) {
-        floatair_info("assistant popup intercepted event %d", code);
         return true;
     }
     if (msgbox_handle_active_event(code)) {
@@ -208,7 +180,7 @@ static bool system_runtime_input_try_top_event(lv_event_code_t code) {
 }
 
 /**
- * @brief Open the assistant on long press, or send the event to the current app.
+ * @brief Send the event to the current app.
  * @param[in] raw_event 原始系统事件值，仅用于日志。
  * @param[in] code 待发送的 LVGL 事件码。
  * @return `true` 表示发送成功，`false` 表示当前页不可用。
@@ -219,20 +191,6 @@ static bool system_runtime_input_send_event_to_app(uint32_t raw_event, lv_event_
 
     if (current_app != NULL && current_app->use_top_layer) {
         return true;
-    }
-
-    if (code == LV_EVENT_LONG_PRESSED && system_get_btconn_state()) {
-        if (!assistant_open()) {
-            return false;
-        }
-        if (assistant_is_open()) {
-            if (floatair_lcd_get_state() == LCD_OFF) {
-                floatair_lcd_set_state(LCD_ON);
-                system_report_sys_state(1);
-            }
-            app_sleep_timer_reset();
-            return true;
-        }
     }
 
     obj = system_runtime_input_get_current_page_root();
@@ -268,6 +226,28 @@ static bool system_runtime_input_send_sys_state_to_app(uint8_t state) {
     return true;
 }
 
+/** Toggle the screen and use the normal avatar and audio state path. */
+static void system_runtime_input_toggle_screen(const char* source) {
+    uint8_t next_state = (floatair_lcd_get_state() == LCD_OFF) ? 1 : 0;
+
+    floatair_info("%s double-tap: screen state -> %u", source, (unsigned)next_state);
+    system_set_sys_state(next_state);
+    (void)system_runtime_input_send_sys_state_to_app(next_state);
+}
+
+/** Consume double-taps before page input, and ignore other input while off. */
+static bool system_touch_handle_screen(uint8_t event, const char* source, bool double_tap) {
+    if (double_tap) {
+        system_runtime_input_toggle_screen(source);
+        return true;
+    }
+    if (floatair_lcd_get_state() == LCD_OFF) {
+        floatair_info("lcd off, ignore %s touch event %u", source, (unsigned)event);
+        return true;
+    }
+    return false;
+}
+
 /**
  * @brief 处理系统触摸事件并向当前页面分发。
  * @param[in] event 系统触摸事件值。
@@ -276,9 +256,7 @@ static bool system_runtime_input_send_sys_state_to_app(uint8_t state) {
 bool system_touch_event(uint8_t event) {
     lv_event_code_t code = system_runtime_touch_event_to_lvgl(event);
 
-    if (system_touch_lcd_off_blocked(event,
-                                     "remote",
-                                     event == SYSTEM_TOUCH_EVENT_DCLICKED)) {
+    if (system_touch_handle_screen(event, "remote", event == SYSTEM_TOUCH_EVENT_DCLICKED)) {
         return true;
     }
 
@@ -313,9 +291,7 @@ bool system_touch_event_convert(uint8_t event) {
         return true;
     }
 
-    if (system_touch_lcd_off_blocked(event,
-                                     "force",
-                                     event == SET_FORCE_DOUBLE_CLICK)) {
+    if (system_touch_handle_screen(event, "force", event == SET_FORCE_DOUBLE_CLICK)) {
         return true;
     }
 
@@ -349,8 +325,6 @@ bool system_touch_event_convert(uint8_t event) {
  * @return `true` 表示事件已处理，`false` 表示处理失败。
  */
 bool system_imu_event_convert_to_touch(uint8_t event) {
-    uint8_t next_state = 0;
-
     if (event != SET_IMU_SINGLE_TAP && event != SET_IMU_DOUBLE_TAP) {
         floatair_err("imu event %d not support", event);
         return false;
@@ -360,10 +334,7 @@ bool system_imu_event_convert_to_touch(uint8_t event) {
         case SET_IMU_SINGLE_TAP:
             return true;
         case SET_IMU_DOUBLE_TAP:
-            next_state = (floatair_lcd_get_state() == LCD_OFF) ? 1 : 0;
-            system_set_sys_state(next_state);
-            system_report_sys_state(next_state);
-            (void)system_runtime_input_send_sys_state_to_app(next_state);
+            system_runtime_input_toggle_screen("imu");
             return true;
         default:
             return true;
@@ -382,11 +353,6 @@ bool system_update_imu_tilt(JYT_ELF_MQ_MSG* msg) {
     if (msg == NULL) {
         floatair_err("msg is NULL");
         return false;
-    }
-
-    if (!system_config_is_userguide_finished()) {
-        floatair_info("userguide unfinished, ignore imu_tilt %d", msg->Header.simple_data);
-        return true;
     }
 
     if (!system_config_get_head_gesture_config(&config) ||
@@ -428,6 +394,5 @@ bool system_update_imu_tilt(JYT_ELF_MQ_MSG* msg) {
     }
 
     system_set_sys_state(next_state);
-    system_report_sys_state(next_state);
     return true;
 }

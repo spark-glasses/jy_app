@@ -214,7 +214,7 @@ bool assistant_open(void) {
 }
 
 /**
- * @brief Start closing the popup; release resources after deletion.
+ * @brief Close the text popup and release its resources.
  * @param[in] report_close 是否主动上报 assistant 已关闭。
  * @return `true` when close is accepted, `false` on failure.
  */

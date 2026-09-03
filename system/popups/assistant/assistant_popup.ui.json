@@ -4,7 +4,7 @@
     "type": "container",
     "id": "root",
     "geometry": { "x": 0, "y": 0, "w": "100%", "h": "100%" },
-    "padding": [24, 24, 72, 24],
+    "padding": [24, 24, 24, 24],
     "opa": 255,
     "layout": {
       "type": "vbox",
@@ -74,12 +74,6 @@
           "cross_align": "center"
         },
         "children": [
-          {
-            "type": "container",
-            "id": "avatar_slot",
-            "size": { "w": 40, "h": 40 },
-            "opa": 0
-          },
           {
             "type": "container",
             "id": "speech_slot",

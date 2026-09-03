@@ -9,10 +9,8 @@
  */
 #include "system/system_runtime_state.h"
 
-#include "system/popups/assistant/assistant.h"
 #include "app_lcd.h"
 #include "app_def.h"
-#include "common/app_framework/app_manager.h"
 #include "common/app_framework/app_router.h"
 #include "system/popups/notify/notify.h"
 #include "common/widgets/toast.h"
@@ -54,18 +52,6 @@ static bool s_call_seen_connected = false;     ///< 当前通话流程是否出�
 static char s_call_last_number[64] = {0};      ///< 当前通话流程缓存的来电号码
 static bool s_auto_brightness_valid = false;   ///< 是否已有 ALS 自动亮度目标值。
 static uint8_t s_auto_brightness = 0;          ///< 最近一次 ALS 分档得到的自动亮度目标值。
-
-/**
- * @brief 判断当前是否存在中断后的新手教学进度。
- * @return `true` 表示存在 step1-step5 进度，`false` 表示未开始或已完成。
- */
-static bool system_runtime_state_has_userguide_progress(void) {
-    const char* progress = system_config_get_userguide();
-
-    return progress != NULL &&
-           strcmp(progress, SYSTEM_USERGUIDE_PROGRESS_FALSE) != 0 &&
-           strcmp(progress, SYSTEM_USERGUIDE_PROGRESS_TRUE) != 0;
-}
 
 /**
  * @brief 蓝牙通话建立阶段状态定义。
@@ -224,7 +210,6 @@ static void system_runtime_state_refresh_btconn_state(bool connected) {
     bool prev_connected = g_bt_connected;
     bool changed = prev_connected != connected;
     const char* current_app = app_router_get_app();
-    bool langselection_finished = system_config_get_langselection_finish();
 
     floatair_info("refresh btconn state: prev=%d, next=%d, changed=%d, app=%s, overlay_target=%d",
                   (int)prev_connected,
@@ -233,22 +218,14 @@ static void system_runtime_state_refresh_btconn_state(bool connected) {
                   current_app,
                   (int)!connected);
     if (changed && !connected) {
+        system_ui_set_avatar_listening(false);
         app_router_clear_app_config();
         system_runtime_state_reset_call_flow();
         system_notification_clear();
         toast_dismiss_active();
         (void)notify_list_close();
-        (void)assistant_close(false);
 
-        if (!langselection_finished) {
-            app_t* active_app = app_manager_current();
-            if (current_app[0] == '\0' || active_app == NULL || !active_app->use_top_layer) {
-                floatair_info("bt disconnect: language selection unfinished, route to home resolver");
-                if (!app_router_call_home()) {
-                    floatair_warn("bt disconnect: route to langselection failed, current=%s", current_app);
-                }
-            }
-        } else if (current_app[0] != '\0' && strcmp(current_app, APP_NAME_HOME) != 0) {
+        if (current_app[0] != '\0' && strcmp(current_app, APP_NAME_HOME) != 0) {
             floatair_info("bt disconnect: try switch app to home before showing overlay, current=%s", current_app);
             if (!app_router_set_app(APP_NAME_HOME, APP_ROUTER_ENTRY_LOCAL)) {
                 floatair_warn("bt disconnect: switch to home failed, current=%s", current_app);
@@ -269,22 +246,6 @@ static void system_runtime_state_refresh_btconn_state(bool connected) {
     }
 
     floatair_info("bt connection state changed: %d -> %d", (int)prev_connected, (int)connected);
-
-    if (!langselection_finished) {
-        app_t* active_app = app_manager_current();
-        if (current_app[0] == '\0' || active_app == NULL || !active_app->use_top_layer) {
-            floatair_info("bt connection state changed: language selection unfinished, route to home resolver");
-            (void)app_router_call_home();
-            return;
-        }
-    }
-
-    if (connected && system_runtime_state_has_userguide_progress()) {
-        floatair_info("bt reconnected during userguide, route to guide resume prompt");
-        (void)app_router_call_home();
-        return;
-    }
-
 }
 
 /**
@@ -388,7 +349,7 @@ bool system_update_als_raw_data(JYT_ELF_MQ_MSG* msg) {
 }
 
 /**
- * @brief Handle a keyword hit and open the assistant when Bluetooth is connected.
+ * @brief Wake the screen on a keyword hit when Bluetooth is connected.
  * @param[in] msg KWS 事件消息。
  * @return `true` 表示处理成功，`false` 表示处理失败。
  */
@@ -419,17 +380,15 @@ bool system_update_kws_state(JYT_ELF_MQ_MSG* msg) {
                   (int)floatair_lcd_get_state(),
                   current_app);
     if (!system_get_btconn_state()) {
-        floatair_info("ignore kws assistant action while bt disconnect overlay active");
+        floatair_info("ignore kws wake while bt disconnect overlay active");
         return true;
     }
 
     if (floatair_lcd_get_state() == LCD_OFF) {
         floatair_lcd_set_state(LCD_ON);
-        system_report_sys_state(1);
         app_sleep_timer_reset();
     }
 
-    (void)assistant_open();
     return true;
 }
 

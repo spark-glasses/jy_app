@@ -813,6 +813,9 @@ The install directory contains:
 Built-in operations:
 
 - Host connect / disconnect
+- Avatar: Normal / Listening. Either button turns the screen on and sets the
+  permanent footer avatar state. Listening previews its size and brightness pulse without
+  requiring microphone input or a host connection.
 - Low battery, charging, and SOC adjustment
 - Wear / remove
 - Single click, double click, triple click, long press, and swipe

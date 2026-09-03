@@ -1,36 +1,28 @@
 #include "avatar.h"
 #include "floatair_dbg.h"
+#include "lvgl/src/draw/lv_draw_private.h"
+#include "lvgl/src/draw/sw/blend/lv_draw_sw_blend_private.h"
 
-#define AVATAR_LISTENING_MIN_PERCENT 80
+#define AVATAR_LISTENING_MIN_OPA 180
+#define AVATAR_LISTENING_MAX_SIZE_PERCENT 120
 #define AVATAR_LISTENING_HALF_CYCLE_MS 650
 #define AVATAR_ENTRANCE_DURATION_MS 450
 #define AVATAR_EXIT_DURATION_MS 300
-#define AVATAR_ENTRANCE_TURN 3600
-#define AVATAR_CHECKER_COUNT 6   /* tiles across the visible hemisphere */
-#define AVATAR_EDGE_AA_PX 1.0f
-#define AVATAR_RIM_PX 1.5f
+#define AVATAR_MIN_SIZE 6
 
-/* On the 8-bit hardware display these reduce to brightness levels. */
-#define AVATAR_COLOR_BASE 0x4B6B34u
-#define AVATAR_COLOR_TILE 0xB9DC90u
-#define AVATAR_COLOR_RIM  0xC6E49Eu
-#define AVATAR_SHADE_MAX  215u   /* shadow alpha on the side facing away from the light */
+/* Ordered monochrome dither. One software draw task blends each row;
+ * no image source, decoded buffer, or image cache is needed. */
+static const uint8_t avatar_bayer[4][4] = {
+    {0, 8, 2, 10}, {12, 4, 14, 6}, {3, 11, 1, 9}, {15, 7, 13, 5},
+};
 
-/*
- * The ball is two pre-rendered ARGB8888 images, generated once at creation:
- *  - ball:  a checkered sphere, rotated by the roll animation
- *  - shade: a fixed lighting overlay so the light stays put while the ball rolls
- * Each frame is therefore two image blits (one transformed) instead of a
- * rotated, corner-clipped container with a dozen children, which needs an
- * intermediate layer every frame.
- */
 struct avatar_t {
     ui_widget_t base;
     lv_obj_t* ball;
-    lv_obj_t* shade;
-    lv_draw_buf_t* ball_buf;
-    lv_draw_buf_t* shade_buf;
     int32_t size;
+    int32_t angle;
+    lv_opa_t brightness;
+    bool draw_logged;
     avatar_state_t state;
     avatar_animation_complete_cb_t motion_completion;
     void* motion_user_data;
@@ -43,103 +35,86 @@ struct avatar_t {
     uint32_t motion_update_count;
 };
 
-/* Integer square root; keeps the texture generator free of libm. */
-static uint32_t avatar_isqrt(uint32_t v) {
-    uint32_t r = 0;
-    uint32_t bit = 1u << 30;
-    while (bit > v) {
-        bit >>= 2;
-    }
-    while (bit != 0) {
-        if (v >= r + bit) {
-            v -= r + bit;
-            r = (r >> 1) + bit;
-        } else {
-            r >>= 1;
-        }
-        bit >>= 2;
-    }
-    return r;
-}
+typedef struct {
+    lv_draw_custom_dsc_t custom;
+    int32_t size;
+    int32_t angle;
+    lv_opa_t brightness;
+    bool log_draw;
+} avatar_draw_dsc_t;
 
-/* sqrt(x) for x in [0, 1]. */
-static float avatar_sqrt_unit(float x) {
-    if (x <= 0.0f) {
-        return 0.0f;
-    }
-    if (x >= 1.0f) {
-        return 1.0f;
-    }
-    /* Q16 in, Q16 out: sqrt(x * 2^32) = sqrt(x) * 2^16 */
-    return (float)avatar_isqrt((uint32_t)(x * 65536.0f) << 16) / 65536.0f;
-}
-
-/* atan(t) for |t| <= 1, max error ~0.005 rad. */
-static float avatar_atan_unit(float t) {
-    float a = t < 0.0f ? -t : t;
-    return t * (0.7853982f + 0.273f * (1.0f - a));
-}
-
-static float avatar_atan(float t) {
-    if (t > 1.0f) {
-        return 1.5707963f - avatar_atan_unit(1.0f / t);
-    }
-    if (t < -1.0f) {
-        return -1.5707963f - avatar_atan_unit(1.0f / t);
-    }
-    return avatar_atan_unit(t);
-}
-
-static void avatar_render_textures(lv_draw_buf_t* ball, lv_draw_buf_t* shade, int32_t size) {
-    const float radius = (float)size * 0.5f;
-    const float tile_angle = 3.1415927f / AVATAR_CHECKER_COUNT;
-    /* Light from the upper left, toward the viewer. Roughly unit length. */
-    const float lx = -0.55f;
-    const float ly = -0.45f;
-    const float lz = 0.70f;
+static void avatar_draw_rows(lv_draw_unit_t* unit, const void* descriptor, const lv_area_t* bounds) {
+    const avatar_draw_dsc_t* avatar = descriptor;
+    int32_t size = avatar->size;
+    int32_t radius_squared = size * size;
+    int32_t sine = lv_trigo_sin(avatar->angle);
+    int32_t cosine = lv_trigo_sin(avatar->angle + 90);
+    uint32_t started = lv_tick_get();
+    /* Chunk larger avatars too, without a variable-size stack allocation. */
+    lv_opa_t row[40];
+    lv_draw_sw_blend_dsc_t blend = {0};
+    blend.color = lv_color_white();
+    blend.opa = LV_OPA_COVER;
+    blend.mask_buf = row;
+    blend.mask_res = LV_DRAW_SW_MASK_RES_CHANGED;
 
     for (int32_t y = 0; y < size; y++) {
-        uint32_t* ball_row = (uint32_t*)(ball->data + (uint32_t)y * ball->header.stride);
-        uint32_t* shade_row = (uint32_t*)(shade->data + (uint32_t)y * shade->header.stride);
-        for (int32_t x = 0; x < size; x++) {
-            /* Unit-sphere coordinates of this pixel centre. */
-            float nx = ((float)x + 0.5f - radius) / radius;
-            float ny = ((float)y + 0.5f - radius) / radius;
-            float d2 = nx * nx + ny * ny;
-            /* Distance inside the rim in pixels, good enough near the edge. */
-            float edge = (1.0f - d2) * radius * 0.5f;
-            uint32_t cov;
-
-            if (edge <= 0.0f) {
-                ball_row[x] = 0;
-                shade_row[x] = 0;
-                continue;
+        for (int32_t first_x = 0; first_x < size; first_x += (int32_t)sizeof(row)) {
+            int32_t width = LV_MIN((int32_t)sizeof(row), size - first_x);
+            for (int32_t i = 0; i < width; i++) {
+                int32_t x = first_x + i;
+                int32_t dx = 2 * x + 1 - size;
+                int32_t dy = 2 * y + 1 - size;
+                int32_t depth = radius_squared - dx * dx - dy * dy;
+                bool lit = false;
+                if (depth > 0) {
+                    int32_t rx = (dx * cosine + dy * sine) >> LV_TRIGO_SHIFT;
+                    int32_t ry = (dy * cosine - dx * sine) >> LV_TRIGO_SHIFT;
+                    int32_t light = LV_CLAMP(32, 148 - (rx + ry) * 50 / size + depth * 44 / radius_squared, 224);
+                    int32_t coverage = LV_MIN(255, depth * 255 / (4 * size));
+                    /* Keep dots fixed while the shading rotates. */
+                    lit = light * coverage / 255 > avatar_bayer[y & 3][x & 3] * 16 + 8;
+                }
+                /* Put brightness in the mask to avoid multiplying opacity twice. */
+                row[i] = lit ? avatar->brightness : 0;
             }
-            cov = edge >= AVATAR_EDGE_AA_PX ? 255u : (uint32_t)(edge / AVATAR_EDGE_AA_PX * 255.0f);
-
-            float nz = avatar_sqrt_unit(1.0f - d2);
-            float depth = nz < 0.02f ? 0.02f : nz;
-            float lon = avatar_atan(nx / depth);
-            float lat_base = avatar_sqrt_unit(1.0f - ny * ny);
-            float lat = avatar_atan(ny / (lat_base < 0.02f ? 0.02f : lat_base));
-            int32_t lon_i = (int32_t)(lon / tile_angle + 64.0f);
-            int32_t lat_i = (int32_t)(lat / tile_angle + 64.0f);
-            bool light_tile = ((lon_i + lat_i) & 1) != 0;
-            uint32_t color = edge < AVATAR_RIM_PX ? AVATAR_COLOR_RIM
-                             : light_tile          ? AVATAR_COLOR_TILE
-                                                   : AVATAR_COLOR_BASE;
-            ball_row[x] = (cov << 24) | color;
-
-            float lambert = nx * lx + ny * ly + nz * lz;
-            if (lambert < 0.0f) {
-                lambert = 0.0f;
-            }
-            float dark = 1.0f - lambert;
-            dark = dark * dark; /* keep the lit side clean, darken past the terminator */
-            uint32_t shade_a = (uint32_t)(dark * (float)AVATAR_SHADE_MAX) * cov / 255u;
-            shade_row[x] = shade_a << 24; /* black */
+            lv_area_t area = {
+                .x1 = bounds->x1 + first_x, .y1 = bounds->y1 + y,
+                .x2 = bounds->x1 + first_x + width - 1, .y2 = bounds->y1 + y,
+            };
+            blend.blend_area = &area;
+            blend.mask_area = &area;
+            blend.mask_stride = width;
+            lv_draw_sw_blend(unit, &blend);
         }
     }
+    if (avatar->log_draw) {
+        floatair_info("avatar batched draw size=%ld row_bytes=%u cost_ms=%lu",
+                      (long)size, (unsigned)sizeof(row), (unsigned long)lv_tick_elaps(started));
+    }
+}
+
+static void avatar_on_draw(lv_event_t* event) {
+    avatar_t* avatar = lv_event_get_user_data(event);
+    lv_layer_t* layer = lv_event_get_layer(event);
+    lv_area_t bounds;
+    lv_obj_get_coords(avatar->ball, &bounds);
+    avatar_draw_dsc_t* dsc = lv_malloc_zeroed(sizeof(*dsc));
+    if (dsc == NULL) {
+        return;
+    }
+    dsc->custom.base.dsc_size = sizeof(*dsc);
+    dsc->custom.draw_cb = avatar_draw_rows;
+    /* Snapshot values: the task does not retain the widget or a stack pointer. */
+    dsc->size = lv_area_get_width(&bounds);
+    dsc->angle = avatar->angle;
+    dsc->brightness = avatar->brightness;
+    dsc->log_draw = !avatar->draw_logged;
+    lv_draw_task_t* task = lv_draw_add_task(layer, &bounds);
+    task->type = LV_DRAW_TASK_TYPE_CUSTOM;
+    task->draw_dsc = dsc;
+    lv_draw_finalize_task_creation(layer, task);
+    avatar->draw_logged = true;
 }
 
 static void avatar_trace_roll_start(avatar_t* avatar, uint32_t duration_ms) {
@@ -161,15 +136,19 @@ static void avatar_trace_roll_end(avatar_t* avatar, const char* result) {
                   (long)avatar->motion_progress);
 }
 
-static void avatar_set_zoom(avatar_t* avatar, uint32_t zoom) {
-    lv_image_set_scale(avatar->ball, zoom);
-    lv_image_set_scale(avatar->shade, zoom);
-}
-
-static void avatar_animate_scale(void* var, int32_t value) {
+static void avatar_animate_listening(void* var, int32_t value) {
     avatar_t* avatar = var;
     if (lv_obj_is_visible(avatar->base.obj)) {
-        avatar_set_zoom(avatar, LV_SCALE_NONE * value / 100);
+        int32_t max_size = avatar->size * AVATAR_LISTENING_MAX_SIZE_PERCENT / 100;
+        int32_t size = avatar->size + (max_size - avatar->size) * value / 1000;
+        lv_opa_t brightness = LV_OPA_COVER - (LV_OPA_COVER - AVATAR_LISTENING_MIN_OPA) * value / 1000;
+
+        /* Resize the centered ball; keep its footer slot and roll position fixed. */
+        lv_obj_set_size(avatar->ball, size, size);
+        if (avatar->brightness != brightness) {
+            avatar->brightness = brightness;
+            lv_obj_invalidate(avatar->ball);
+        }
     }
 }
 
@@ -185,10 +164,12 @@ static void avatar_animate_roll(void* var, int32_t value) {
 
     avatar->motion_progress = value;
     lv_obj_set_style_translate_x(avatar->base.obj,
-                                 avatar->motion_start_x * remaining / 1000,
-                                 LV_PART_MAIN);
-    /* Only the checker rotates; the lighting overlay stays fixed. */
-    lv_image_set_rotation(avatar->ball, -AVATAR_ENTRANCE_TURN * remaining / 1000);
+                                 avatar->motion_start_x * remaining / 1000, LV_PART_MAIN);
+    int32_t angle = value * 360 / 1000;
+    if (angle != avatar->angle) {
+        avatar->angle = angle;
+        lv_obj_invalidate(avatar->ball);
+    }
 }
 
 static void avatar_roll_complete(lv_anim_t* animation) {
@@ -205,8 +186,10 @@ static void avatar_roll_complete(lv_anim_t* animation) {
 }
 
 static void avatar_apply_state(avatar_t* avatar) {
-    lv_anim_delete(avatar, avatar_animate_scale);
-    avatar_set_zoom(avatar, LV_SCALE_NONE);
+    lv_anim_delete(avatar, avatar_animate_listening);
+    avatar->brightness = LV_OPA_COVER;
+    lv_obj_set_size(avatar->ball, avatar->size, avatar->size);
+    lv_obj_invalidate(avatar->ball);
 
     if (avatar->exiting || avatar->state != AVATAR_STATE_LISTENING ||
         ui_widget_is_hidden(UI_WIDGET(avatar))) {
@@ -216,8 +199,8 @@ static void avatar_apply_state(avatar_t* avatar) {
     lv_anim_t animation;
     lv_anim_init(&animation);
     lv_anim_set_var(&animation, avatar);
-    lv_anim_set_exec_cb(&animation, avatar_animate_scale);
-    lv_anim_set_values(&animation, 100, AVATAR_LISTENING_MIN_PERCENT);
+    lv_anim_set_exec_cb(&animation, avatar_animate_listening);
+    lv_anim_set_values(&animation, 0, 1000);
     lv_anim_set_duration(&animation, AVATAR_LISTENING_HALF_CYCLE_MS);
     lv_anim_set_playback_duration(&animation, AVATAR_LISTENING_HALF_CYCLE_MS);
     lv_anim_set_repeat_count(&animation, LV_ANIM_REPEAT_INFINITE);
@@ -231,56 +214,14 @@ static void avatar_on_delete(lv_event_t* event) {
     if (lv_anim_get(avatar, avatar_animate_roll) != NULL) {
         avatar_trace_roll_end(avatar, "cancelled");
     }
-    lv_anim_delete(avatar, avatar_animate_scale);
+    lv_anim_delete(avatar, avatar_animate_listening);
     lv_anim_delete(avatar, avatar_animate_roll);
-    /* Children are deleted after this event; detach the buffers first. */
-    if (avatar->ball != NULL) {
-        lv_image_set_src(avatar->ball, NULL);
-    }
-    if (avatar->shade != NULL) {
-        lv_image_set_src(avatar->shade, NULL);
-    }
-    if (avatar->ball_buf != NULL) {
-        lv_draw_buf_destroy(avatar->ball_buf);
-    }
-    if (avatar->shade_buf != NULL) {
-        lv_draw_buf_destroy(avatar->shade_buf);
-    }
     lv_obj_set_user_data(avatar->base.obj, NULL);
     lv_free(avatar);
 }
 
-static lv_obj_t* avatar_create_layer(lv_obj_t* root, lv_draw_buf_t* buf, int32_t size) {
-    lv_obj_t* img = lv_image_create(root);
-    if (img == NULL) {
-        return NULL;
-    }
-    lv_obj_remove_style_all(img);
-    lv_obj_remove_flag(img, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_size(img, size, size);
-    lv_image_set_src(img, buf);
-    lv_image_set_pivot(img, size / 2, size / 2);
-    lv_image_set_antialias(img, true);
-    lv_obj_center(img);
-    return img;
-}
-
-static bool avatar_create_texture(avatar_t* avatar, lv_obj_t* root, int32_t size) {
-    avatar->size = size;
-    avatar->ball_buf = lv_draw_buf_create((uint32_t)size, (uint32_t)size, LV_COLOR_FORMAT_ARGB8888, 0);
-    avatar->shade_buf = lv_draw_buf_create((uint32_t)size, (uint32_t)size, LV_COLOR_FORMAT_ARGB8888, 0);
-    if (avatar->ball_buf == NULL || avatar->shade_buf == NULL) {
-        return false;
-    }
-    avatar_render_textures(avatar->ball_buf, avatar->shade_buf, size);
-
-    avatar->ball = avatar_create_layer(root, avatar->ball_buf, size);
-    avatar->shade = avatar_create_layer(root, avatar->shade_buf, size);
-    return avatar->ball != NULL && avatar->shade != NULL;
-}
-
 avatar_t* avatar_create(lv_obj_t* parent, int32_t size) {
-    if (size < AVATAR_CHECKER_COUNT) {
+    if (size < AVATAR_MIN_SIZE) {
         return NULL;
     }
     if (parent == NULL) {
@@ -301,21 +242,24 @@ avatar_t* avatar_create(lv_obj_t* parent, int32_t size) {
     }
     lv_obj_remove_style_all(root);
     lv_obj_remove_flag(root, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(root, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
     lv_obj_set_size(root, size, size);
 
-    if (!avatar_create_texture(avatar, root, size)) {
-        if (avatar->ball_buf != NULL) {
-            lv_draw_buf_destroy(avatar->ball_buf);
-        }
-        if (avatar->shade_buf != NULL) {
-            lv_draw_buf_destroy(avatar->shade_buf);
-        }
+    avatar->ball = lv_obj_create(root);
+    if (avatar->ball == NULL) {
         lv_obj_delete(root);
         lv_free(avatar);
         return NULL;
     }
+    lv_obj_remove_style_all(avatar->ball);
+    lv_obj_remove_flag(avatar->ball, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_size(avatar->ball, size, size);
+    lv_obj_center(avatar->ball);
+    lv_obj_add_event_cb(avatar->ball, avatar_on_draw, LV_EVENT_DRAW_MAIN, avatar);
 
     ui_widget_init(&avatar->base, root, UI_WIDGET_TYPE_AVATAR);
+    avatar->size = size;
+    avatar->brightness = LV_OPA_COVER;
     avatar->state = AVATAR_STATE_NORMAL;
     avatar->motion_completion = NULL;
     avatar->motion_user_data = NULL;
@@ -423,6 +367,15 @@ void avatar_set_visible(avatar_t* avatar, bool visible) {
     if (!ui_widget_is_valid(UI_WIDGET(avatar)) ||
         ui_widget_is_hidden(UI_WIDGET(avatar)) == !visible) {
         return;
+    }
+    if (!visible) {
+        if (lv_anim_get(avatar, avatar_animate_roll) != NULL) {
+            avatar_trace_roll_end(avatar, "cancelled");
+        }
+        lv_anim_delete(avatar, avatar_animate_roll);
+        avatar->motion_completion = NULL;
+        avatar->motion_user_data = NULL;
+        avatar->exiting = false;
     }
     ui_widget_set_visible(UI_WIDGET(avatar), visible);
     avatar_apply_state(avatar);

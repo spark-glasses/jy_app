@@ -4,8 +4,13 @@ Spark uses the internal app name `home`. The router registers this app in place
 of the vendor Home menu. `app.c` opens the root page, and `view.c` shows `hello`
 with the shared label widget. The framework owns and destroys the page objects.
 
-Language selection and the optional guide still run before Home. System status
-bars, connection overlays, notifications, and calls keep their existing behavior.
+Startup selects English (`en-US`) and opens Spark. The language selection and
+guide apps are not registered, and guide commands are not handled. Saved setup
+progress does not block head gestures, sleep, notifications, or phone commands.
+System status bars, connection overlays, notifications, and calls remain available.
+Head-up and head-down control load as disabled. Touchpad double-tap toggles the
+screen before page or popup input. IMU double-tap uses the same toggle. Screen
+state drives the footer avatar and the phone's mic capture.
 The page has no app launcher or swipe actions. Other app routes remain available
 to phone commands.
 
@@ -32,14 +37,14 @@ cd simulator/FloatairSimulator/build-macos-llvm
 ./floatair_simulator
 ```
 
-A rebuild refreshes `jyt_d/` and resets setup. Restarting the existing executable
-without a rebuild retains the saved setup state.
+A rebuild refreshes `jyt_d/`. Startup and factory reset select English and disable
+the guides, including when an older saved configuration has unfinished setup.
 
 Run `simulator/FloatairSimulator/simulator_event_panel.py` with a Python that has
-Tk support. On first launch, use Long Press to confirm English, then Host
-Connected to dismiss the connection overlay. Slide Forward and Slide Backward
+Tk support. On first launch, English is already selected. Use Host Connected to
+dismiss the connection overlay. Slide Forward and Slide Backward
 must leave `hello` visible. Calls and Host Disconnected must still show their
-normal popups. Restarting must retain the selected language.
+normal popups. Restarting must use English without a setup screen.
 
 The simulator window's TCP status refers to the phone test server. The event
 panel can simulate a Host connection while that TCP server is disconnected.

@@ -16,16 +16,16 @@ typedef enum {
     AVATAR_STATE_LISTENING,
 } avatar_state_t;
 
-/** Create a normal avatar drawn with LVGL objects. */
+/** Create a dithered avatar drawn in one LVGL task, without image buffers. */
 avatar_t* avatar_create(lv_obj_t* parent, int32_t size);
 
-/** Roll the avatar in from the left edge without changing its visual state. */
+/** Roll in from the left without changing the visual state. */
 void avatar_play_entrance(avatar_t* avatar,
                           avatar_entrance_complete_cb_t completion,
                           void* user_data);
 
 /**
- * Roll out to the left and stop pulsing. The widget is not deleted.
+ * Roll out to the left and stop the listening pulse. The widget is not deleted.
  * Completion runs once at the end and may delete the widget.
  * Repeating exit keeps the current animation and callback.
  * Entrance or deletion cancels exit without calling its completion.
@@ -35,10 +35,10 @@ bool avatar_play_exit(avatar_t* avatar,
                       avatar_animation_complete_cb_t completion,
                       void* user_data);
 
-/** Select the visual state. Repeating the current state preserves the animation. */
+/** Listening pulses size and brightness. Repeating the current state preserves the animation. */
 void avatar_set_state(avatar_t* avatar, avatar_state_t state);
 
-/** Show or hide the avatar and start or stop its animation. State is retained. */
+/** Hide cancels motion and pulsing without a completion callback. State is retained. */
 void avatar_set_visible(avatar_t* avatar, bool visible);
 
 /* Use UI_WIDGET(avatar) for layout and deletion. Parent deletion also cleans up. */

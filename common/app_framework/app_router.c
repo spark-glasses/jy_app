@@ -15,10 +15,8 @@
 #include "common/app_framework/app_manager.h"
 #include "common/widgets/status_bar.h"
 #include "gallery/gallery.h"
-#include "guide/guide.h"
 #include "spark/spark.h"
 #include "imagefusion/imagefusion.h"
-#include "langselection/langselection.h"
 #include "music/music.h"
 #include "navigation/navigation.h"
 #include "prompter_pro/prompter.h"
@@ -61,9 +59,6 @@ static bool app_router_should_block_by_bt_disconnect(void) {
     if (system_get_btconn_state()) {
         return false;
     }
-    if (!system_config_get_langselection_finish()) {
-        return false;
-    }
     if (g_router_curapp[0] == '\0') {
         return false;
     }
@@ -79,18 +74,9 @@ static bool app_router_should_block_by_bt_disconnect(void) {
  * @return 返回首页应用名称；配置异常时返回 `NULL`。
  */
 static const char* app_router_resolve_home(void) {
-    const char* home = APP_NAME_HOME;
-
-    if (!system_config_get_langselection_finish()) {
-        home = APP_NAME_LANGSELECTION;
-    } else if (g_router_app_platform == APP_ROUTER_APP_PLATFORM_NONE) {
-        home = APP_NAME_HOME;
-    } else if (g_router_app_platform == APP_ROUTER_APP_PLATFORM_WATCH) {
-        home = APP_NAME_TRANSCRIBE;
-    } else if (!system_config_is_userguide_finished()) {
-        home = APP_NAME_GUIDE;
-    }
-    return home;
+    return g_router_app_platform == APP_ROUTER_APP_PLATFORM_WATCH
+               ? APP_NAME_TRANSCRIBE
+               : APP_NAME_HOME;
 }
 
 /**
@@ -149,20 +135,12 @@ static bool app_router_register_apps(void) {
         floatair_err("navigation app register failed");
         return false;
     }
-    if (!guide_app_register()) {
-        floatair_err("guide app register failed");
-        return false;
-    }
     if (!music_app_register()) {
         floatair_err("music app register failed");
         return false;
     }
     if (!reader_app_register()) {
         floatair_err("reader app register failed");
-        return false;
-    }
-    if (!langselection_app_register()) {
-        floatair_err("langselection app register failed");
         return false;
     }
     if (!ai_app_register()) {
@@ -309,7 +287,6 @@ bool app_router_set_app(const char* targetapp, app_router_entry_t mode) {
     notify_mode_t active_notify_mode = NOTIFY_MODE_MESSAGE;
     bool ret = false;
     bool had_current_app = false;
-    bool suppress_view_change_report = false;
     char previous_app[MSG_STR_MAX_LEN] = {0};
 
     floatair_assert(targetapp != NULL, "targetapp is NULL");
@@ -379,12 +356,8 @@ bool app_router_set_app(const char* targetapp, app_router_entry_t mode) {
     ret = app_manager_switch(targetapp);
     if (ret) {
         snprintf(g_router_curapp, sizeof(g_router_curapp), "%s", targetapp);
-        suppress_view_change_report = !system_config_is_userguide_finished();
-        if (g_router_entry_mode == APP_ROUTER_ENTRY_LOCAL &&
-            !suppress_view_change_report) {
+        if (g_router_entry_mode == APP_ROUTER_ENTRY_LOCAL) {
             system_report_view_change(targetapp);
-        } else if (suppress_view_change_report) {
-            floatair_info("router suppress guide view change report for app %s", targetapp);
         } else {
             floatair_info("router suppress view change report for remote app %s", targetapp);
         }

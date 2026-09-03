@@ -28,29 +28,6 @@ bool assistant_open_cmd(mpack_node_t node, msg_pack_t* msg) {
 }
 
 /**
- * @brief Set the avatar state: 0 is normal, 1 is listening.
- * @param[in] node Message data with the required state field.
- * @param[in,out] msg Message context used for the acknowledgement.
- * @return Result of sending the acknowledgement.
- */
-bool assistant_set_state_cmd(mpack_node_t node, msg_pack_t* msg) {
-    uint8_t state = 0;
-
-    floatair_assert(msg != NULL, "msg is NULL");
-
-    if (!app_msg_get_u8(node, false, "state", &state) ||
-        mpack_node_error(node) != mpack_ok || state > 1) {
-        return app_mpack_send_ack(msg, ErrBadParam);
-    }
-    if (!assistant_is_open()) {
-        return app_mpack_send_ack(msg, ErrNotReady);
-    }
-
-    assistant_set_listening(state == 1);
-    return app_mpack_send_ack(msg, Dp_ErrNone);
-}
-
-/**
  * @brief 处理 assistant 弹窗 STT 文本更新命令。
  * @param[in] node 消息 payload 数据节点。
  * @param[in,out] msg 消息上下文。

@@ -9,7 +9,6 @@
  */
 #include "system/system.h"
 
-#include "system/popups/assistant/assistant.h"
 #include "system/popups/notify_list/notify_list.h"
 
 #include <stdbool.h>
@@ -50,6 +49,7 @@ static bool system_runtime_misc_system_control_allowed(const msg_pack_t* msg,
         "sendTouchEvent",
         "sendHeartbeat",
         "sendKeepAlive",
+        "setAssistantState",
         "setProgressVisible",
         "setUploadProgressVisible",
     };
@@ -65,25 +65,6 @@ static bool system_runtime_misc_system_control_allowed(const msg_pack_t* msg,
                                            common_cmds,
                                            sizeof(common_cmds) / sizeof(common_cmds[0])) ||
            system_runtime_misc_cmd_in_list(msg->cmd, extra_cmds, extra_count);
-}
-
-/**
- * @brief 判断 popup 期间是否允许处理指定 SystemInd 回包。
- * @param[in] msg 已解析的 host 消息头。
- * @return `true` 表示允许继续处理，`false` 表示应直接返回 `ErrNotReady`。
- */
-static bool system_runtime_misc_system_ind_allowed(const msg_pack_t* msg) {
-    if (msg == NULL || msg->id != APP_MSG_ID_SYSTEM) {
-        return false;
-    }
-    if (strcmp(msg->biz, "SystemInd") != 0) {
-        return false;
-    }
-    if (strcmp(msg->cmd, "onKeywordSpotting") != 0) {
-        return false;
-    }
-
-    return msg->type == MSG_TYPE_ACK || msg->type == MSG_TYPE_NAK;
 }
 
 /**
@@ -129,26 +110,6 @@ bool system_host_message_allowed_when_lcd_off(const msg_pack_t* msg) {
     }
 
     return false;
-}
-
-/**
- * @brief 判断 assistant popup 激活时是否允许处理指定消息。
- * @param[in] msg 已解析的 host 消息头。
- * @return `true` 表示允许处理，`false` 表示应直接返回 `ErrNotReady`。
- */
-static bool system_runtime_misc_assistant_msg_allowed(const msg_pack_t* msg) {
-    static const char* const assistant_cmds[] = {
-        "openAssistant",
-        "setAssistantState",
-        "updateAssistantSttInfo",
-        "closeAssistant",
-    };
-
-    return system_runtime_misc_system_control_allowed(
-               msg,
-               assistant_cmds,
-               sizeof(assistant_cmds) / sizeof(assistant_cmds[0])) ||
-           system_runtime_misc_system_ind_allowed(msg);
 }
 
 /**
@@ -198,9 +159,6 @@ bool system_host_message_allowed_when_popup_active(const msg_pack_t* msg) {
         return false;
     }
 
-    if (assistant_is_open()) {
-        return system_runtime_misc_assistant_msg_allowed(msg);
-    }
     if (notify_list_is_open()) {
         return system_runtime_misc_notify_list_msg_allowed(msg);
     }

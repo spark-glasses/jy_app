@@ -61,8 +61,16 @@ void floatair_lcd_set_state(lcd_state_t state)
         system_update_time();
         floatair_lcd_invalidate_full_display();
         system_ui_flush_pending_after_screen_on();
+        /* Start the roll after the blocking display wake and refresh. */
+        system_ui_set_avatar_visible(true);
     } else {
+        system_ui_set_avatar_visible(false);
         floatair_lcd_set_brightness(0);
+    }
+    if (system_get_btconn_state()) {
+        (void)system_report_sys_state(state == LCD_ON ? 1 : 0);
+    }
+    if (state == LCD_OFF) {
         system_request_os_sleep(true);
     }
 }
