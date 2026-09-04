@@ -116,10 +116,14 @@ on_back       页面自定义返回；返回 true 表示已消费
 
 新增 App 时通常需要：
 
-1. 将 App 源码放入 `apps/<app_name>/`，构建系统会自动收集源码与 UI 资源。
-2. 在 `app_router.c` 引入 app 头文件并注册 `*_app_register()`。
-3. 确认 `*_app_register()` 已在 `app_router_init()` 注册。
+1. 在需要启用该模块的 `products/<product>/product.json` 中加入模块目录。
+2. 在同一产品清单的 `apps` 中声明逻辑 App 的 name、msgid、角色和通用能力。
+3. 独立实现模块使用默认 `*_app_register()` 约定；复用 `apps/common/` 运行时的入口使用 `registration: "descriptor"` 导出静态 profile 描述符。
 4. 检查首页配置、远端 `setView` 名称和退出返回首页行为。
+
+产品清单使用正向模块列表。未列入清单的 `apps/<app>/` 不参与源码和 UI 编译，公共路由通过构建目录中生成的注册表统一注册模块，不保存具体 App 列表。
+
+`apps/common/` 只保存 App 层真正共享的运行时、视图与控件实现，不能包含具体产品名、私有 App name/msgid 或产品选择判断。产品通过 `common_modules` 正向选择需要的共享子模块，具体入口身份放在独立 App 目录中，以便开源时按目录删除而不复制共享实现。
 
 ## 使用边界
 

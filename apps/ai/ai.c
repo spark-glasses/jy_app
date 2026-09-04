@@ -17,6 +17,8 @@
 #include "system/system.h"
 #include "system/system_config_json.h"
 
+extern void rpmsgttf_cache_bitmap_enable(bool enable);
+
 /**
  * @brief AI 应用消息注册项。
  */
@@ -27,58 +29,6 @@ static app_message_t ai_msg = {
 };
 
 static bool s_ai_msg_registered = false;    ///< AI 消息是否已注册
-
-static bool ai_config_is_valid_root(cJSON* root) {
-    if (!root || !cJSON_IsObject(root)) {
-        return false;
-    }
-    cJSON* fontinfo = cJSON_GetObjectItemCaseSensitive(root, "fontinfo");
-    if (!cJSON_IsObject(fontinfo)) {
-        return false;
-    }
-    cJSON* weight = cJSON_GetObjectItemCaseSensitive(fontinfo, "weight");
-    cJSON* word_space = cJSON_GetObjectItemCaseSensitive(fontinfo, "wordSpace");
-    cJSON* row_space = cJSON_GetObjectItemCaseSensitive(fontinfo, "rowSpace");
-    return cJSON_IsNumber(weight) && cJSON_IsNumber(word_space) && cJSON_IsNumber(row_space);
-}
-
-static cJSON* ai_config_create_default_root(void) {
-    cJSON* root = cJSON_CreateObject();
-    if (!root) {
-        return NULL;
-    }
-    cJSON* fontinfo = cJSON_AddObjectToObject(root, "fontinfo");
-    if (!fontinfo) {
-        cJSON_Delete(root);
-        return NULL;
-    }
-    cJSON_AddItemToObject(fontinfo, "weight", cJSON_CreateNumber(32));
-    cJSON_AddItemToObject(fontinfo, "wordSpace", cJSON_CreateNumber(0));
-    cJSON_AddItemToObject(fontinfo, "rowSpace", cJSON_CreateNumber(0));
-    return root;
-}
-
-static bool ai_config_write_default(const char* config_path) {
-    cJSON* root = ai_config_create_default_root();
-    if (!root) {
-        return false;
-    }
-    int ret = save_json(config_path, root);
-    cJSON_Delete(root);
-    return ret == 0;
-}
-
-static bool ai_config_ensure(const char* config_path) {
-    cJSON* root = load_json(config_path);
-    if (root) {
-        bool ok = ai_config_is_valid_root(root);
-        cJSON_Delete(root);
-        if (ok) {
-            return true;
-        }
-    }
-    return ai_config_write_default(config_path);
-}
 
 /**
  * @brief 注册 AI 消息处理器。
@@ -127,9 +77,6 @@ static bool ai_service_init(void) {
         return false;
     }
 
-    if (!ai_config_ensure(config_path)) {
-        return false;
-    }
     stt_service_init(config_path);
     stt_config.textMode = TEXTMODE_HISTORY;
     stt_config.transMode = TRANSMODE_SHOW_DUAL;
@@ -141,6 +88,8 @@ static bool ai_service_init(void) {
  * @return 无返回值。
  */
 static void ai_app_on_start(void) {
+    rpmsgttf_cache_bitmap_enable(true);
+
     if (!ai_msg_register_once()) {
         floatair_assert(false, "app_msg_register failed");
         return;
@@ -162,6 +111,7 @@ static void ai_app_on_stop(void) {
     ai_msg_unregister_if_needed();
     ai_stt_clear();
     stt_service_deinit();
+    rpmsgttf_cache_bitmap_enable(false);
 }
 
 static app_t s_ai_app = {

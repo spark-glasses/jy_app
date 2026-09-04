@@ -33,6 +33,7 @@
 #include "system/system_config_json.h"
 #include "system/stt_common.h"
 #include "system/system.h"
+#include "system/system_runtime_ui.h"
 
 #include <lvgl/lvgl.h>
 
@@ -171,96 +172,185 @@ static void floatair_call_minute_cbs(void) {
     }
 }
 
-static void app_msg_recv(void) {
-    while (1) {
-        OSAL_MQ_MSG *msg = OSAL_WAITING_MQ_MSG(MQ_JYT_ELFAPP_DATA_IN, CPU_SPEED_REQ_FULL);
-        if (msg) {
-            uint32_t msg_start_time_us = (uint32_t)GetTimeUs();
-            JYT_ELF_MQ_MSG* p_que_data = NULL;
-            bool handle_ret = false;
-            bool refreshed = false;
-            uint8_t msg_type = 0;
-            uint16_t event_type = 0;
-            uint16_t payload_len = 0;
-            if (msg->header.id == LMID_ELFMSG_WRAP) {
-                p_que_data=(JYT_ELF_MQ_MSG*)(msg->pdu.ptr[0]);
-                if (p_que_data) {
-                    msg_type = p_que_data->Header.msg_type;
-                    event_type = p_que_data->Header.event_type;
-                    payload_len = p_que_data->payload_len;
-                    floatair_log_elf_queue_msg_preview("recv elf wrap", p_que_data);
-                    switch (p_que_data->Header.msg_type) {
-                        case EMT_HOST_MPACK_MSG: {
-                            int q_pending = floatair_get_app_msg_queue_pending();
-                            stt_set_flow_queue_pending(q_pending);
-                            app_msg_dump_summary((char*) p_que_data->payload, p_que_data->payload_len, "mpack recv");
-                            app_msg_dump((char*) p_que_data->payload, p_que_data->payload_len, "phone msg");
-                            handle_ret = app_mpack_msg_handle((char*) p_que_data->payload, p_que_data->payload_len);
-                            break;
-                        }
-                        case EMT_SYSTEM_EVENT: {
-                            handle_ret = app_system_msg_handle(p_que_data);
-                            break;
-                        }
-                        case EMT_SYSTEM_EMERG_MSG: {
-                            handle_ret = app_emerg_msg_handle((char*) p_que_data->payload, p_que_data->payload_len);
-                            break;
-                        }
-                        case EMT_SYSTEM_EVENT_WITH_PAYLOAD: {
-                            handle_ret = app_system_msg_handle_payload(p_que_data);
-                            break;
-                        }
-                        default:
-                            floatair_err("----, msg type not support %d", p_que_data->Header.msg_type);
-                            break;
-                    }
-                } else {
-                    floatair_err("p_que_data is NULL");
+static void app_msg_handle(OSAL_MQ_MSG* msg) {
+    uint32_t msg_start_time_us = (uint32_t)GetTimeUs();
+    JYT_ELF_MQ_MSG* p_que_data = NULL;
+    bool handle_ret = false;
+    uint8_t msg_type = 0;
+    uint16_t event_type = 0;
+    uint16_t payload_len = 0;
+
+    if (msg == NULL) {
+        return;
+    }
+    if (msg->header.id == LMID_ELFMSG_WRAP) {
+        p_que_data = (JYT_ELF_MQ_MSG*)(msg->pdu.ptr[0]);
+        if (p_que_data) {
+            msg_type = p_que_data->Header.msg_type;
+            event_type = p_que_data->Header.event_type;
+            payload_len = p_que_data->payload_len;
+            floatair_log_elf_queue_msg_preview("recv elf wrap", p_que_data);
+            switch (p_que_data->Header.msg_type) {
+                case EMT_HOST_MPACK_MSG: {
+                    int q_pending = floatair_get_app_msg_queue_pending();
+                    stt_set_flow_queue_pending(q_pending);
+                    app_msg_dump_summary((char*)p_que_data->payload,
+                                         p_que_data->payload_len,
+                                         "mpack recv");
+                    app_msg_dump((char*)p_que_data->payload,
+                                 p_que_data->payload_len,
+                                 "phone msg");
+                    handle_ret = app_mpack_msg_handle((char*)p_que_data->payload,
+                                                      p_que_data->payload_len);
+                    break;
                 }
-            } else {
-                floatair_warn("unexpected mq msg id=%u size=%u in app_msg_recv",
-                              (unsigned)msg->header.id,
-                              (unsigned)msg->header.pdu_size);
-            }
-            if (!handle_ret) {
-                if (p_que_data != NULL) {
-                    floatair_log_elf_queue_msg_preview("handle ret false detail", p_que_data);
+                case EMT_SYSTEM_EVENT: {
+                    handle_ret = app_system_msg_handle(p_que_data);
+                    break;
                 }
-                floatair_err("handle ret false");
-            } else {
-                if (!floatair_lcd_is_off()) {
-                    lv_timer_handler(); // 先补刷一个，响应UI变化
-                    refreshed = true;
-                } else {
-                    floatair_info("skip lv_timer_handler while lcd off");
+                case EMT_SYSTEM_EMERG_MSG: {
+                    handle_ret = app_emerg_msg_handle((char*)p_que_data->payload,
+                                                      p_que_data->payload_len);
+                    break;
                 }
+                case EMT_SYSTEM_EVENT_WITH_PAYLOAD: {
+                    handle_ret = app_system_msg_handle_payload(p_que_data);
+                    break;
+                }
+                default:
+                    floatair_err("----, msg type not support %d",
+                                 p_que_data->Header.msg_type);
+                    break;
             }
-            /* The wrapped ELF message is heap-allocated by system_manager and
-             * passed through the MQ as a raw pointer, so the consumer must
-             * release it after handling. */
-            if (p_que_data != NULL) {
-                free(p_que_data);
-            }
-            OSAL_DELETE_MQ_MSG(msg);
-            {
-                uint32_t msg_cost_us = (uint32_t)GetTimeUs() - msg_start_time_us;
-                floatair_info("app msg recv cost %lu us/%lu ms, handle_ret=%d refreshed=%d msg_type=%u event_type=%u payload_len=%u",
-                              (unsigned long)msg_cost_us,
-                              (unsigned long)(msg_cost_us / 1000U),
-                              handle_ret ? 1 : 0,
-                              refreshed ? 1 : 0,
-                              (unsigned)msg_type,
-                              (unsigned)event_type,
-                              (unsigned)payload_len);
+        } else {
+            floatair_err("p_que_data is NULL");
+        }
+    } else {
+        floatair_warn("unexpected mq msg id=%u size=%u in app_msg_recv",
+                      (unsigned)msg->header.id,
+                      (unsigned)msg->header.pdu_size);
+    }
+    if (!handle_ret) {
+        if (p_que_data != NULL) {
+            floatair_log_elf_queue_msg_preview("handle ret false detail", p_que_data);
+        }
+        floatair_err("handle ret false");
+    }
+    /* The wrapped ELF message is heap-allocated by system_manager and
+     * passed through the MQ as a raw pointer, so the consumer must
+     * release it after handling. */
+    if (p_que_data != NULL) {
+        free(p_que_data);
+    }
+    OSAL_DELETE_MQ_MSG(msg);
+    {
+        uint32_t msg_cost_us = (uint32_t)GetTimeUs() - msg_start_time_us;
+        floatair_info("app msg recv cost %lu us/%lu ms, handle_ret=%d msg_type=%u event_type=%u payload_len=%u",
+                      (unsigned long)msg_cost_us,
+                      (unsigned long)(msg_cost_us / 1000U),
+                      handle_ret ? 1 : 0,
+                      (unsigned)msg_type,
+                      (unsigned)event_type,
+                      (unsigned)payload_len);
 #if defined(CONFIG_RPMSG_TTF_CLIENT)
-                struct mallinfo info = mallinfo();
-                floatair_info("app msg heap total=%d used=%d free=%d largest=%d ordblks=%d",
-                              info.arena,
-                              info.uordblks,
-                              info.fordblks,
-                              info.mxordblk,
-                              info.ordblks);
+        struct mallinfo info = mallinfo();
+        floatair_info("app msg heap total=%d used=%d free=%d largest=%d ordblks=%d",
+                      info.arena,
+                      info.uordblks,
+                      info.fordblks,
+                      info.mxordblk,
+                      info.ordblks);
 #endif
+    }
+}
+
+/**
+ * @brief 非阻塞消费当前 Q-8 中的全部消息。
+ * @return 本轮消费的消息数量。
+ */
+static uint32_t app_msg_drain_pending(void) {
+    uint32_t drained = 0;
+
+    while (1) {
+        int pending = floatair_get_app_msg_queue_pending();
+        int batch_count = pending;
+
+        if (pending == 0) {
+            break;
+        }
+        if (batch_count < 0) {
+            batch_count = 1;
+        }
+        for (int i = 0; i < batch_count; ++i) {
+#if defined(BUILD_NATIVE)
+            OSAL_MQ_MSG* msg = OSAL_TIMEOUT_WAITING_MQ_MSG(
+                MQ_JYT_ELFAPP_DATA_IN, CPU_SPEED_REQ_FULL, 0);
+#else
+            OSAL_MQ_MSG* msg = OSAL_WAITING_MQ_MSG(
+                MQ_JYT_ELFAPP_DATA_IN, CPU_SPEED_REQ_FULL);
+#endif
+
+            if (msg == NULL) {
+                return drained;
+            }
+            app_msg_handle(msg);
+            drained++;
+        }
+    }
+
+    return drained;
+}
+
+static void app_msg_recv(void) {
+    uint32_t refresh_start_tick = lv_tick_get();
+    uint32_t handled_since_refresh = 0;
+
+    while (1) {
+        uint32_t refresh_elapsed = lv_tick_elaps(refresh_start_tick);
+
+        if (refresh_elapsed >= LV_DEF_REFR_PERIOD) {
+            uint32_t cycle_start_tick = lv_tick_get();
+            uint32_t drained_at_deadline = 0;
+            bool forced_refresh = false;
+
+            refresh_start_tick = cycle_start_tick;
+            drained_at_deadline = app_msg_drain_pending();
+            handled_since_refresh += drained_at_deadline;
+            if (!floatair_lcd_is_off()) {
+                forced_refresh = system_ui_apply_pending_screen_refresh();
+                lv_timer_handler();
+                /*
+                 * LVGL 9 会在无效区域刷新后暂停 display refresh timer。
+                 * 周期调度需要显式提交本轮 timer/动画产生的无效区域，否则
+                 * 空闲一段时间后新建的滚动动画可能只有坐标变化而没有显示帧。
+                 *
+                 * PC 模拟器的 lv_timer_handler 已替换为向 SDL 主线程提交刷新
+                 * 请求；不能在 app 线程再次直接刷新，否则会提前消费无效区域，
+                 * 导致 SDL 主线程拿不到需要显示的画面。
+                 */
+#if !defined(BUILD_NATIVE)
+                lv_refr_now(lv_display_get_default());
+#endif
+            }
+            if (handled_since_refresh > 0 || forced_refresh) {
+                floatair_info("app refresh cycle cost=%lu ms handled=%lu drained_at_deadline=%lu forced_refresh=%d",
+                              (unsigned long)lv_tick_elaps(cycle_start_tick),
+                              (unsigned long)handled_since_refresh,
+                              (unsigned long)drained_at_deadline,
+                              forced_refresh ? 1 : 0);
+            }
+            handled_since_refresh = 0;
+            continue;
+        }
+
+        {
+            uint32_t wait_ms = LV_DEF_REFR_PERIOD - refresh_elapsed;
+            OSAL_MQ_MSG* msg = OSAL_TIMEOUT_WAITING_MQ_MSG(
+                MQ_JYT_ELFAPP_DATA_IN, CPU_SPEED_REQ_FULL, (int)wait_ms);
+
+            if (msg != NULL) {
+                app_msg_handle(msg);
+                handled_since_refresh++;
             }
         }
     }

@@ -1,0 +1,44 @@
+[
+    {
+        "biz": "Notification",
+        "cmd": "addNotification",
+        "data": {
+            "action": 0,
+            "duration": 5,
+            "id": 1,
+            "level": 1,
+            "msg": "Message",
+            "title": "Title",
+            "type": 0
+        },
+        "id": 0,
+        "name": "添加通知",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "Notification",
+        "cmd": "updateNotification",
+        "data": {
+            "action": 0,
+            "duration": 5,
+            "id": 1,
+            "level": 1,
+            "msg": "Message Updated",
+            "title": "Title Updated",
+            "type": 0
+        },
+        "id": 0,
+        "name": "更新通知",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "Notification",
+        "cmd": "removeNotification",
+        "data": {
+            "id": 1
+        },
+        "id": 0,
+        "name": "删除通知",
+        "type": "DATA_RELIABLE"
+    }
+]

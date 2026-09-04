@@ -52,6 +52,15 @@ void system_deinit(void);
 #define SYSTEM_USERGUIDE_PROGRESS_TRUE  "true"  ///< 新手引导已完成。
 
 /**
+ * @brief 磁吸附件所在的眼镜侧身份。
+ */
+typedef enum {
+    SYSTEM_ATTACHMENT_SIDE_MASTER = 0, ///< 主侧，当前硬件对应右侧。
+    SYSTEM_ATTACHMENT_SIDE_SLAVE = 1,  ///< 从侧，当前硬件对应左侧。
+    SYSTEM_ATTACHMENT_SIDE_COUNT,      ///< 可上报附件状态的侧数。
+} system_attachment_side_t;
+
+/**
  * @brief 获取新手引导进度。
  * @return 返回 `"false"`、`"step1"` 至 `"step5"` 或 `"true"`。
  */
@@ -129,6 +138,12 @@ bool system_config_set_keyword_spotting_enabled(bool keyword_spotting_enabled);
  */
 uint32_t system_config_get_kws_hit_value(void);
 /**
+ * @brief 判断 KWS 命中值是否为当前产品允许响应的值。
+ * @param[in] kws_hit_value KWS 命中值。
+ * @return `true` 表示允许响应，`false` 表示忽略。
+ */
+bool system_config_matches_kws_hit_value(uint32_t kws_hit_value);
+/**
  * @brief 获取闲置检测开关状态。
  * @return `true` 表示开启，`false` 表示关闭。
  */
@@ -195,6 +210,17 @@ uint32_t system_config_get_displaylevel(void);
  * @return `true` 表示保存成功，`false` 表示保存失败。
  */
 bool system_config_set_displaylevel(uint32_t level);
+/**
+ * @brief 获取持久化的应用垂直显示位置。
+ * @return 返回 `SYSTEM_DISPLAY_POSITION_*` 取值。
+ */
+uint32_t system_config_get_displayposition(void);
+/**
+ * @brief 设置并持久化应用垂直显示位置。
+ * @param[in] position `SYSTEM_DISPLAY_POSITION_*` 取值。
+ * @return `true` 表示保存成功，`false` 表示参数无效或保存失败。
+ */
+bool system_config_set_displayposition(uint32_t position);
 /**
  * @brief 将显示层级配置转换为实际距离值。
  * @param[in] level 显示层级值。
@@ -306,12 +332,15 @@ bool system_cfgfile_update(void);
  * @return 无返回值。
  */
 void system_cfgfile_dump(void);
-bool system_cfgfile_rebuild_default(void);
-bool system_cfgfile_reset_to_default(void);
-
-typedef bool (*system_factoryreset_handler_t)(void);
-bool system_factoryreset_register(const char* name, system_factoryreset_handler_t handler);
-void system_factoryreset_invoke(void);
+/**
+ * @brief 执行完整恢复出厂流程。
+ *
+ * 关闭屏幕后请求 OS 持久化恢复出厂标记、清除蓝牙配对信息并协调重启。
+ * 用户区格式化由 OS 在下一次启动时完成。
+ *
+ * @return `true` 表示请求已发送，`false` 表示请求发送失败。
+ */
+bool system_factoryreset_execute(void);
 
 /**
  * @brief 分发 system 模块消息命令。
@@ -366,6 +395,11 @@ bool system_report_kws_hit(void);
  */
 void system_report_kws_hit_response_finish(void);
 /**
+ * @brief 上报 assistant 已打开。
+ * @return `true` 表示上报成功，`false` 表示上报失败。
+ */
+bool system_report_assistant_open(void);
+/**
  * @brief 上报 assistant 已关闭。
  * @return `true` 表示上报成功，`false` 表示上报失败。
  */
@@ -380,12 +414,27 @@ bool system_report_guide_open(void);
  * @return `true` 表示上报成功，`false` 表示上报失败。
  */
 bool system_report_guide_close(void);
+
+#define SYSTEM_SYS_STATE_TRIGGER_PHONE_SET_VIEW       "phoneSetView"       ///< 手机 setView 命令触发。
+#define SYSTEM_SYS_STATE_TRIGGER_APP_CONFIG           "appConfig"          ///< 上位机 setAppConfig 命令触发。
+#define SYSTEM_SYS_STATE_TRIGGER_NOTIFICATION         "notification"       ///< 通知到达触发。
+#define SYSTEM_SYS_STATE_TRIGGER_REMOTE_DOUBLE_CLICK  "remoteDoubleClick"  ///< 手机远程双击触发。
+#define SYSTEM_SYS_STATE_TRIGGER_FORCE_DOUBLE_CLICK   "forceDoubleClick"   ///< 镜腿 Force 双击触发。
+#define SYSTEM_SYS_STATE_TRIGGER_IMU_DOUBLE_TAP       "imuDoubleTap"       ///< IMU 双击触发。
+#define SYSTEM_SYS_STATE_TRIGGER_IMU_HEAD_UP          "imuHeadUp"          ///< IMU 抬头触发。
+#define SYSTEM_SYS_STATE_TRIGGER_IMU_HEAD_DOWN        "imuHeadDown"        ///< IMU 低头触发。
+#define SYSTEM_SYS_STATE_TRIGGER_WEAR_ON              "wearOn"             ///< 佩戴检测到戴上触发。
+#define SYSTEM_SYS_STATE_TRIGGER_KEYWORD_SPOTTING     "keywordSpotting"    ///< 关键词唤醒触发。
+#define SYSTEM_SYS_STATE_TRIGGER_INACTIVITY_TIMEOUT   "inactivityTimeout"  ///< 无操作超时触发。
+#define SYSTEM_SYS_STATE_TRIGGER_GLASSES_CASE         "glassesCase"        ///< 收到眼镜盒附件触发。
+
 /**
  * @brief 上报系统亮灭屏状态。
- * @param[in] state 系统状态值。
+ * @param[in] state `0` 表示灭屏，`1` 表示亮屏；其他值无效。
+ * @param[in] trigger 触发本次状态变化的来源。
  * @return `true` 表示上报成功，`false` 表示上报失败。
  */
-bool system_report_sys_state(uint8_t state);
+bool system_report_sys_state(uint8_t state, const char* trigger);
 /**
  * @brief 上报充电状态。
  * @param[in] state 充电状态值。
@@ -404,12 +453,21 @@ bool system_report_battery(uint32_t battery);
  * @return `true` 表示上报成功，`false` 表示上报失败。
  */
 bool system_report_brightness(uint8_t brightness);
+/**
+ * @brief 上报指定侧的当前附件类型。
+ * @param[in] attachment_type `JYT_ATTACHMENT_TYPE` 定义的附件类型。
+ * @param[in] attachment_side 附件所在的主从侧身份。
+ * @return `true` 表示上报成功，`false` 表示附件类型、侧身份无效或上报失败。
+ */
+bool system_report_attachment_type(uint8_t attachment_type,
+                                   system_attachment_side_t attachment_side);
 
 /**
  * @brief 获取下一条上报消息序号。
  * @return 返回下一条消息序号。
  */
 uint32_t system_report_next_sequence(void);
+
 /**
  * @brief 请求底层返回最新设备状态。
  * @return `true` 表示请求已发送，`false` 表示发送失败。
@@ -452,7 +510,11 @@ void system_sync_config_to_device(void);
  */
 bool system_request_bt_visibility(uint8_t visibility);
 
-bool system_request_bt_reset_pair(void);
+/**
+ * @brief 请求 OS 执行恢复出厂流程。
+ * @return `true` 表示请求已发送，`false` 表示请求发送失败。
+ */
+bool system_request_factory_reset(void);
 /**
  * @brief 周期向底层请求最新设备时间。
  * @return 无返回值。
@@ -477,6 +539,13 @@ void app_sleep_timer_init(void);
 void app_sleep_timer_reset(void);
 
 /**
+ * @brief 更新佩戴状态并按配置的无交互超时时间重新起算。
+ * @param[in] removed `true` 表示摘下，`false` 表示已佩戴。
+ * @return 无返回值。
+ */
+void app_sleep_timer_set_wear_removed(bool removed);
+
+/**
  * @brief 打印蓝牙信息缓存。
  * @return 无返回值。
  */
@@ -494,25 +563,10 @@ void system_dump_jyt_section(void);
 uint8_t system_get_sys_state(void);
 /**
  * @brief 设置当前系统亮灭屏状态。
- * @param[in] state 目标系统状态值。
+ * @param[in] state `0` 表示灭屏，`1` 表示亮屏；其他值将被拒绝。
  * @return 无返回值。
  */
 void system_set_sys_state(uint8_t state);
-/**
- * @brief 获取设备总存储容量。
- * @return 返回总容量，单位为字节。
- */
-uint32_t system_get_rom_total(void);
-/**
- * @brief 获取设备已用存储容量。
- * @return 返回已用容量，单位为字节。
- */
-uint32_t system_get_rom_used(void);
-/**
- * @brief 获取设备剩余存储容量。
- * @return 返回剩余容量，单位为字节。
- */
-uint32_t system_get_rom_remaining(void);
 /**
  * @brief 获取制造商字符串。
  * @return 返回制造商字符串。

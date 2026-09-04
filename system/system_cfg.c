@@ -25,6 +25,9 @@ static bool config_touchpad_enabled       = false;
 static bool config_notification_enabled   = false;
 static bool config_keyword_spotting_enabled = true;
 static uint32_t config_kws_hit_value      = 5; ///< 当前产品需要响应的 KWS 命中值。
+#define SYSTEM_KWS_HIT_VALUES_MAX 8U
+static uint32_t config_kws_hit_values[SYSTEM_KWS_HIT_VALUES_MAX] = {5};
+static size_t config_kws_hit_values_count = 1;
 static bool config_idle_detection_enabled = false;
 static system_head_gesture_config_t config_head_gesture = {0};
 static uint8_t config_display_mode        = 0;
@@ -43,29 +46,12 @@ system_lcd_t config_lcd                   = {
     .ui_height = SYSTEM_LCD_UI_HEIGHT,
 };
 
-static bool simple_guide        = false;
+
 static char* user_guide         = NULL;
 static bool play_audio          = false;
 static uint32_t display_level       = 0;
+static uint32_t display_position    = SYSTEM_DISPLAY_POSITION_BOTTOM;
 static bool system_cfgfile_inited = false;
-
-static bool system_cfgfile_mkdir_parent(const char* path) {
-    if (!path || path[0] == '\0') {
-        return false;
-    }
-    const char* last = strrchr(path, '/');
-    if (!last || last == path) {
-        return false;
-    }
-    char dir[128] = {0};
-    size_t n = (size_t)(last - path);
-    if (n >= sizeof(dir)) {
-        return false;
-    }
-    memcpy(dir, path, n);
-    dir[n] = '\0';
-    return floatair_fs_mkdirs(dir) == FLOATAIR_FS_OK;
-}
 
 static void system_cfgfile_free_homeunits(void) {
     if (config_homeunits != NULL) {
@@ -200,78 +186,56 @@ static bool system_cfgfile_parse_homeunits(cJSON* root) {
     return true;
 }
 
-static cJSON* system_cfgfile_create_default_root(void) {
-    cJSON* root = cJSON_CreateObject();
-    if (!root) {
-        return NULL;
+static void system_cfgfile_parse_kws_hit_value(cJSON* root) {
+    cJSON* items = cJSON_GetObjectItemCaseSensitive(root, "kwsHitValue");
+    size_t parsed_count = 0;
+
+    if (cJSON_IsArray(items)) {
+        size_t item_count = (size_t)cJSON_GetArraySize(items);
+        for (size_t i = 0;
+             i < item_count && parsed_count < SYSTEM_KWS_HIT_VALUES_MAX;
+             ++i) {
+            cJSON* item = cJSON_GetArrayItem(items, (int)i);
+            if (!cJSON_IsNumber(item) || item->valuedouble < 0 ||
+                item->valuedouble > (double)UINT32_MAX) {
+                continue;
+            }
+            uint32_t value = (uint32_t)item->valuedouble;
+            bool duplicate = false;
+            for (size_t j = 0; j < parsed_count; ++j) {
+                if (config_kws_hit_values[j] == value) {
+                    duplicate = true;
+                    break;
+                }
+            }
+            if (!duplicate) {
+                config_kws_hit_values[parsed_count++] = value;
+            }
+        }
     }
 
-    cJSON* fontinfo = cJSON_AddObjectToObject(root, "fontinfo");
-    if (!fontinfo) {
-        cJSON_Delete(root);
-        return NULL;
+    if (parsed_count == 0) {
+        config_kws_hit_values[0] = config_kws_hit_value;
+        parsed_count = 1;
     }
-    cJSON_AddItemToObject(fontinfo, "weight", cJSON_CreateNumber(26));
-    cJSON_AddItemToObject(fontinfo, "wordSpace", cJSON_CreateNumber(0));
-    cJSON_AddItemToObject(fontinfo, "rowSpace", cJSON_CreateNumber(0));
-
-    cJSON_AddItemToObject(root, "wearDetectionEnabled", cJSON_CreateBool(true));
-    cJSON* head_gesture = cJSON_AddObjectToObject(root, "headGestureConfig");
-    if (!head_gesture) {
-        cJSON_Delete(root);
-        return NULL;
-    }
-    cJSON_AddItemToObject(head_gesture, "up_enabled", cJSON_CreateBool(false));
-    cJSON_AddItemToObject(head_gesture, "down_enabled", cJSON_CreateBool(true));
-    cJSON_AddItemToObject(head_gesture, "up_deg", cJSON_CreateNumber(25));
-    cJSON_AddItemToObject(head_gesture, "down_deg", cJSON_CreateNumber(15));
-    cJSON_AddItemToObject(head_gesture, "base_deg", cJSON_CreateNumber(0));
-
-    cJSON_AddItemToObject(root, "touchpadEnabled", cJSON_CreateBool(true));
-    cJSON_AddItemToObject(root, "notificationEnabled", cJSON_CreateBool(true));
-    cJSON_AddItemToObject(root, "keywordSpottingEnabled", cJSON_CreateBool(true));
-    cJSON_AddItemToObject(
-        root, "kwsHitValue", cJSON_CreateNumber((double)config_kws_hit_value));
-    cJSON_AddItemToObject(root, "idleDetectionEnabled", cJSON_CreateBool(true));
-    cJSON_AddItemToObject(root, "displayMode", cJSON_CreateNumber(0));
-    cJSON_AddItemToObject(root, "lcd_sleep_timeout", cJSON_CreateNumber(30));
-    cJSON_AddItemToObject(root, "deep_sleep_timeout", cJSON_CreateNumber(60));
-    cJSON_AddItemToObject(root, "inactivity_timeout", cJSON_CreateNumber(120));
-    cJSON_AddItemToObject(root, "bl_auto", cJSON_CreateBool(true));
-
-    uint32_t jb = g_section_data.jyt_default_brightness;
-    uint8_t brightness = (jb > UINT8_MAX) ? UINT8_MAX : (uint8_t)jb;
-    if (brightness == 0) {
-        brightness = 128;
-    }
-    cJSON_AddItemToObject(root, "brightness", cJSON_CreateNumber((double)brightness));
-
-    cJSON_AddItemToObject(root, "curlang", cJSON_CreateString(""));
-    cJSON_AddItemToObject(root, "homeunits", cJSON_CreateArray());
-    cJSON_AddItemToObject(root, "simpleguide", cJSON_CreateBool(true));
-    cJSON_AddItemToObject(root, "userguide", cJSON_CreateString(SYSTEM_USERGUIDE_PROGRESS_FALSE));
-    cJSON_AddItemToObject(root, "playaudio", cJSON_CreateBool(true));
-    cJSON_AddItemToObject(root, "displaylevel", cJSON_CreateNumber(1));
-    cJSON_AddItemToObject(root, "displaydistancelevel", cJSON_CreateNumber(1));
-
-    return root;
+    config_kws_hit_values_count = parsed_count;
+    config_kws_hit_value = config_kws_hit_values[0];
 }
 
-bool system_cfgfile_rebuild_default(void) {
-    const char* path = system_config_path();
-    if (!path) {
+static bool system_cfgfile_update_kws_hit_value(cJSON* root) {
+    cJSON_DeleteItemFromObjectCaseSensitive(root, "kwsHitValue");
+    cJSON* items = cJSON_AddArrayToObject(root, "kwsHitValue");
+    if (items == NULL) {
         return false;
     }
-    if (!system_cfgfile_mkdir_parent(path)) {
-        return false;
+    for (size_t i = 0; i < config_kws_hit_values_count; ++i) {
+        cJSON* item = cJSON_CreateNumber((double)config_kws_hit_values[i]);
+        if (item == NULL || !cJSON_AddItemToArray(items, item)) {
+            cJSON_Delete(item);
+            return false;
+        }
     }
-    cJSON* root = system_cfgfile_create_default_root();
-    if (!root) {
-        return false;
-    }
-    int ret = save_json(path, root);
-    cJSON_Delete(root);
-    return ret == 0;
+    return true;
 }
 
 static void system_cfgfile_clear_runtime_state(void) {
@@ -284,15 +248,8 @@ static void system_cfgfile_clear_runtime_state(void) {
         user_guide = NULL;
     }
     system_cfgfile_free_homeunits();
+    display_position = SYSTEM_DISPLAY_POSITION_BOTTOM;
     system_cfgfile_inited = false;
-}
-
-bool system_cfgfile_reset_to_default(void) {
-    if (!system_cfgfile_rebuild_default()) {
-        return false;
-    }
-    system_cfgfile_clear_runtime_state();
-    return system_cfgfile_load();
 }
 
 /**
@@ -356,6 +313,15 @@ uint32_t system_config_get_kws_hit_value(void) {
     return config_kws_hit_value;
 }
 
+bool system_config_matches_kws_hit_value(uint32_t kws_hit_value) {
+    for (size_t i = 0; i < config_kws_hit_values_count; ++i) {
+        if (config_kws_hit_values[i] == kws_hit_value) {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool system_config_get_idle_detection_enabled(void) {
     return config_idle_detection_enabled;
 }
@@ -403,6 +369,28 @@ bool system_config_set_displaylevel(uint32_t level) {
     floatair_dbg("displaylevel %" PRIu32, level);
     display_level = level;
     return system_cfgfile_update();
+}
+
+uint32_t system_config_get_displayposition(void) {
+    return display_position;
+}
+
+bool system_config_set_displayposition(uint32_t position) {
+    uint32_t previous = display_position;
+
+    if (position < (uint32_t)SYSTEM_DISPLAY_POSITION_TOP ||
+        position > (uint32_t)SYSTEM_DISPLAY_POSITION_BOTTOM) {
+        floatair_err("displayposition invalid: %" PRIu32, position);
+        return false;
+    }
+
+    display_position = position;
+    if (system_cfgfile_update()) {
+        return true;
+    }
+
+    display_position = previous;
+    return false;
 }
 
 uint16_t system_config_get_lcd_sleep_timeout(void) {
@@ -518,18 +506,7 @@ bool system_cfgfile_load(void) {
         return true;
     }
     const char* cfg_path = system_config_path();
-    cJSON* root = NULL;
-    for (int attempt = 0; attempt < 2; attempt++) {
-        root = load_json(cfg_path);
-        if (!root) {
-            floatair_err("load_json %s failed", cfg_path);
-            if (!system_cfgfile_rebuild_default()) {
-                return false;
-            }
-            continue;
-        }
-        break;
-    }
+    cJSON* root = system_config_load_json(cfg_path);
     if (!root) {
         return false;
     }
@@ -538,7 +515,7 @@ bool system_cfgfile_load(void) {
     parse_bool_key(root, "touchpadEnabled", &config_touchpad_enabled);
     parse_bool_key(root, "notificationEnabled", &config_notification_enabled);
     parse_bool_key(root, "keywordSpottingEnabled", &config_keyword_spotting_enabled);
-    parse_u32_key(root, "kwsHitValue", &config_kws_hit_value);
+    system_cfgfile_parse_kws_hit_value(root);
     parse_bool_key(root, "idleDetectionEnabled", &config_idle_detection_enabled);
     cJSON* head_gesture = cJSON_GetObjectItemCaseSensitive(root, "headGestureConfig");
     if (cJSON_IsObject(head_gesture)) {
@@ -606,11 +583,18 @@ bool system_cfgfile_load(void) {
     config_lcd.ui_width = SYSTEM_LCD_UI_WIDTH;
     config_lcd.ui_height = SYSTEM_LCD_UI_HEIGHT;
 
-    parse_bool_key(root, "simpleguide", &simple_guide);
+   
     system_cfgfile_parse_userguide(root);
     parse_bool_key(root, "playaudio", &play_audio);
     parse_u32_key(root, "displaylevel", &display_level);
     parse_u32_key(root, "displaydistancelevel", &display_level);
+    display_position = SYSTEM_DISPLAY_POSITION_BOTTOM;
+    parse_u32_key(root, "displayposition", &display_position);
+    if (display_position < (uint32_t)SYSTEM_DISPLAY_POSITION_TOP ||
+        display_position > (uint32_t)SYSTEM_DISPLAY_POSITION_BOTTOM) {
+        floatair_warn("displayposition invalid in config: %" PRIu32 ", use bottom", display_position);
+        display_position = SYSTEM_DISPLAY_POSITION_BOTTOM;
+    }
     cJSON* platform = cJSON_GetObjectItemCaseSensitive(root, "platform");
     if (platform != NULL && !cJSON_IsString(platform)) {
         floatair_err("platform is invalid");
@@ -651,16 +635,10 @@ bool system_cfgfile_update(void) {
         return false;
     }
 
-    cJSON* root = load_json(system_config_path());
+    cJSON* root = system_config_load_json(system_config_path());
     if (!root) {
-        floatair_err("load_json %s failed", system_config_path());
-        if (!system_cfgfile_mkdir_parent(system_config_path())) {
-            return false;
-        }
-        root = system_cfgfile_create_default_root();
-        if (!root) {
-            return false;
-        }
+        floatair_err("load effective config failed: %s", system_config_path());
+        return false;
     }
 
     cJSON_DeleteItemFromObjectCaseSensitive(root, "wearDetectionEnabled");
@@ -678,9 +656,11 @@ bool system_cfgfile_update(void) {
     cJSON_AddItemToObject(
         root, "keywordSpottingEnabled", cJSON_CreateBool(config_keyword_spotting_enabled));
 
-    cJSON_DeleteItemFromObjectCaseSensitive(root, "kwsHitValue");
-    cJSON_AddItemToObject(
-        root, "kwsHitValue", cJSON_CreateNumber((double)config_kws_hit_value));
+    if (!system_cfgfile_update_kws_hit_value(root)) {
+        cJSON_Delete(root);
+        floatair_err("update kwsHitValue failed");
+        return false;
+    }
 
     cJSON_DeleteItemFromObjectCaseSensitive(root, "idleDetectionEnabled");
     cJSON_AddItemToObject(
@@ -739,6 +719,8 @@ bool system_cfgfile_update(void) {
         } else {
             cJSON_AddItemToObject(root, "curlang", cJSON_CreateString(v));
         }
+    } else {
+        cJSON_AddItemToObject(root, "curlang", cJSON_CreateString(""));
     }
     cJSON_DeleteItemFromObjectCaseSensitive(root, "homeunits");
     cJSON* homeunits = cJSON_AddArrayToObject(root, "homeunits");
@@ -754,8 +736,7 @@ bool system_cfgfile_update(void) {
     cJSON_DeleteItemFromObjectCaseSensitive(root, "lcdinfo");
 
     cJSON_DeleteItemFromObjectCaseSensitive(root, "onlyCenterName");
-    cJSON_DeleteItemFromObjectCaseSensitive(root, "simpleguide");
-    cJSON_AddItemToObject(root, "simpleguide", cJSON_CreateBool(simple_guide));
+    
     cJSON_DeleteItemFromObjectCaseSensitive(root, "userguide");
     cJSON_AddItemToObject(root, "userguide", cJSON_CreateString(system_config_get_userguide()));
     cJSON_DeleteItemFromObjectCaseSensitive(root, "userguidefinish");
@@ -766,12 +747,12 @@ bool system_cfgfile_update(void) {
     cJSON_DeleteItemFromObjectCaseSensitive(root, "displaylevel");
     cJSON_AddItemToObject(
         root, "displaylevel", cJSON_CreateNumber((double)display_level));
-    cJSON_DeleteItemFromObjectCaseSensitive(root, "displaydistancelevel");
-    cJSON_AddItemToObject(
-        root, "displaydistancelevel", cJSON_CreateNumber((double)display_level));
     cJSON_DeleteItemFromObjectCaseSensitive(root, "displaydistance");
+    cJSON_DeleteItemFromObjectCaseSensitive(root, "displayposition");
+    cJSON_AddItemToObject(
+        root, "displayposition", cJSON_CreateNumber((double)display_position));
 
-    int ret_code = save_json(system_config_path(), root);
+    int ret_code = system_config_save_json(system_config_path(), root);
     cJSON_Delete(root);
     return ret_code == 0;
 }
@@ -790,6 +771,11 @@ void system_cfgfile_dump(void) {
     floatair_dbg("config_keyword_spotting_enabled: %s",
                   config_keyword_spotting_enabled ? "true" : "false");
     floatair_dbg("config_kws_hit_value: %" PRIu32, config_kws_hit_value);
+    for (size_t i = 0; i < config_kws_hit_values_count; ++i) {
+        floatair_dbg("config_kws_hit_values[%u]: %" PRIu32,
+                     (unsigned)i,
+                     config_kws_hit_values[i]);
+    }
     floatair_dbg("config_idle_detection_enabled: %s",
                   config_idle_detection_enabled ? "true" : "false");
     floatair_dbg("config_head_gesture.up_enabled: %s",
@@ -811,22 +797,15 @@ void system_cfgfile_dump(void) {
     floatair_dbg("config_ui_y_begin: %" PRIu32, config_lcd.ui_y_begin);
     floatair_dbg("config_ui_width: %" PRIu32, config_lcd.ui_width);
     floatair_dbg("config_ui_height: %" PRIu32, config_lcd.ui_height);
-    floatair_dbg("simple_guide: %d", simple_guide);
+
     floatair_dbg("user_guide: %s", user_guide ? user_guide : "");
     floatair_dbg("play_audio: %d", play_audio);
     floatair_dbg("display_level: %" PRIu32, display_level);
+    floatair_dbg("display_position: %" PRIu32, display_position);
     floatair_dbg("End");
 }
 
-bool home_get_simple_guide(void) {
-    floatair_dbg("simple_guide %d", simple_guide);
-    return simple_guide;
-}
 
-void home_set_simple_guide(bool guide) {
-    simple_guide = guide;
-    system_cfgfile_update();
-}
 
 const char* system_config_get_userguide(void) {
     if (user_guide == NULL) {

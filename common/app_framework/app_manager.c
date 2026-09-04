@@ -164,7 +164,10 @@ static bool app_manager_create_top_view(app_t* app) {
     }
 
     /* 对齐旧 page_manager 语义：页面 on_create 可能清掉 root 样式，回调后要补回承载层尺寸。 */
-    app_page_host_resize(&entry->view, g_cfg.page_host.width, g_cfg.page_host.height);
+    app_page_host_resize(&entry->view,
+                         g_cfg.page_host.width,
+                         g_cfg.page_host.height,
+                         g_cfg.page_host.offset_y);
     entry->view_created = true;
 
     if (entry->page->on_appear != NULL) {
@@ -178,7 +181,10 @@ static bool app_manager_create_top_view(app_t* app) {
                      (unsigned)(ts_cb1 - ts_cb0));
     }
     /* on_appear 也可能切换状态栏模式，显示前再同步一次最终尺寸。 */
-    app_page_host_resize(&entry->view, g_cfg.page_host.width, g_cfg.page_host.height);
+    app_page_host_resize(&entry->view,
+                         g_cfg.page_host.width,
+                         g_cfg.page_host.height,
+                         g_cfg.page_host.offset_y);
     floatair_dbg("ts=%u view create end app=%s page=%s cost=%u",
                  (unsigned)lv_tick_get(),
                  app != NULL ? app->name : "N/A",
@@ -519,7 +525,9 @@ lv_obj_t* app_manager_current_content_root(void) {
     return app_page_host_get_content(&entry->view);
 }
 
-void app_manager_sync_current_view_layout(int32_t width, int32_t height) {
+void app_manager_sync_current_view_layout(int32_t width,
+                                          int32_t height,
+                                          int32_t offset_y) {
     app_page_entry_t* entry = app_manager_top_entry(g_current_app);
 
     if (!g_initialized || width <= 0 || height <= 0) {
@@ -528,12 +536,13 @@ void app_manager_sync_current_view_layout(int32_t width, int32_t height) {
 
     g_cfg.page_host.width = width;
     g_cfg.page_host.height = height;
+    g_cfg.page_host.offset_y = offset_y;
     if (entry == NULL) {
         return;
     }
 
     /* on_create 期间页面可能切换状态栏模式，此时 host 已存在但 view_created 仍为 false。 */
-    app_page_host_resize(&entry->view, width, height);
+    app_page_host_resize(&entry->view, width, height, offset_y);
 }
 
 bool app_manager_is_busy(void) {

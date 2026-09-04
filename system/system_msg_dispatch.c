@@ -28,6 +28,7 @@ extern app_cmd_func_t system_systemcontrol_cmd_funcs[];
 extern app_cmd_func_t system_systemind_cmd_funcs[];
 extern app_cmd_func_t system_notification_cmd_funcs[];
 extern app_cmd_func_t system_toast_cmd_funcs[];
+extern app_cmd_func_t system_tap_msgbox_cmd_funcs[];
 extern app_cmd_func_t system_file_cmd_funcs[];
 extern app_cmd_func_t system_draw_cmd_funcs[];
 extern const size_t system_deviceinfo_cmd_funcs_count;
@@ -38,6 +39,7 @@ extern const size_t system_systemcontrol_cmd_funcs_count;
 extern const size_t system_systemind_cmd_funcs_count;
 extern const size_t system_notification_cmd_funcs_count;
 extern const size_t system_toast_cmd_funcs_count;
+extern const size_t system_tap_msgbox_cmd_funcs_count;
 extern const size_t system_file_cmd_funcs_count;
 extern const size_t system_draw_cmd_funcs_count;
 #ifdef __cplusplus
@@ -91,6 +93,10 @@ bool system_route_cmd(mpack_node_t node, msg_pack_t* msg) {
     }
     if (strcmp(msg->biz, "Toast") == 0) {
         return dispatch_cmd(system_toast_cmd_funcs, system_toast_cmd_funcs_count, node, msg);
+    }
+    if (strcmp(msg->biz, "TapMsgbox") == 0) {
+        return dispatch_cmd(
+            system_tap_msgbox_cmd_funcs, system_tap_msgbox_cmd_funcs_count, node, msg);
     }
     if (strcmp(msg->biz, "File") == 0) {
         return dispatch_cmd(system_file_cmd_funcs, system_file_cmd_funcs_count, node, msg);

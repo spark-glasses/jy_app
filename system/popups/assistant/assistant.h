@@ -13,9 +13,10 @@ extern "C" {
 
 /**
  * @brief 打开 assistant 弹窗层。
+ * @param[in] report_open 是否主动上报 assistant 已打开。
  * @return `true` 表示打开成功，`false` 表示打开失败。
  */
-bool assistant_open(void);
+bool assistant_open(bool report_open);
 /**
  * @brief 关闭 assistant 弹窗层。
  * @param[in] report_close 是否主动上报 assistant 已关闭。

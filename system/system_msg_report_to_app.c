@@ -11,8 +11,10 @@
 #include "elf_common.h"
 #include "floatair_dbg.h"
 #include "message.h"
+#include "common/app_framework/app_router.h"
 #include "common/widgets/toast.h"
 #include "app_def.h"
+#include "app_lcd.h"
 #include "system/system.h"
 #include "system/system_res.h"
 #include "system/system_timer.h"
@@ -60,7 +62,6 @@ value:  0-100
 /*
 report_pageinfo
 */
-
 
 static uint32_t s_report_sequence = 0;
 static uint32_t s_kws_response_timer_id = 0;
@@ -160,12 +161,18 @@ bool system_report_touch_event(lv_event_code_t code) {
 }
 
 bool system_report_view_change(const char* view_name) {
+    const char* protocol_view_name = NULL;
+
     if (!view_name) {
         floatair_err("view_name is NULL");
         return false;
     }
 
-    floatair_info("report view change %s", view_name);
+    protocol_view_name = app_router_app_to_protocol_name(view_name);
+    if (protocol_view_name == NULL) {
+        return false;
+    }
+    floatair_info("report view change %s, app=%s", protocol_view_name, view_name);
     
     msg_pack_t msgpack = {0};
     msgpack.sequence = system_report_next_sequence();
@@ -180,7 +187,7 @@ bool system_report_view_change(const char* view_name) {
     floatair_assert(writer != NULL, "create writer failed");
     mpack_start_map(&writer->writer, 1);
     mpack_write_cstr(&writer->writer, "viewName");
-    mpack_write_cstr(&writer->writer, view_name);
+    mpack_write_cstr(&writer->writer, protocol_view_name);
     mpack_finish_map(&writer->writer);
     
     return app_mpack_send_writer(writer);
@@ -208,6 +215,26 @@ bool system_report_kws_hit(void) {
         system_report_kws_response_wait_start();
     }
     return ret;
+}
+
+bool system_report_assistant_open(void) {
+    floatair_info("report assistant open");
+
+    msg_pack_t msgpack = {0};
+    msgpack.sequence = system_report_next_sequence();
+    msgpack.id = APP_MSG_ID_SYSTEM;
+    msgpack.type = MSG_TYPE_DATA_UNRELIABLE;
+    strncpy(msgpack.biz, "SystemInd", sizeof(msgpack.biz));
+    msgpack.biz[sizeof(msgpack.biz) - 1] = '\0';
+    strncpy(msgpack.cmd, "onAssistantOpen", sizeof(msgpack.cmd));
+    msgpack.cmd[sizeof(msgpack.cmd) - 1] = '\0';
+
+    msg_pack_writer_t* writer = app_mpack_create_writer(&msgpack, MSG_TYPE_DATA_UNRELIABLE);
+    floatair_assert(writer != NULL, "create writer failed");
+    mpack_start_map(&writer->writer, 0);
+    mpack_finish_map(&writer->writer);
+
+    return app_mpack_send_writer(writer);
 }
 
 bool system_report_assistant_close(void) {
@@ -270,8 +297,21 @@ bool system_report_guide_close(void) {
     return app_mpack_send_writer(writer);
 }
 
-bool system_report_sys_state(uint8_t state) {
-    floatair_info("report sys state %d", state);
+bool system_report_sys_state(uint8_t state, const char* trigger) {
+    if (!floatair_lcd_state_is_valid((lcd_state_t)state)) {
+        floatair_err("reject invalid screen state report: %u, expected 0(OFF) or 1(ON)",
+                     (unsigned)state);
+        return false;
+    }
+    if (trigger == NULL || trigger[0] == '\0') {
+        floatair_err("report sys state trigger is empty");
+        return false;
+    }
+
+    floatair_info("report screen state %u(%s), trigger %s",
+                  (unsigned)state,
+                  floatair_lcd_state_name((lcd_state_t)state),
+                  trigger);
     
     msg_pack_t msgpack = {0};
     msgpack.sequence = system_report_next_sequence();
@@ -284,9 +324,11 @@ bool system_report_sys_state(uint8_t state) {
     
     msg_pack_writer_t* writer = app_mpack_create_writer(&msgpack, MSG_TYPE_DATA_UNRELIABLE);
     floatair_assert(writer != NULL, "create writer failed");
-    mpack_start_map(&writer->writer, 1);
+    mpack_start_map(&writer->writer, 2);
     mpack_write_cstr(&writer->writer, "sysState");
     mpack_write_u8(&writer->writer, state);
+    mpack_write_cstr(&writer->writer, "trigger");
+    mpack_write_cstr(&writer->writer, trigger);
     mpack_finish_map(&writer->writer);
     
     return app_mpack_send_writer(writer);
@@ -353,6 +395,48 @@ bool system_report_brightness(uint8_t brightness) {
     mpack_start_map(&writer->writer, 1);
     mpack_write_cstr(&writer->writer, "brightness");
     mpack_write_u8(&writer->writer, brightness);
+    mpack_finish_map(&writer->writer);
+
+    return app_mpack_send_writer(writer);
+}
+
+/**
+ * @brief 向手机上报指定侧的当前附件类型。
+ * @param[in] attachment_type `JYT_ATTACHMENT_TYPE` 定义的附件类型。
+ * @param[in] attachment_side 附件所在的主从侧身份。
+ * @return `true` 表示上报成功，`false` 表示附件类型、侧身份无效或上报失败。
+ */
+bool system_report_attachment_type(uint8_t attachment_type,
+                                   system_attachment_side_t attachment_side) {
+    if (attachment_type > JYT_ACC_SPEAKER) {
+        floatair_err("reject invalid attachment type: %u", (unsigned)attachment_type);
+        return false;
+    }
+    if ((unsigned)attachment_side >= SYSTEM_ATTACHMENT_SIDE_COUNT) {
+        floatair_err("reject invalid attachment side: %u", (unsigned)attachment_side);
+        return false;
+    }
+
+    floatair_info("report attachment type %u side %u",
+                  (unsigned)attachment_type,
+                  (unsigned)attachment_side);
+
+    msg_pack_t msgpack = {0};
+    msgpack.sequence = system_report_next_sequence();
+    msgpack.id = APP_MSG_ID_SYSTEM;
+    msgpack.type = MSG_TYPE_DATA_UNRELIABLE;
+    strncpy(msgpack.biz, "SystemInd", sizeof(msgpack.biz));
+    msgpack.biz[sizeof(msgpack.biz) - 1] = '\0';
+    strncpy(msgpack.cmd, "onAttachmentTypeChanged", sizeof(msgpack.cmd));
+    msgpack.cmd[sizeof(msgpack.cmd) - 1] = '\0';
+
+    msg_pack_writer_t* writer = app_mpack_create_writer(&msgpack, MSG_TYPE_DATA_UNRELIABLE);
+    floatair_assert(writer != NULL, "create writer failed");
+    mpack_start_map(&writer->writer, 2);
+    mpack_write_cstr(&writer->writer, "attachmentType");
+    mpack_write_u8(&writer->writer, attachment_type);
+    mpack_write_cstr(&writer->writer, "attachmentSide");
+    mpack_write_u8(&writer->writer, (uint8_t)attachment_side);
     mpack_finish_map(&writer->writer);
 
     return app_mpack_send_writer(writer);

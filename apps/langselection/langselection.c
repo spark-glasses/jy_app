@@ -56,8 +56,6 @@ static const lv_font_t* s_font_s = NULL;
 static char** s_lang_codes = NULL;
 static int s_current_selected = 0;
 static int s_lang_count = 0;
-static bool s_langselection_msg_registered = false;
-
 static bool langselection_has_json_suffix(const char* name) {
     size_t name_len = 0;
     size_t suffix_len = strlen(LANG_SELECTION_JSON_SUFFIX);
@@ -367,14 +365,6 @@ static void langselection_page_destroy(void) {
     s_font_s = NULL;
 }
 
-static bool langselection_msg_cb(mpack_node_t node, msg_pack_t* msg) {
-    (void) node;
-    if (!msg) {
-        return false;
-    }
-    return app_mpack_send_ack(msg, ErrCmdNotImplemented);
-}
-
 static bool langselection_host_system_control_allowed(const msg_pack_t* msg) {
     static const char* const allow_cmds[] = {
         "getView",
@@ -435,6 +425,7 @@ static bool langselection_system_event_allowed(uint16_t event_type) {
         case SET_JYT_TIMER_TRIGGER:
         case SET_JYT_BT_VISIBLE_CHANGED:
         case SET_JYT_REFRESH_UI_REQ:
+        case SET_JYT_ACC_TYPE_CHANGED:
             return true;
         default:
             return false;
@@ -472,39 +463,6 @@ static bool langselection_app_on_emerg_message(const char* msg, size_t msg_size)
     return true;
 }
 
-static app_message_t langselection_msg = {
-    .id   = APP_MSG_ID_LANGSELECTION,
-    .name = APP_NAME_LANGSELECTION,
-    .cb   = langselection_msg_cb,
-};
-
-static bool langselection_msg_register_once(void) {
-    int ret = 0;
-
-    if (s_langselection_msg_registered) {
-        return true;
-    }
-
-    ret = app_msg_register(&langselection_msg);
-    if (ret != 0) {
-        return false;
-    }
-    s_langselection_msg_registered = true;
-    return true;
-}
-
-static void langselection_msg_unregister_if_needed(void) {
-    int ret = 0;
-
-    if (!s_langselection_msg_registered) {
-        return;
-    }
-
-    ret = app_msg_delete(APP_MSG_ID_LANGSELECTION);
-    floatair_assert(ret == 0, "app_msg_delete failed");
-    s_langselection_msg_registered = false;
-}
-
 static app_page_t s_langselection_page = {
     .name = APP_NAME_LANGSELECTION,
     .on_create = langselection_page_create,
@@ -521,17 +479,12 @@ const app_page_t* langselection_page_get(void) {
 
 static void langselection_app_on_start(void) {
     system_status_bar_set_mode(false);
-    if (!langselection_msg_register_once()) {
-        floatair_assert(false, "app_msg_register failed");
-        return;
-    }
     if (!app_nav_replace((app_page_t*)langselection_page_get(), NULL, 0)) {
         floatair_assert(false, "langselection page replace failed");
     }
 }
 
 static void langselection_app_on_stop(void) {
-    langselection_msg_unregister_if_needed();
     langselection_page_destroy();
 }
 

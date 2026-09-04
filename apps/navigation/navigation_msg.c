@@ -28,6 +28,8 @@ static bool navigation_clearview(mpack_node_t node, msg_pack_t* msg) {
 static bool navigation_updateinfo(mpack_node_t node, msg_pack_t* msg) {
     (void) msg;
     int32_t navMode = 0;
+    const uint8_t* icon_data = NULL;
+    size_t icon_size = 0;
     app_msg_get_32(node, false, "navMode", &navMode);
     char nextRoadName[256] = {0};
     char curStepRetainDistance[128] = {0};
@@ -39,15 +41,13 @@ static bool navigation_updateinfo(mpack_node_t node, msg_pack_t* msg) {
     app_msg_get_str(node, "remainDistance", remainDistance, sizeof(remainDistance));
     app_msg_get_str(node, "remainTime", remainTime, sizeof(remainTime));
     app_msg_get_str(node, "speed", speed, sizeof(speed));
-    size_t icon_sz = 0;
     mpack_node_t icon_node = mpack_node_map_cstr_optional(node, "iconBytes");
     if (!mpack_node_is_missing(icon_node) && !mpack_node_is_nil(icon_node)) {
         if (mpack_node_type(icon_node) == mpack_type_bin) {
-            size_t bin_sz = mpack_node_bin_size(icon_node);
+            icon_size = mpack_node_bin_size(icon_node);
             const char* bin_ptr = mpack_node_bin_data(icon_node);
-            if (bin_ptr && bin_sz > 0) {
-                navigation_map_update_dir_icon_bin((const uint8_t*)bin_ptr, bin_sz);
-                icon_sz = bin_sz;
+            if (bin_ptr && icon_size > 0) {
+                icon_data = (const uint8_t*)bin_ptr;
             }
         }
     }
@@ -56,8 +56,11 @@ static bool navigation_updateinfo(mpack_node_t node, msg_pack_t* msg) {
         floatair_err("navigation page visible failed");
         return app_mpack_send_ack(msg, ErrNotReady);
     }
+    /* iconBytes 是增量字段；未携带时继续沿用上一张方向图。 */
+    if (icon_data != NULL && icon_size > 0) {
+        navigation_map_update_dir_icon_bin(icon_data, icon_size);
+    }
     navigation_map_update_info((int)navMode, nextRoadName, curStepRetainDistance, remainDistance, remainTime, speed);
-    (void)icon_sz;
     return app_mpack_send_ack(msg, Dp_ErrNone);
 }
 

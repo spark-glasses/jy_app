@@ -12,7 +12,6 @@
 #include "common/app_framework/app_nav.h"
 #include "message.h"
 #include "app_def.h"
-#include "system/system.h"
 #include "common/app_framework/app_manager.h"
 
 static app_message_t reader_msg = {
@@ -75,6 +74,5 @@ static app_t s_reader_app = {
 };
 
 bool reader_app_register(void) {
-    (void)system_factoryreset_register(APP_NAME_READER, reader_config_reset_to_default);
     return app_manager_register(&s_reader_app);
 }

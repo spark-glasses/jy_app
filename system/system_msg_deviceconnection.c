@@ -7,7 +7,9 @@
 #include "elf_common.h"
 #include "floatair_dbg.h"
 #include "message.h"
+#include "app_lcd.h"
 #include "common/app_framework/app_router.h"
+#include "system/system.h"
 
 #include <inttypes.h>
 
@@ -35,6 +37,10 @@ static bool system_deviceconnection_setappconfig(mpack_node_t node, msg_pack_t* 
         default:
             floatair_err("appPlatform out of range: %" PRIu32, app_platform);
             return app_mpack_send_ack(msg, ErrBadParam);
+    }
+    if (system_get_sys_state() == LCD_OFF) {
+        system_set_sys_state(LCD_ON);
+        (void)system_report_sys_state(LCD_ON, SYSTEM_SYS_STATE_TRIGGER_APP_CONFIG);
     }
     if (!app_router_apply_app_config(app_platform)) {
         floatair_err("apply app config failed, appPlatform=%" PRIu32, app_platform);

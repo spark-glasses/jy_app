@@ -16,7 +16,6 @@
 #include "floatair_fs.h"
 #include "message.h"
 #include "system/system.h"
-#include "common/app_framework/app_router.h"
 #include "system/system_def.h"
 #include "sys_adapter.h"
 #include "ui_res.h"
@@ -38,8 +37,6 @@ static lv_obj_t* home_buttons_container = NULL;
 
 static uint8_t home_select = 0;
 static bool s_home_units_initialized = false;
-static bool s_home_route_pending = false;
-static char s_home_pending_app[MSG_STR_MAX_LEN] = {0};
 static size_t s_home_units_count = 0;
 static const app_home_unit_t* s_home_units_cur = NULL;
 static app_home_unit_t* s_home_units_filtered = NULL;
@@ -124,67 +121,6 @@ static void home_units_release_filtered(void) {
         free(s_home_units_filtered);
         s_home_units_filtered = NULL;
     }
-}
-
-static const app_home_unit_t* home_units_find_supported(const char* name) {
-    if (!home_is_supported_app(name)) {
-        return NULL;
-    }
-    for (size_t i = 0; i < g_home_units_count; ++i) {
-        if (g_home_units_arr[i].name != NULL && strcmp(g_home_units_arr[i].name, name) == 0) {
-            return &g_home_units_arr[i];
-        }
-    }
-    return NULL;
-}
-
-static bool home_units_contains_name(const app_home_unit_t* units, size_t count, const char* name) {
-    if (units == NULL || name == NULL) {
-        return false;
-    }
-    for (size_t i = 0; i < count; ++i) {
-        if (units[i].name != NULL && strcmp(units[i].name, name) == 0) {
-            return true;
-        }
-    }
-    return false;
-}
-
-static bool home_units_build_from_config(void) {
-    size_t configured_count = system_config_get_homeunits_count();
-    app_home_unit_t* filtered = NULL;
-    size_t filtered_count = 0;
-
-    if (configured_count == 0) {
-        return false;
-    }
-    filtered = (app_home_unit_t*)malloc(sizeof(app_home_unit_t) * configured_count);
-    if (filtered == NULL) {
-        floatair_warn("alloc home units filtered failed");
-        return false;
-    }
-    for (size_t i = 0; i < configured_count; ++i) {
-        const char* configured_name = system_config_get_homeunit(i);
-        const app_home_unit_t* unit = home_units_find_supported(configured_name);
-
-        if (unit == NULL) {
-            floatair_warn("home unit not supported: %s",
-                          configured_name != NULL ? configured_name : "NULL");
-            continue;
-        }
-        if (home_units_contains_name(filtered, filtered_count, unit->name)) {
-            continue;
-        }
-        filtered[filtered_count++] = *unit;
-    }
-    if (filtered_count == 0) {
-        free(filtered);
-        return false;
-    }
-    s_home_units_filtered = filtered;
-    s_home_units_cur = s_home_units_filtered;
-    s_home_units_count = filtered_count;
-    return true;
 }
 
 static const app_home_unit_t* home_units_at(size_t index) {
@@ -298,53 +234,7 @@ static void home_select_right_app(void) {
     home_view_update();
 }
 
-/**
- * @brief 在 LVGL 事件回调退出后执行 Home 到目标 App 的切换。
- * @param[in] user_data 未使用。
- * @return 无返回值。
- */
-static void home_route_pending_app_async(void* user_data) {
-    char target[MSG_STR_MAX_LEN] = {0};
-
-    (void)user_data;
-    if (!s_home_route_pending || s_home_pending_app[0] == '\0') {
-        return;
-    }
-
-    snprintf(target, sizeof(target), "%s", s_home_pending_app);
-    s_home_pending_app[0] = '\0';
-    s_home_route_pending = false;
-    (void)app_router_set_app(target, APP_ROUTER_ENTRY_LOCAL);
-}
-
-/**
- * @brief 请求从 Home 路由到目标 App。
- * @param[in] app 目标 App 名称。
- * @return 无返回值。
- */
-static void home_route_to_app(const char* app) {
-    if (app == NULL || app[0] == '\0') {
-        return;
-    }
-    if (s_home_route_pending) {
-        return;
-    }
-
-    snprintf(s_home_pending_app, sizeof(s_home_pending_app), "%s", app);
-    s_home_route_pending = true;
-    if (lv_async_call(home_route_pending_app_async, NULL) != LV_RESULT_OK) {
-        s_home_pending_app[0] = '\0';
-        s_home_route_pending = false;
-        floatair_warn("home route async failed: target=%s", app);
-    }
-}
-
 static void home_unit_click(void) {
-    if (home_guide_is_step1()) {
-        home_route_to_app(APP_NAME_TRANSLATE);
-        return;
-    }
-
     if (!s_home_units_cur || s_home_units_count == 0) {
         floatair_err("home_units_click %u failed", home_select);
         return;
@@ -358,7 +248,9 @@ static void home_unit_click(void) {
         floatair_err("home_units_click %u failed", home_select);
         return;
     }
-    home_route_to_app(unit->name);
+    if (!home_unit_activate(unit)) {
+        floatair_warn("home unit activate failed: target=%s", unit->name);
+    }
 }
 
 static void home_unit_dclick(void) {
@@ -392,7 +284,9 @@ static bool home_uints_init(void) {
     home_units_release_filtered();
     s_home_units_cur = g_home_units_arr;
     s_home_units_count = g_home_units_count;
-    if (!home_units_build_from_config()) {
+    if (home_units_build_from_config(&s_home_units_filtered, &s_home_units_count)) {
+        s_home_units_cur = s_home_units_filtered;
+    } else {
         s_home_units_cur = g_home_units_arr;
         s_home_units_count = g_home_units_count;
     }
@@ -542,7 +436,10 @@ static void home_page_create(lv_obj_t* root, const app_page_data_t* data) {
     lv_label_set_long_mode(idle_text_center, LV_LABEL_LONG_CLIP);
     lv_obj_null_on_delete(&idle_text_center);
 
-    home_guide_create_controls(home_buttons_container, system_font, font_height);
+    home_guide_create_controls(home_buttons_container,
+                               home_float_container,
+                               system_font,
+                               font_height);
 
     idle_img_left = lv_image_create(home_buttons_container);
     floatair_assert(idle_img_left != NULL, "idle_img_left NULL");
@@ -586,7 +483,9 @@ static void home_page_appear(lv_obj_t* root) {
     };
 
     floatair_assert(root != NULL, "root is NULL");
-    system_status_bar_set_mode(true);
+    system_status_bar_set_mode_at(
+        true,
+        PRODUCT_HOME_STATUS_BAR_AT_TOP ? STATUS_BAR_POS_TOP : STATUS_BAR_POS_BOTTOM);
     home_guide_set_ops(&guide_ops);
     lv_obj_add_event_cb(root, touch_event_handle, LV_EVENT_GESTURE_LEFT, NULL);
     lv_obj_add_event_cb(root, touch_event_handle, LV_EVENT_GESTURE_RIGHT, NULL);

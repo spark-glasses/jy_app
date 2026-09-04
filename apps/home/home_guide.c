@@ -10,8 +10,9 @@
 #include "home_guide.h"
 
 #include "app_def.h"
-#include "common/app_framework/app_layers.h"
+#include "app_lcd.h"
 #include "common/app_framework/app_router.h"
+#include "common/widgets/label.h"
 #include "floatair_dbg.h"
 #include "guide_runtime.h"
 #include "home.h"
@@ -40,6 +41,7 @@
 #define HOME_GUIDE_STEP2_LANG_TARGET_KEY "BOOT_GUIDE_STEP2_LANG_TARGET" ///< Home 教学第 2 步目标语言文案键。
 
 static lv_obj_t* s_guide_img = NULL;      ///< Home 教学手势示意图。
+static label_t* s_guide_title_widget = NULL; ///< Home 教学主文案组件。
 static lv_obj_t* s_guide_title = NULL;    ///< Home 教学主文案。
 static lv_obj_t* s_guide_subtitle = NULL; ///< Home 教学辅助文案。
 static lv_obj_t* s_step2_mask = NULL;     ///< Home 教学第 2 步遮罩。
@@ -50,6 +52,8 @@ static lv_obj_t* s_step2_lang_target = NULL; ///< Home 教学第 2 步目标语�
 static lv_obj_t* s_step2_img = NULL;      ///< Home 教学第 2 步手势示意图。
 static lv_obj_t* s_step2_title = NULL;    ///< Home 教学第 2 步主文案。
 static const lv_font_t* s_step2_lang_font = NULL; ///< Home 教学第 2 步语言标签字体。
+static lv_obj_t* s_home_float_content = NULL; ///< Home 挂载到 app_float 层、Step2 期间临时隐藏的内容。
+static bool s_step2_hid_home_float_content = false; ///< Step2 是否实际隐藏了 Home 浮层内容。
 static home_guide_ops_t s_ops = {0};      ///< Home 教学异步事件使用的页面动作。
 
 /**
@@ -66,6 +70,7 @@ static void home_guide_show_message_notify(const char* title) {
     cfg.image_src_size = 0;
     cfg.mode = NOTIFY_MODE_MESSAGE;
     cfg.duration_ms = HOME_GUIDE_NOTIFY_DURATION_MS;
+    cfg.passthrough_input = true;
     notify = notify_show_with_cfg(&cfg);
     notify_set_body_hint_visible(notify, false);
 }
@@ -141,6 +146,18 @@ static void home_guide_step2_sync_lang_layout(void) {
 
     if (row_width < HOME_GUIDE_STEP2_LANG_LABEL_MIN_W) {
         row_width = (lv_coord_t)config_lcd.ui_width;
+    }
+    if (PRODUCT_HOME_GUIDE_STEP2_MODE == PRODUCT_HOME_GUIDE_STEP2_MODE_TRANSCRIBE) {
+        target_width = home_guide_step2_lang_natural_width(s_step2_lang_target);
+        if (target_width > row_width) {
+            target_width = row_width;
+        }
+        if (s_step2_lang_target != NULL && lv_obj_is_valid(s_step2_lang_target)) {
+            lv_obj_set_width(s_step2_lang_target, target_width);
+        }
+        lv_obj_set_width(s_step2_lang_row, row_width);
+        lv_obj_align(s_step2_lang_row, LV_ALIGN_TOP_MID, 0, HOME_GUIDE_STEP2_LANG_Y);
+        return;
     }
     if (s_step2_lang_switch != NULL && lv_obj_is_valid(s_step2_lang_switch)) {
         switch_width = lv_obj_get_width(s_step2_lang_switch);
@@ -286,11 +303,11 @@ static void home_guide_sys_state_event_handle(lv_event_t* event) {
     if (state == NULL) {
         return;
     }
-    if (*state == 0 && guide_runtime_is_home_step4_wait_sleep()) {
+    if (*state == LCD_OFF && guide_runtime_is_home_step4_wait_sleep()) {
         home_guide_enter_step4_sleeping();
         return;
     }
-    if (*state != 0 && guide_runtime_is_home_step4_sleeping()) {
+    if (*state == LCD_ON && guide_runtime_is_home_step4_sleeping()) {
         home_guide_complete_step4();
     }
 }
@@ -305,15 +322,45 @@ static void home_guide_assistant_close_event_handle(lv_event_t* event) {
     home_guide_finish_step5(false, &s_ops);
 }
 
-void home_guide_create_controls(lv_obj_t* parent, const lv_font_t* font, int font_height) {
-    (void)font_height;
-    lv_obj_t* step2_parent = home_enable_app_float ? app_layers_get_app_float() : parent;
-
-    if (step2_parent == NULL || !lv_obj_is_valid(step2_parent)) {
-        step2_parent = parent;
+/**
+ * @brief 按 Step2 显示状态临时隐藏或恢复 Home 自己的 app_float 内容。
+ * @param[in] hidden `true` 表示进入 Step2，`false` 表示退出 Step2。
+ * @return 无返回值。
+ */
+static void home_guide_step2_set_home_float_hidden(bool hidden) {
+    if (s_home_float_content == NULL || !lv_obj_is_valid(s_home_float_content)) {
+        s_step2_hid_home_float_content = false;
+        return;
     }
 
+    if (hidden) {
+        if (!lv_obj_has_flag(s_home_float_content, LV_OBJ_FLAG_HIDDEN)) {
+            lv_obj_add_flag(s_home_float_content, LV_OBJ_FLAG_HIDDEN);
+            s_step2_hid_home_float_content = true;
+        }
+        return;
+    }
+
+    if (s_step2_hid_home_float_content) {
+        lv_obj_clear_flag(s_home_float_content, LV_OBJ_FLAG_HIDDEN);
+        s_step2_hid_home_float_content = false;
+    }
+}
+
+void home_guide_create_controls(lv_obj_t* parent,
+                                lv_obj_t* home_float_content,
+                                const lv_font_t* font,
+                                int font_height) {
+    label_cfg_t guide_title_cfg = label_default_cfg();
+
+    (void)font_height;
+
     s_step2_lang_font = font;
+    s_home_float_content = home_float_content;
+    s_step2_hid_home_float_content = false;
+    if (s_home_float_content != NULL && lv_obj_is_valid(s_home_float_content)) {
+        lv_obj_null_on_delete(&s_home_float_content);
+    }
 
     s_guide_img = lv_image_create(parent);
     floatair_assert(s_guide_img != NULL, "guide_step1_img NULL");
@@ -321,14 +368,16 @@ void home_guide_create_controls(lv_obj_t* parent, const lv_font_t* font, int fon
     lv_obj_add_flag(s_guide_img, LV_OBJ_FLAG_HIDDEN);
     lv_obj_null_on_delete(&s_guide_img);
 
-    s_guide_title = lv_label_create(parent);
+    guide_title_cfg.w = LV_PCT(HOME_GUIDE_TEXT_WIDTH_PCT);
+    guide_title_cfg.h = LV_SIZE_CONTENT;
+    guide_title_cfg.align = LABEL_ALIGN_CENTER;
+    guide_title_cfg.overflow = LABEL_OVERFLOW_WRAP;
+    guide_title_cfg.font.weight = get_system_font_size();
+    guide_title_cfg.text = app_get_str("BOOT_GUIDE_STEP1_TITLE");
+    s_guide_title_widget = label_create(parent, &guide_title_cfg);
+    floatair_assert(s_guide_title_widget != NULL, "guide_step1_title widget NULL");
+    s_guide_title = label_get_obj(s_guide_title_widget);
     floatair_assert(s_guide_title != NULL, "guide_step1_title NULL");
-    lv_obj_set_size(s_guide_title, LV_PCT(HOME_GUIDE_TEXT_WIDTH_PCT), LV_SIZE_CONTENT);
-    lv_label_set_text(s_guide_title, app_get_str("BOOT_GUIDE_STEP1_TITLE"));
-    obj_set_text_font(s_guide_title, font);
-    lv_obj_set_style_text_color(s_guide_title, lv_color_white(), 0);
-    lv_obj_set_style_text_align(s_guide_title, LV_TEXT_ALIGN_CENTER, 0);
-    lv_label_set_long_mode(s_guide_title, LV_LABEL_LONG_WRAP);
     lv_obj_add_flag(s_guide_title, LV_OBJ_FLAG_HIDDEN);
     lv_obj_null_on_delete(&s_guide_title);
 
@@ -343,7 +392,7 @@ void home_guide_create_controls(lv_obj_t* parent, const lv_font_t* font, int fon
     lv_obj_add_flag(s_guide_subtitle, LV_OBJ_FLAG_HIDDEN);
     lv_obj_null_on_delete(&s_guide_subtitle);
 
-    s_step2_mask = lv_obj_create(step2_parent);
+    s_step2_mask = lv_obj_create(parent);
     floatair_assert(s_step2_mask != NULL, "guide_step2_mask NULL");
     lv_obj_remove_style_all(s_step2_mask);
     lv_obj_set_size(s_step2_mask, LV_PCT(100), LV_PCT(100));
@@ -356,34 +405,42 @@ void home_guide_create_controls(lv_obj_t* parent, const lv_font_t* font, int fon
     lv_obj_add_flag(s_step2_mask, LV_OBJ_FLAG_HIDDEN);
     lv_obj_null_on_delete(&s_step2_mask);
 
-    s_step2_lang_row = lv_obj_create(s_step2_mask);
-    floatair_assert(s_step2_lang_row != NULL, "guide_step2_lang_row NULL");
-    lv_obj_remove_style_all(s_step2_lang_row);
-    lv_obj_set_size(s_step2_lang_row, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-    lv_obj_set_layout(s_step2_lang_row, LV_LAYOUT_FLEX);
-    lv_obj_set_flex_flow(s_step2_lang_row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(s_step2_lang_row,
-                          LV_FLEX_ALIGN_CENTER,
-                          LV_FLEX_ALIGN_CENTER,
-                          LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_column(s_step2_lang_row, HOME_GUIDE_STEP2_LANG_GAP, 0);
-    lv_obj_align(s_step2_lang_row, LV_ALIGN_TOP_MID, 0, HOME_GUIDE_STEP2_LANG_Y);
-    lv_obj_null_on_delete(&s_step2_lang_row);
+    if (PRODUCT_HOME_GUIDE_STEP2_MODE != PRODUCT_HOME_GUIDE_STEP2_MODE_HIDDEN) {
+        s_step2_lang_row = lv_obj_create(s_step2_mask);
+        floatair_assert(s_step2_lang_row != NULL, "guide_step2_lang_row NULL");
+        lv_obj_remove_style_all(s_step2_lang_row);
+        lv_obj_set_size(s_step2_lang_row, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+        lv_obj_set_layout(s_step2_lang_row, LV_LAYOUT_FLEX);
+        lv_obj_set_flex_flow(s_step2_lang_row, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(s_step2_lang_row,
+                              LV_FLEX_ALIGN_CENTER,
+                              LV_FLEX_ALIGN_CENTER,
+                              LV_FLEX_ALIGN_CENTER);
+        lv_obj_set_style_pad_column(s_step2_lang_row, HOME_GUIDE_STEP2_LANG_GAP, 0);
+        lv_obj_align(s_step2_lang_row, LV_ALIGN_TOP_MID, 0, HOME_GUIDE_STEP2_LANG_Y);
+        lv_obj_null_on_delete(&s_step2_lang_row);
 
-    s_step2_lang_source = lv_label_create(s_step2_lang_row);
-    floatair_assert(s_step2_lang_source != NULL, "guide_step2_lang_source NULL");
-    home_guide_step2_init_lang_label(s_step2_lang_source, app_get_str(HOME_GUIDE_STEP2_LANG_SOURCE_KEY), font);
-    lv_obj_null_on_delete(&s_step2_lang_source);
+        if (PRODUCT_HOME_GUIDE_STEP2_MODE == PRODUCT_HOME_GUIDE_STEP2_MODE_TRANSLATE) {
+            s_step2_lang_source = lv_label_create(s_step2_lang_row);
+            floatair_assert(s_step2_lang_source != NULL, "guide_step2_lang_source NULL");
+            home_guide_step2_init_lang_label(s_step2_lang_source,
+                                             app_get_str(HOME_GUIDE_STEP2_LANG_SOURCE_KEY),
+                                             font);
+            lv_obj_null_on_delete(&s_step2_lang_source);
 
-    s_step2_lang_switch = lv_image_create(s_step2_lang_row);
-    floatair_assert(s_step2_lang_switch != NULL, "guide_step2_lang_switch NULL");
-    lv_image_set_src(s_step2_lang_switch, UI_RES_IMAGE_SWITCH);
-    lv_obj_null_on_delete(&s_step2_lang_switch);
+            s_step2_lang_switch = lv_image_create(s_step2_lang_row);
+            floatair_assert(s_step2_lang_switch != NULL, "guide_step2_lang_switch NULL");
+            lv_image_set_src(s_step2_lang_switch, UI_RES_IMAGE_SWITCH);
+            lv_obj_null_on_delete(&s_step2_lang_switch);
+        }
 
-    s_step2_lang_target = lv_label_create(s_step2_lang_row);
-    floatair_assert(s_step2_lang_target != NULL, "guide_step2_lang_target NULL");
-    home_guide_step2_init_lang_label(s_step2_lang_target, app_get_str(HOME_GUIDE_STEP2_LANG_TARGET_KEY), font);
-    lv_obj_null_on_delete(&s_step2_lang_target);
+        s_step2_lang_target = lv_label_create(s_step2_lang_row);
+        floatair_assert(s_step2_lang_target != NULL, "guide_step2_lang_target NULL");
+        home_guide_step2_init_lang_label(s_step2_lang_target,
+                                         app_get_str(HOME_GUIDE_STEP2_LANG_TARGET_KEY),
+                                         font);
+        lv_obj_null_on_delete(&s_step2_lang_target);
+    }
 
     s_step2_img = lv_image_create(s_step2_mask);
     floatair_assert(s_step2_img != NULL, "guide_step2_img NULL");
@@ -408,6 +465,7 @@ void home_guide_create_controls(lv_obj_t* parent, const lv_font_t* font, int fon
  * @return 无返回值。
  */
 void home_guide_destroy_controls(void) {
+    home_guide_step2_set_home_float_hidden(false);
     if (s_step2_mask != NULL && lv_obj_is_valid(s_step2_mask)) {
         lv_obj_delete(s_step2_mask);
     }
@@ -419,6 +477,8 @@ void home_guide_destroy_controls(void) {
     s_step2_img = NULL;
     s_step2_title = NULL;
     s_step2_lang_font = NULL;
+    s_home_float_content = NULL;
+    s_step2_hid_home_float_content = false;
 }
 
 void home_guide_layout_update(void) {
@@ -429,7 +489,11 @@ void home_guide_layout_update(void) {
     bool show_step4 = guide_runtime_is_home_step4_wait_sleep();
     bool show_step5 = guide_runtime_is_home_step5_wait_assistant();
     bool show_guide = show_step1 || show_step3_back || show_step3_forward || show_step4 || show_step5;
+    app_font_info_t guide_title_font = {0};
 
+    guide_title_font.weight = get_system_font_size();
+
+    home_guide_step2_set_home_float_hidden(show_step2);
     if (s_step2_mask != NULL && lv_obj_is_valid(s_step2_mask)) {
         if (show_step2) {
             home_guide_step2_sync_lang_layout();
@@ -456,21 +520,25 @@ void home_guide_layout_update(void) {
             lv_obj_add_flag(s_guide_img, LV_OBJ_FLAG_HIDDEN);
         }
     }
-    if (s_guide_title != NULL && lv_obj_is_valid(s_guide_title)) {
+    if (s_guide_title_widget != NULL && s_guide_title != NULL && lv_obj_is_valid(s_guide_title)) {
         if (show_guide) {
             lv_obj_clear_flag(s_guide_title, LV_OBJ_FLAG_HIDDEN);
             lv_obj_set_width(s_guide_title, LV_PCT(HOME_GUIDE_TEXT_WIDTH_PCT));
             lv_obj_set_height(s_guide_title, LV_SIZE_CONTENT);
+            label_set_auto_fit_width(s_guide_title_widget, false);
+            label_set_font_info(s_guide_title_widget, &guide_title_font);
+            label_set_overflow(s_guide_title_widget, LABEL_OVERFLOW_WRAP);
             if (show_step1) {
-                lv_label_set_text(s_guide_title, app_get_str("BOOT_GUIDE_STEP1_BODY"));
+                label_set_text(s_guide_title_widget, app_get_str("BOOT_GUIDE_STEP1_BODY"));
             } else if (show_step3_back) {
-                lv_label_set_text(s_guide_title, app_get_str("BOOT_GUIDE_STEP3_FORWARD_BODY"));
+                label_set_text(s_guide_title_widget, app_get_str("BOOT_GUIDE_STEP3_FORWARD_BODY"));
             } else if (show_step3_forward) {
-                lv_label_set_text(s_guide_title, app_get_str("BOOT_GUIDE_STEP3_BACK_BODY"));
+                label_set_text(s_guide_title_widget, app_get_str("BOOT_GUIDE_STEP3_BACK_BODY"));
             } else if (show_step4) {
-                lv_label_set_text(s_guide_title, app_get_str("BOOT_GUIDE_STEP4_BODY"));
+                label_set_text(s_guide_title_widget, app_get_str("BOOT_GUIDE_STEP4_BODY"));
+                label_set_auto_fit_width(s_guide_title_widget, true);
             } else {
-                lv_label_set_text(s_guide_title, app_get_str("BOOT_GUIDE_STEP5_BODY"));
+                label_set_text(s_guide_title_widget, app_get_str("BOOT_GUIDE_STEP5_BODY"));
             }
             lv_obj_align(s_guide_title, LV_ALIGN_TOP_MID, 0, show_step5 ? 48 : 108);
         } else {
@@ -493,11 +561,13 @@ void home_guide_layout_update(void) {
 bool home_guide_apply_step1_selection(bool (*select_app_by_name)(const char*),
                                       bool view_ready,
                                       void (*refresh)(void)) {
+    const char* demo_app_name = PRODUCT_HOME_GUIDE_STEP2_APP_NAME;
+
     if (!guide_runtime_is_home_step1()) {
         return false;
     }
-    if (select_app_by_name == NULL || !select_app_by_name(APP_NAME_TRANSLATE)) {
-        floatair_warn("guide step1 translate app missing in home units");
+    if (select_app_by_name == NULL || !select_app_by_name(demo_app_name)) {
+        floatair_warn("guide step1 demo app missing in home units: %s", demo_app_name);
         return true;
     }
     if (view_ready && refresh != NULL) {

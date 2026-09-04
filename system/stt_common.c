@@ -4,6 +4,7 @@
 #include "cJSON.h"
 #include "floatair_dbg.h"
 #include "app_def.h"
+#include "product_app.h"
 #include "system/system_config_json.h"
 #include "sys_adapter.h"
 #include <inttypes.h>
@@ -188,7 +189,10 @@ static bool stt_should_skip_update_by_flow(const stt_info_t* info, const msg_pac
     if (!stt_is_skippable_interim_update(info)) {
         return false;
     }
-    if (msg->id == APP_MSG_ID_AI && info->area == STT_FLOW_AI_AREA_QUESTION) {
+    if (product_app_msg_id_has_capability(
+            msg->id,
+            PRODUCT_APP_CAP_STT_QUESTION_NO_SKIP) &&
+        info->area == STT_FLOW_AI_AREA_QUESTION) {
         return false;
     }
 
@@ -364,6 +368,21 @@ bool stt_buffer_push(stt_info_t* info) {
         floatair_err("Invalid actionType: %d", info->actionType);
         return false;
     }
+}
+
+const char* stt_buffer_get_user_by_index(size_t index) {
+    if (stt_info_buf == NULL) {
+        floatair_err("stt_info_buf is NULL");
+        return NULL;
+    }
+    if (index >= STT_INFO_MAX_MSG_NUM) {
+        floatair_err("index %d out of range", (int)index);
+        return NULL;
+    }
+    if (stt_info_buf[index].user != NULL && stt_info_buf[index].user[0] != '\0') {
+        return stt_info_buf[index].user;
+    }
+    return NULL;
 }
 
 const char* stt_buffer_get_translate_by_index(size_t index) {
@@ -666,18 +685,23 @@ bool stt_update_sttinfo(mpack_node_t node, msg_pack_t* msg) {
 }
 
 bool stt_set_textmode(mpack_node_t node, msg_pack_t* msg) {
+    uint8_t text_mode = 0;
+
     if (!msg) {
         floatair_err("input err");
         return app_mpack_send_ack(msg, ErrBadParam);
     }
-    if (!app_msg_get_u8(node, false, "textMode", &(stt_config.textMode))) {
+    if (!app_msg_get_u8(node, false, "textMode", &text_mode)) {
         floatair_err("textMode err");
         return app_mpack_send_ack(msg, ErrBadParam);
     }
-    if (stt_config.textMode != TEXTMODE_DEFAULT && stt_config.textMode != TEXTMODE_HISTORY && stt_config.textMode != TEXTMODE_MEETING) {
+    if (text_mode != TEXTMODE_DEFAULT &&
+        text_mode != TEXTMODE_HISTORY &&
+        text_mode != TEXTMODE_MEETING) {
         floatair_err("textMode err");
         return app_mpack_send_ack(msg, ErrBadParam);
     }
+    stt_config.textMode = text_mode;
     return app_mpack_send_ack(msg, Dp_ErrNone);
 }
 
@@ -701,23 +725,71 @@ bool stt_set_audiotrackstate(mpack_node_t node, msg_pack_t* msg) {
         return app_mpack_send_ack(msg, ErrBadParam);
     }
     audio_track = mpack_node_u8(at);
+    if (audio_track != AUDIOTRACK_HIDE && audio_track != AUDIOTRACK_SHOW) {
+        floatair_err("audioTrack err");
+        return app_mpack_send_ack(msg, ErrBadParam);
+    }
+    stt_config.audioTrack = audio_track;
     floatair_info("app msg u8: (audioTrack) %u ", audio_track);
     return app_mpack_send_ack(msg, Dp_ErrNone);
 }
 
-bool stt_set_transmode(mpack_node_t node, msg_pack_t* msg) {
+bool stt_set_hearingiconstate(mpack_node_t node, msg_pack_t* msg) {
+    uint8_t visible = 0;
+
     if (!msg) {
         floatair_err("input err");
         return app_mpack_send_ack(msg, ErrBadParam);
     }
-    if (!app_msg_get_u8(node, false, "transMode", &(stt_config.transMode))) {
+    if (!app_msg_get_u8(node, false, "visible", &visible)) {
+        floatair_err("visible err");
+        return app_mpack_send_ack(msg, ErrBadParam);
+    }
+    if (visible != HEARINGICON_HIDE && visible != HEARINGICON_SHOW) {
+        floatair_err("visible err");
+        return app_mpack_send_ack(msg, ErrBadParam);
+    }
+    stt_config.hearingIcon = visible;
+    return app_mpack_send_ack(msg, Dp_ErrNone);
+}
+
+bool stt_set_transmode(mpack_node_t node, msg_pack_t* msg) {
+    uint8_t trans_mode = 0;
+
+    if (!msg) {
+        floatair_err("input err");
+        return app_mpack_send_ack(msg, ErrBadParam);
+    }
+    if (!app_msg_get_u8(node, false, "transMode", &trans_mode)) {
         floatair_err("transMode err");
         return app_mpack_send_ack(msg, ErrBadParam);
     }
-    if (stt_config.transMode != TRANSMODE_SHOW_ONLY_TRANS && stt_config.transMode != TRANSMODE_SHOW_DUAL && stt_config.transMode != TRANSMODE_SHOW_ONLY_ORI) {
+    if (trans_mode != TRANSMODE_SHOW_ONLY_TRANS &&
+        trans_mode != TRANSMODE_SHOW_DUAL &&
+        trans_mode != TRANSMODE_SHOW_ONLY_ORI) {
         floatair_err("transMode err");
         return app_mpack_send_ack(msg, ErrBadParam);
     }
+    stt_config.transMode = trans_mode;
+    return app_mpack_send_ack(msg, Dp_ErrNone);
+}
+
+bool stt_set_usermode(mpack_node_t node, msg_pack_t* msg) {
+    uint8_t user_mode = 0;
+
+    if (!msg) {
+        floatair_err("input err");
+        return app_mpack_send_ack(msg, ErrBadParam);
+    }
+    if (!app_msg_get_u8(node, false, "userMode", &user_mode)) {
+        floatair_err("userMode err");
+        return app_mpack_send_ack(msg, ErrBadParam);
+    }
+    if (user_mode != USERMODE_HIDE && user_mode != USERMODE_SHOW) {
+        floatair_err("userMode err");
+        return app_mpack_send_ack(msg, ErrBadParam);
+    }
+    stt_config.userMode = user_mode;
     return app_mpack_send_ack(msg, Dp_ErrNone);
 }
 
@@ -737,40 +809,50 @@ bool stt_set_maxline(mpack_node_t node, msg_pack_t* msg) {
 
 bool stt_set_audiosourceindicator(mpack_node_t node,
                                   msg_pack_t* msg) {
+    uint8_t audio_source = 0;
+
     if (!msg) {
         floatair_err("input err");
         return app_mpack_send_ack(msg, ErrBadParam);
     }
-    if (!app_msg_get_u8(node, false, "audioSourceIndicator", &(stt_config.audioSourceIndicator))) {
+    if (!app_msg_get_u8(node, false, "audioSourceIndicator", &audio_source)) {
         floatair_err("audioSourceIndicator err");
         return app_mpack_send_ack(msg, ErrBadParam);
     }
-    if (stt_config.audioSourceIndicator != AUDIOSOURCE_GLASSES &&
-        stt_config.audioSourceIndicator != AUDIOSOURCE_PHONE &&
-        stt_config.audioSourceIndicator != AUDIOSOURCE_WATCH) {
+    if (audio_source != AUDIOSOURCE_GLASSES &&
+        audio_source != AUDIOSOURCE_PHONE &&
+        audio_source != AUDIOSOURCE_WATCH) {
         floatair_err("audioSourceIndicator err");
         return app_mpack_send_ack(msg, ErrBadParam);
     }
+    stt_config.audioSourceIndicator = audio_source;
     return app_mpack_send_ack(msg, Dp_ErrNone);
 }
 
 bool stt_set_micdirectional(mpack_node_t node, msg_pack_t* msg) {
+    uint8_t mic_directional = 0;
+
     if (!msg) {
         floatair_err("input err");
         return app_mpack_send_ack(msg, ErrBadParam);
     }
-    if (!app_msg_get_u8(node, false, "micDirectional", &(stt_config.micDirectional))) {
+    if (!app_msg_get_u8(node, false, "micDirectional", &mic_directional)) {
         floatair_err("micDirectional err");
         return app_mpack_send_ack(msg, ErrBadParam);
     }
-    if (stt_config.micDirectional != OMNIDIRECTIONAL && stt_config.micDirectional != DIRECTIONAL) {
+    if (mic_directional != OMNIDIRECTIONAL && mic_directional != DIRECTIONAL) {
         floatair_err("micDirectional err");
         return app_mpack_send_ack(msg, ErrBadParam);
     }
+    stt_config.micDirectional = mic_directional;
     return app_mpack_send_ack(msg, Dp_ErrNone);
 }
 
 bool stt_set_languagehint(mpack_node_t node, msg_pack_t* msg) {
+    uint8_t language_hint = 0;
+    char language_source[STT_CONFIG_MAX_LANGUAGE_LEN] = {0};
+    char language_target[STT_CONFIG_MAX_LANGUAGE_LEN] = {0};
+
     if (!msg) {
         floatair_err("input err");
         return app_mpack_send_ack(msg, ErrBadParam);
@@ -782,11 +864,11 @@ bool stt_set_languagehint(mpack_node_t node, msg_pack_t* msg) {
         parse_node = language_hint_node;
     }
 
-    if (!app_msg_get_u8(parse_node, false, "mode", &(stt_config.language_hint))) {
+    if (!app_msg_get_u8(parse_node, false, "mode", &language_hint)) {
         floatair_err("language_hint err");
         return app_mpack_send_ack(msg, ErrBadParam);
     }
-    if (stt_config.language_hint > 1) {
+    if (language_hint > 1) {
         floatair_err("language_hint err");
         return app_mpack_send_ack(msg, ErrBadParam);
     }
@@ -805,30 +887,36 @@ bool stt_set_languagehint(mpack_node_t node, msg_pack_t* msg) {
     if (src_copy >= STT_CONFIG_MAX_LANGUAGE_LEN) {
         src_copy = STT_CONFIG_MAX_LANGUAGE_LEN - 1;
     }
-    memcpy(stt_config.language_source, mpack_node_str(src_node), src_copy);
-    stt_config.language_source[src_copy] = '\0';
+    memcpy(language_source, mpack_node_str(src_node), src_copy);
+    language_source[src_copy] = '\0';
 
-    if (stt_config.language_hint == 0) {
-        stt_config.language_target[0] = '\0';
-        return app_mpack_send_ack(msg, Dp_ErrNone);
+    if (language_hint != 0) {
+        mpack_node_t dst_node = mpack_node_map_cstr_optional(parse_node, "target");
+        if (mpack_node_is_missing(dst_node) || mpack_node_is_nil(dst_node) ||
+            mpack_node_type(dst_node) != mpack_type_str) {
+            floatair_err("target err");
+            return app_mpack_send_ack(msg, ErrBadParam);
+        }
+        size_t dst_len = mpack_node_strlen(dst_node);
+        if (dst_len == 0) {
+            floatair_err("target err");
+            return app_mpack_send_ack(msg, ErrBadParam);
+        }
+        size_t dst_copy = dst_len;
+        if (dst_copy >= STT_CONFIG_MAX_LANGUAGE_LEN) {
+            dst_copy = STT_CONFIG_MAX_LANGUAGE_LEN - 1;
+        }
+        memcpy(language_target, mpack_node_str(dst_node), dst_copy);
+        language_target[dst_copy] = '\0';
     }
 
-    mpack_node_t dst_node = mpack_node_map_cstr_optional(parse_node, "target");
-    if (mpack_node_is_missing(dst_node) || mpack_node_is_nil(dst_node) || mpack_node_type(dst_node) != mpack_type_str) {
-        floatair_err("target err");
-        return app_mpack_send_ack(msg, ErrBadParam);
-    }
-    size_t dst_len = mpack_node_strlen(dst_node);
-    if (dst_len == 0) {
-        floatair_err("target err");
-        return app_mpack_send_ack(msg, ErrBadParam);
-    }
-    size_t dst_copy = dst_len;
-    if (dst_copy >= STT_CONFIG_MAX_LANGUAGE_LEN) {
-        dst_copy = STT_CONFIG_MAX_LANGUAGE_LEN - 1;
-    }
-    memcpy(stt_config.language_target, mpack_node_str(dst_node), dst_copy);
-    stt_config.language_target[dst_copy] = '\0';
+    stt_config.language_hint = language_hint;
+    memcpy(stt_config.language_source,
+           language_source,
+           sizeof(stt_config.language_source));
+    memcpy(stt_config.language_target,
+           language_target,
+           sizeof(stt_config.language_target));
     return app_mpack_send_ack(msg, Dp_ErrNone);
 }
 

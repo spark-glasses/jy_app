@@ -35,6 +35,7 @@ app_page_host_config_t app_page_host_default_config(int32_t width, int32_t heigh
     app_page_host_config_t cfg = {
         .width = width,
         .height = height,
+        .offset_y = 0,
     };
     return cfg;
 }
@@ -65,7 +66,7 @@ bool app_page_host_create(lv_obj_t* parent, const app_page_host_config_t* cfg, a
         return false;
     }
     app_page_host_prepare_obj(view->scene_root, local_cfg.width, local_cfg.height);
-    lv_obj_align(view->scene_root, LV_ALIGN_TOP_LEFT, 0, 0);
+    lv_obj_align(view->scene_root, LV_ALIGN_TOP_LEFT, 0, local_cfg.offset_y);
 
     view->content_root = lv_obj_create(view->scene_root);
     if (view->content_root == NULL) {
@@ -80,14 +81,17 @@ bool app_page_host_create(lv_obj_t* parent, const app_page_host_config_t* cfg, a
     return true;
 }
 
-void app_page_host_resize(app_page_view_t* view, int32_t width, int32_t height) {
+void app_page_host_resize(app_page_view_t* view,
+                          int32_t width,
+                          int32_t height,
+                          int32_t offset_y) {
     if (view == NULL || width <= 0 || height <= 0) {
         return;
     }
 
     if (view->scene_root != NULL && lv_obj_is_valid(view->scene_root)) {
         lv_obj_set_size(view->scene_root, width, height);
-        lv_obj_align(view->scene_root, LV_ALIGN_TOP_LEFT, 0, 0);
+        lv_obj_align(view->scene_root, LV_ALIGN_TOP_LEFT, 0, offset_y);
     }
     if (view->content_root != NULL && lv_obj_is_valid(view->content_root)) {
         lv_obj_set_size(view->content_root, width, height);

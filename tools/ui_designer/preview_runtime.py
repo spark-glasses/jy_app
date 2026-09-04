@@ -25,6 +25,7 @@ ROLLER_DEFAULT_BORDER_WIDTH = 2
 ROLLER_DEFAULT_NORMAL_OPA = 178
 ROLLER_DEFAULT_SELECTED_OPA = 255
 ROLLER_DEFAULT_SELECTED_PAD_VER = 2
+ROLLER_DEFAULT_HINT_GAP = 48
 OVERLAY_DEFAULT_MAX_ITEMS = 16
 OVERLAY_DEFAULT_POINT_SIZE = 6
 OVERLAY_DEFAULT_POINT_OPA = 255
@@ -316,7 +317,12 @@ def estimate_content_height(node: dict[str, Any],
         label_cfg = node.get("label") if isinstance(node.get("label"), dict) else {}
         row_height, row_gap = roller_row_metrics(node, label_cfg, default_font, font_path)
         count = max(1, len(roller_visible_rows(node)))
-        return count * row_height + max(0, count - 1) * row_gap + padding_v(node)
+        height = count * row_height + max(0, count - 1) * row_gap
+        if node.get("show_hint") is True:
+            hint_gap = max(0, int(node.get("hint_gap") if node.get("hint_gap") is not None else ROLLER_DEFAULT_HINT_GAP))
+            hint_font = load_font(font_size(label_cfg, default_font), font_path)
+            height += hint_gap + line_height(hint_font, label_cfg, default_font)
+        return height + padding_v(node)
     if node_type == "paged_text":
         label = paged_text_label_config(node)
         return estimate_content_height(label, max(1, width), default_font, font_path, i18n or {})
@@ -775,10 +781,16 @@ def draw_roller(draw: ImageDraw.ImageDraw,
     normal_opa = opa_value(node.get("opa_normal"), ROLLER_DEFAULT_NORMAL_OPA)
     selected_opa = opa_value(node.get("opa_selected"), ROLLER_DEFAULT_SELECTED_OPA)
     rows = roller_visible_rows(node)
+    show_hint = node.get("show_hint") is True
+    hint_gap = max(0, int(node.get("hint_gap") if node.get("hint_gap") is not None else ROLLER_DEFAULT_HINT_GAP))
+    hint_font = load_font(font_size(label_cfg, default_font), font_path)
+    hint_h = line_height(hint_font, label_cfg, default_font) if show_hint else 0
     total_h = len(rows) * row_h + max(0, len(rows) - 1) * row_gap
+    if show_hint:
+        total_h += hint_gap + hint_h
     y = box.y + max(0, (box.h - total_h) // 2)
 
-    for text, is_selected in rows:
+    for index, (text, is_selected) in enumerate(rows):
         item_box = Box(box.x, y, box.w, row_h)
         alpha = selected_opa if is_selected else normal_opa
         draw.rounded_rectangle(rect(item_box),
@@ -788,7 +800,28 @@ def draw_roller(draw: ImageDraw.ImageDraw,
                                width=max(1, border))
         label = {"type": "label", **label_cfg, "text": text, "align": label_cfg.get("align", "center"), "opa": alpha}
         draw_label_text_only(draw, label, item_box, i18n, default_font, font_path, vertical_align="center")
-        y += row_h + row_gap
+        y += row_h
+        if index + 1 < len(rows):
+            y += row_gap
+
+    if show_hint:
+        y += hint_gap
+        hint_text = i18n.get("ROLLER_OPERATION_HINT", "Swipe to switch | Tap to select")
+        hint_box = Box(box.x, y, box.w, hint_h)
+        hint = {
+            "type": "label",
+            **label_cfg,
+            "text": hint_text,
+            "align": "center",
+            "opa": selected_opa,
+        }
+        draw_label_text_only(draw,
+                             hint,
+                             hint_box,
+                             i18n,
+                             default_font,
+                             font_path,
+                             vertical_align="center")
 
 
 def draw_paged_text(draw: ImageDraw.ImageDraw,

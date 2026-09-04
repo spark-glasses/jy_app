@@ -68,6 +68,35 @@ static bool paged_text_highlight_is_valid(paged_text_t* paged_text) {
            lv_obj_is_valid(paged_text->highlight_box);
 }
 
+static void paged_text_set_label_y(void* obj, int32_t y) {
+    lv_obj_set_y((lv_obj_t*)obj, (lv_coord_t)y);
+}
+
+static void paged_text_stop_visible_text_animation(paged_text_t* paged_text) {
+    lv_obj_t* label_obj = NULL;
+
+    if (!paged_text_handle_is_valid(paged_text)) {
+        return;
+    }
+
+    label_obj = label_get_obj(paged_text->label);
+    (void)lv_anim_delete(label_obj, paged_text_set_label_y);
+}
+
+static void paged_text_restore_label_view_height(paged_text_t* paged_text) {
+    lv_obj_t* label_obj = NULL;
+    int32_t view_height = 0;
+
+    if (!paged_text_handle_is_valid(paged_text)) {
+        return;
+    }
+
+    label_obj = label_get_obj(paged_text->label);
+    lv_obj_update_layout(paged_text->base.obj);
+    view_height = lv_obj_get_height(paged_text->base.obj) - paged_text->text_inset * 2;
+    lv_obj_set_height(label_obj, (lv_coord_t)LV_MAX(view_height, 1));
+}
+
 /**
  * @brief 隐藏指定高亮窗口层对象。
  * @param obj 高亮窗口层对象。
@@ -448,6 +477,8 @@ static void paged_text_render_current_page(paged_text_t* paged_text) {
         return;
     }
 
+    paged_text_stop_visible_text_animation(paged_text);
+    paged_text_restore_label_view_height(paged_text);
     total_pages = paged_text_total_pages_cached(paged_text);
     if (paged_text->current_page_idx >= total_pages) {
         paged_text->current_page_idx = total_pages - 1;
@@ -661,6 +692,8 @@ void paged_text_set_visible_text(paged_text_t* paged_text, const char* text) {
         return;
     }
 
+    paged_text_stop_visible_text_animation(paged_text);
+    paged_text_restore_label_view_height(paged_text);
     paged_text->source_text = text ? text : "";
     paged_text->source_text_len = (uint32_t)strlen(paged_text->source_text);
     paged_text->current_page_idx = 0;
@@ -669,6 +702,66 @@ void paged_text_set_visible_text(paged_text_t* paged_text, const char* text) {
     (void)paged_text_append_page(paged_text, 0, paged_text->source_text_len);
     label_set_text(paged_text->label, paged_text->source_text);
     lv_obj_set_y(label_get_obj(paged_text->label), (lv_coord_t)paged_text->text_inset);
+}
+
+void paged_text_set_visible_text_animated(paged_text_t* paged_text,
+                                          const char* text,
+                                          uint32_t from_offset,
+                                          uint32_t to_offset,
+                                          uint32_t duration_ms) {
+    lv_obj_t* label_obj = NULL;
+    lv_point_t from_pos = {0};
+    lv_point_t to_pos = {0};
+    uint32_t from_char_id = 0;
+    uint32_t to_char_id = 0;
+    int32_t from_y = 0;
+    int32_t to_y = 0;
+
+    if (!paged_text_handle_is_valid(paged_text)) {
+        return;
+    }
+
+    paged_text_stop_visible_text_animation(paged_text);
+    paged_text->source_text = text ? text : "";
+    paged_text->source_text_len = (uint32_t)strlen(paged_text->source_text);
+    if (from_offset > paged_text->source_text_len) {
+        from_offset = paged_text->source_text_len;
+    }
+    if (to_offset > paged_text->source_text_len) {
+        to_offset = paged_text->source_text_len;
+    }
+
+    paged_text->current_page_idx = 0;
+    paged_text->lines_per_page = 1;
+    paged_text_clear_offsets(paged_text);
+    (void)paged_text_append_page(paged_text, 0, paged_text->source_text_len);
+
+    label_obj = label_get_obj(paged_text->label);
+    lv_obj_set_height(label_obj, LV_SIZE_CONTENT);
+    label_set_text(paged_text->label, paged_text->source_text);
+    lv_obj_update_layout(label_obj);
+
+    from_char_id = lv_text_encoded_get_char_id(paged_text->source_text, from_offset);
+    to_char_id = lv_text_encoded_get_char_id(paged_text->source_text, to_offset);
+    lv_label_get_letter_pos(label_obj, from_char_id, &from_pos);
+    lv_label_get_letter_pos(label_obj, to_char_id, &to_pos);
+    from_y = paged_text->text_inset - from_pos.y;
+    to_y = paged_text->text_inset - to_pos.y;
+    lv_obj_set_y(label_obj, (lv_coord_t)from_y);
+
+    if (duration_ms == 0 || from_y == to_y) {
+        lv_obj_set_y(label_obj, (lv_coord_t)to_y);
+    } else {
+        lv_anim_t anim;
+
+        lv_anim_init(&anim);
+        lv_anim_set_var(&anim, label_obj);
+        lv_anim_set_values(&anim, from_y, to_y);
+        lv_anim_set_duration(&anim, duration_ms);
+        lv_anim_set_exec_cb(&anim, paged_text_set_label_y);
+        lv_anim_set_path_cb(&anim, lv_anim_path_ease_out);
+        lv_anim_start(&anim);
+    }
 }
 
 /**

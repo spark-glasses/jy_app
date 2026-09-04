@@ -9,27 +9,22 @@
  */
 #include "common/app_framework/app_router.h"
 
-#include "app_def.h"
 #include "app_lcd.h"
-#include "ai/ai.h"
 #include "common/app_framework/app_manager.h"
-#include "common/widgets/status_bar.h"
-#include "gallery/gallery.h"
-#include "guide/guide.h"
+#include "product_app_generated.h"
+#if defined(APP_NAME_HOME)
 #include "home/home.h"
-#include "imagefusion/imagefusion.h"
-#include "langselection/langselection.h"
-#include "music/music.h"
-#include "navigation/navigation.h"
-#include "prompter_pro/prompter.h"
-#include "reader/reader.h"
-#include "speech/speech.h"
+#endif
+#include "product_app.h"
+#include "common/widgets/status_bar.h"
 #include "system/popups/notify/notify.h"
 #include "system/system.h"
 #include "system/system_runtime_ui.h"
 
 #include <inttypes.h>
 #include <string.h>
+
+#define APP_ROUTER_PROTOCOL_HOME_VIEW "home" ///< 协议层固定使用的首页视图名称。
 
 static char g_router_curapp[MSG_STR_MAX_LEN] = {0};                  ///< 当前显示的 app 名称
 static app_router_entry_t g_router_entry_mode = APP_ROUTER_ENTRY_LOCAL;  ///< 当前 app 进入方式
@@ -38,11 +33,30 @@ static app_router_app_platform_t g_router_app_platform = APP_ROUTER_APP_PLATFORM
 static bool g_router_initialized = false;                            ///< 路由初始化状态
 
 /**
+ * @brief 按当前 App 策略同步 KWS 软件拦截状态。
+ * @param[in] app_name 当前 App 名称；为空时清除 App 拦截。
+ * @return 无返回值。
+ */
+static void app_router_sync_keyword_spotting_policy(const char* app_name) {
+    bool blocked = product_app_name_has_capability(
+        app_name,
+        PRODUCT_APP_CAP_ASSISTANT_OPEN_BLOCKED);
+
+    system_runtime_state_set_kws_intercept(
+        SYSTEM_KWS_INTERCEPT_REASON_APP_POLICY,
+        blocked);
+}
+
+/**
  * @brief 清理底部状态栏上遗留的自定义组件。
  * @return 无返回值。
  */
 static void app_router_clear_status_bar_widgets(void) {
     lv_obj_t* status_bar = system_get_status_bar(STATUS_BAR_POS_BOTTOM);
+
+    if (status_bar == NULL) {
+        status_bar = system_get_status_bar(STATUS_BAR_POS_TOP);
+    }
 
     if (status_bar == NULL || !lv_obj_is_valid(status_bar)) {
         return;
@@ -52,13 +66,56 @@ static void app_router_clear_status_bar_widgets(void) {
 }
 
 /**
+ * @brief 同步目标 App 在底部状态栏最左侧的展示名称。
+ * @param[in] targetapp 目标 App 协议名称。
+ * @return 无返回值。
+ */
+static void app_router_sync_status_bar_app_name(const char* targetapp) {
+    const char* home_app = product_app_role_name(PRODUCT_APP_ROLE_HOME);
+    const char* display_name = NULL;
+
+    if (targetapp != NULL && targetapp[0] != '\0' &&
+        (home_app == NULL || strcmp(targetapp, home_app) != 0)) {
+#if defined(APP_NAME_HOME)
+        display_name = home_get_app_display_name(targetapp);
+#endif
+        if (display_name == NULL || display_name[0] == '\0') {
+            display_name = targetapp;
+        }
+    }
+
+    system_status_bar_set_app_name(display_name);
+}
+
+/**
+ * @brief 获取目标 App 进入页面创建阶段前应使用的状态栏位置。
+ * @param[in] targetapp 目标 App 协议名称。
+ * @return 返回目标状态栏位置。
+ */
+static status_bar_widget_pos_t app_router_status_bar_position_for_app(
+    const char* targetapp) {
+    const char* home_app = product_app_role_name(PRODUCT_APP_ROLE_HOME);
+
+    if (PRODUCT_HOME_STATUS_BAR_AT_TOP && targetapp != NULL &&
+        home_app != NULL && strcmp(targetapp, home_app) == 0) {
+        return STATUS_BAR_POS_TOP;
+    }
+    return STATUS_BAR_POS_BOTTOM;
+}
+
+/**
  * @brief 判断蓝牙断连状态是否应阻断切换。
+ * @param[in] targetapp 目标 App 名称。
  * @return `true` 表示应阻断，`false` 表示允许继续。
  */
-static bool app_router_should_block_by_bt_disconnect(void) {
+static bool app_router_should_block_by_bt_disconnect(const char* targetapp) {
     app_t* current_app = app_manager_current();
+    const char* home_app = product_app_role_name(PRODUCT_APP_ROLE_HOME);
 
     if (system_get_btconn_state()) {
+        return false;
+    }
+    if (home_app != NULL && targetapp != NULL && strcmp(targetapp, home_app) == 0) {
         return false;
     }
     if (!system_config_get_langselection_finish()) {
@@ -79,16 +136,16 @@ static bool app_router_should_block_by_bt_disconnect(void) {
  * @return 返回首页应用名称；配置异常时返回 `NULL`。
  */
 static const char* app_router_resolve_home(void) {
-    const char* home = APP_NAME_HOME;
+    const char* home = product_app_role_name(PRODUCT_APP_ROLE_HOME);
 
     if (!system_config_get_langselection_finish()) {
-        home = APP_NAME_LANGSELECTION;
+        home = product_app_role_name(PRODUCT_APP_ROLE_LANGSELECTION);
     } else if (g_router_app_platform == APP_ROUTER_APP_PLATFORM_NONE) {
-        home = APP_NAME_HOME;
+        home = product_app_role_name(PRODUCT_APP_ROLE_HOME);
     } else if (g_router_app_platform == APP_ROUTER_APP_PLATFORM_WATCH) {
-        home = APP_NAME_TRANSCRIBE;
+        home = product_app_role_name(PRODUCT_APP_ROLE_WATCH_HOME);
     } else if (!system_config_is_userguide_finished()) {
-        home = APP_NAME_GUIDE;
+        home = product_app_role_name(PRODUCT_APP_ROLE_GUIDE);
     }
     return home;
 }
@@ -128,55 +185,6 @@ static bool app_router_parse_platform_name(const char* platform, app_router_app_
  * @brief 注册全部业务 App。
  * @return `true` 表示全部注册成功，`false` 表示至少一个 App 注册失败。
  */
-static bool app_router_register_apps(void) {
-    if (!home_app_register()) {
-        floatair_err("home app register failed");
-        return false;
-    }
-    if (!prompter_app_register()) {
-        floatair_err("prompter app register failed");
-        return false;
-    }
-    if (!speech_app_register()) {
-        floatair_err("speech app register failed");
-        return false;
-    }
-    if (!gallery_app_register()) {
-        floatair_err("gallery app register failed");
-        return false;
-    }
-    if (!navigation_app_register()) {
-        floatair_err("navigation app register failed");
-        return false;
-    }
-    if (!guide_app_register()) {
-        floatair_err("guide app register failed");
-        return false;
-    }
-    if (!music_app_register()) {
-        floatair_err("music app register failed");
-        return false;
-    }
-    if (!reader_app_register()) {
-        floatair_err("reader app register failed");
-        return false;
-    }
-    if (!langselection_app_register()) {
-        floatair_err("langselection app register failed");
-        return false;
-    }
-    if (!ai_app_register()) {
-        floatair_err("ai app register failed");
-        return false;
-    }
-    if (!imagefusion_app_register()) {
-        floatair_err("imagefusion app register failed");
-        return false;
-    }
-
-    return true;
-}
-
 bool app_router_init(void) {
     app_manager_config_t cfg = {0};
 
@@ -187,12 +195,14 @@ bool app_router_init(void) {
     cfg.page_host = app_page_host_default_config(
         (int32_t)config_lcd.ui_width,
         (int32_t)system_ui_get_page_content_height());
+    cfg.page_host.offset_y = (int32_t)system_ui_get_page_content_offset_y();
     if (!app_manager_init(&cfg)) {
         floatair_err("app manager init failed");
         return false;
     }
 
-    if (!app_router_register_apps()) {
+    if (!product_apps_register_all()) {
+        floatair_err("product apps register failed");
         if (!app_manager_deinit()) {
             floatair_warn("app router init rollback failed, manager busy");
         }
@@ -215,6 +225,8 @@ bool app_router_deinit(void) {
 }
 
 void app_router_reset_state(void) {
+    app_router_sync_keyword_spotting_policy(NULL);
+    system_status_bar_set_app_name(NULL);
     memset(g_router_curapp, 0, sizeof(g_router_curapp));
     g_router_entry_mode = APP_ROUTER_ENTRY_LOCAL;
     g_router_app_platform = g_router_default_app_platform;
@@ -234,6 +246,28 @@ bool app_router_call_home(void) {
 
 const char* app_router_get_home_viewname(void) {
     return app_router_resolve_home();
+}
+
+const char* app_router_protocol_to_app_name(const char* view_name) {
+    if (view_name == NULL) {
+        return NULL;
+    }
+    if (strcmp(view_name, APP_ROUTER_PROTOCOL_HOME_VIEW) == 0) {
+        return app_router_resolve_home();
+    }
+    return view_name;
+}
+
+const char* app_router_app_to_protocol_name(const char* app_name) {
+    const char* product_home = product_app_role_name(PRODUCT_APP_ROLE_HOME);
+
+    if (app_name == NULL) {
+        return NULL;
+    }
+    if (product_home != NULL && strcmp(app_name, product_home) == 0) {
+        return APP_ROUTER_PROTOCOL_HOME_VIEW;
+    }
+    return app_name;
 }
 
 bool app_router_apply_app_config(uint32_t app_platform) {
@@ -296,8 +330,11 @@ bool app_router_exit_current_app(void) {
 }
 
 const char* app_router_get_app(void) {
-    floatair_dbg("router get app %s", g_router_curapp);
     return g_router_curapp;
+}
+
+void app_router_refresh_status_bar_app_name(void) {
+    app_router_sync_status_bar_app_name(g_router_curapp);
 }
 
 bool app_router_is_busy(void) {
@@ -331,6 +368,9 @@ bool app_router_set_app(const char* targetapp, app_router_entry_t mode) {
     }
     if (strcmp(g_router_curapp, targetapp) == 0) {
         g_router_entry_mode = mode;
+        system_status_bar_set_position(
+            app_router_status_bar_position_for_app(targetapp));
+        app_router_sync_status_bar_app_name(targetapp);
         system_ui_sync_shell_state();
         floatair_info("router set app skipped, already current");
         return true;
@@ -344,7 +384,7 @@ bool app_router_set_app(const char* targetapp, app_router_entry_t mode) {
                       (int)mode);
         return false;
     }
-    if (app_router_should_block_by_bt_disconnect()) {
+    if (app_router_should_block_by_bt_disconnect(targetapp)) {
         floatair_warn("router set app blocked by bt disconnect overlay, current=%s target=%s mode=%d",
                       g_router_curapp,
                       targetapp,
@@ -374,10 +414,14 @@ bool app_router_set_app(const char* targetapp, app_router_entry_t mode) {
     }
 
     app_router_clear_status_bar_widgets();
+    system_status_bar_set_position(
+        app_router_status_bar_position_for_app(targetapp));
+    app_router_sync_status_bar_app_name(targetapp);
     g_router_entry_mode = mode;
     ret = app_manager_switch(targetapp);
     if (ret) {
         snprintf(g_router_curapp, sizeof(g_router_curapp), "%s", targetapp);
+        app_router_sync_keyword_spotting_policy(targetapp);
         suppress_view_change_report = !system_config_is_userguide_finished();
         if (g_router_entry_mode == APP_ROUTER_ENTRY_LOCAL &&
             !suppress_view_change_report) {
@@ -389,6 +433,8 @@ bool app_router_set_app(const char* targetapp, app_router_entry_t mode) {
         }
         system_ui_sync_shell_state();
     } else {
+        system_status_bar_set_app_name(NULL);
+        app_router_sync_keyword_spotting_policy(NULL);
         g_router_entry_mode = APP_ROUTER_ENTRY_LOCAL;
     }
     return ret;

@@ -6,7 +6,7 @@
 
 #include "assistant_popup_ui.h"
 #include "app_def.h"
-#include "stt_view_common.h"
+#include "common/stt/stt_view_common.h"
 #include "common/app_framework/app_layers.h"
 #include "common/app_framework/app_manager.h"
 #include "common/widgets/container.h"
@@ -267,12 +267,12 @@ bool assistant_handle_event(lv_event_code_t code) {
         }
         case LV_EVENT_GESTURE_LEFT:
             if (s_ui.scroll) {
-                container_scroll_up(s_ui.scroll, 3.0f / 4.0f);
+                container_scroll_up(s_ui.scroll, 3.0f / 4.0f, LV_ANIM_ON);
             }
             return true;
         case LV_EVENT_GESTURE_RIGHT:
             if (s_ui.scroll) {
-                container_scroll_down(s_ui.scroll, 3.0f / 4.0f);
+                container_scroll_down(s_ui.scroll, 3.0f / 4.0f, LV_ANIM_ON);
             }
             return true;
         default:

@@ -10,10 +10,13 @@
  */
 struct label_t {
     ui_widget_t base;
-    const lv_font_t* font;       ///< 当前组件绑定的系统注册字体；未绑定时为 `NULL`。
-    uint32_t max_lines;           ///< 最大显示行数；0 表示不限制。
-    lv_area_t clip_area_backup;   ///< 绘制裁剪前的原始裁剪区域。
-    bool clip_area_backup_valid;  ///< 是否已保存原始裁剪区域。
+    const lv_font_t* font;         ///< 当前组件绑定的系统注册字体；未绑定时为 `NULL`。
+    app_font_info_t font_info;     ///< 字体上限字号、字间距和行间距配置。
+    uint32_t max_lines;            ///< 最大显示行数；0 表示不限制。
+    lv_area_t clip_area_backup;    ///< 绘制裁剪前的原始裁剪区域。
+    bool clip_area_backup_valid;   ///< 是否已保存原始裁剪区域。
+    bool auto_fit_width;           ///< 是否根据文本和可用宽度自动缩小字体。
+    bool font_refreshing;          ///< 是否正在刷新自适应字体，防止尺寸事件重入。
 };
 
 /**
@@ -237,37 +240,101 @@ static void label_apply_max_lines(label_t* label) {
  * @param font_info 字体配置；传 `NULL` 时回退为系统默认字体。
  * @return `true` 表示字体或间距发生变化，`false` 表示保持不变。
  */
-static bool label_apply_font(label_t* label, const app_font_info_t* font_info) {
+static bool label_refresh_font(label_t* label) {
     const lv_font_t* font = get_system_font();
-    int32_t word_space = font_info ? (int32_t)font_info->wordSpace : 0;
-    int32_t row_space = font_info ? (int32_t)font_info->rowSpace : 0;
+    uint32_t max_font_size = get_system_font_size();
+    int32_t word_space = (int32_t)label->font_info.wordSpace;
+    int32_t row_space = (int32_t)label->font_info.rowSpace;
+    bool changed = false;
 
+    if (!label_handle_is_valid(label) || label->font_refreshing) {
+        return false;
+    }
+
+    if (app_fontsize_valid((int32_t)label->font_info.weight)) {
+        const lv_font_t* configured_font = get_font_by_size_near(label->font_info.weight);
+
+        if (configured_font != NULL) {
+            font = configured_font;
+            max_font_size = get_font_size_near(label->font_info.weight);
+        }
+    }
+
+    label->font_refreshing = true;
+    if (label->auto_fit_width) {
+        const char* text = lv_label_get_text(label->base.obj);
+        int32_t max_width = 0;
+
+        lv_obj_update_layout(label->base.obj);
+        max_width = lv_obj_get_content_width(label->base.obj);
+        if (text != NULL && text[0] != '\0' && max_width > 0) {
+            uint32_t requested_size = max_font_size;
+            uint32_t last_resolved_size = 0;
+
+            while (true) {
+                uint32_t resolved_size = get_font_size_near(requested_size);
+
+                if (resolved_size <= max_font_size && resolved_size != last_resolved_size) {
+                    const lv_font_t* candidate = get_font_by_size_near(requested_size);
+                    lv_point_t text_size = {0};
+
+                    if (candidate != NULL &&
+                        get_font_text_size(candidate,
+                                           &text_size,
+                                           text,
+                                           word_space,
+                                           row_space,
+                                           LV_COORD_MAX)) {
+                        font = candidate;
+                        last_resolved_size = resolved_size;
+                        if (text_size.x <= max_width || resolved_size <= APP_FONT_SIZE_MIN) {
+                            break;
+                        }
+                    }
+                }
+                if (requested_size <= APP_FONT_SIZE_MIN) {
+                    break;
+                }
+                requested_size--;
+            }
+        }
+    }
+
+    changed = lv_obj_get_style_text_font(label->base.obj, LV_PART_MAIN) != font ||
+              lv_obj_get_style_text_letter_space(label->base.obj, LV_PART_MAIN) != word_space ||
+              lv_obj_get_style_text_line_space(label->base.obj, LV_PART_MAIN) != row_space;
+    label_release_font(label);
+    if (font != NULL) {
+        label->font = font;
+        if (changed) {
+            lv_obj_set_style_text_font(label->base.obj, font, 0);
+        }
+    }
+    if (changed) {
+        lv_obj_set_style_text_letter_space(label->base.obj, word_space, 0);
+        lv_obj_set_style_text_line_space(label->base.obj, row_space, 0);
+    }
+    label->font_refreshing = false;
+    return changed;
+}
+
+/**
+ * @brief 保存字体上限与间距配置并刷新实际字体。
+ * @param label 目标组件句柄。
+ * @param font_info 字体配置；传 `NULL` 时回退为系统默认字体。
+ * @return `true` 表示实际字体或间距发生变化，`false` 表示保持不变。
+ */
+static bool label_apply_font(label_t* label, const app_font_info_t* font_info) {
     if (!label_handle_is_valid(label)) {
         return false;
     }
 
-    if (font_info && app_fontsize_valid((int32_t)font_info->weight)) {
-        label->font = get_font_by_size_near(font_info->weight);
-        if (label->font != NULL) {
-            font = label->font;
-        }
+    if (font_info != NULL) {
+        label->font_info = *font_info;
+    } else {
+        memset(&label->font_info, 0, sizeof(label->font_info));
     }
-
-    if (lv_obj_get_style_text_font(label->base.obj, LV_PART_MAIN) == font &&
-        lv_obj_get_style_text_letter_space(label->base.obj, LV_PART_MAIN) == word_space &&
-        lv_obj_get_style_text_line_space(label->base.obj, LV_PART_MAIN) == row_space) {
-        return false;
-    }
-
-    label_release_font(label);
-    if (font) {
-        label->font = font;
-        lv_obj_set_style_text_font(label->base.obj, font, 0);
-    }
-
-    lv_obj_set_style_text_letter_space(label->base.obj, word_space, 0);
-    lv_obj_set_style_text_line_space(label->base.obj, row_space, 0);
-    return true;
+    return label_refresh_font(label);
 }
 
 /**
@@ -292,6 +359,24 @@ static void label_on_delete(lv_event_t* e) {
 }
 
 /**
+ * @brief 在组件可用宽度变化后重新计算自适应字体。
+ * @param e LVGL 尺寸变化事件。
+ * @return 无返回值。
+ */
+static void label_on_size_changed(lv_event_t* e) {
+    lv_obj_t* obj = lv_event_get_current_target(e);
+    label_t* label = (label_t*)lv_obj_get_user_data(obj);
+
+    if (label == NULL || !label->auto_fit_width || label->font_refreshing) {
+        return;
+    }
+    if (label_refresh_font(label)) {
+        label_apply_max_lines(label);
+        label_notify_layout_changed(label);
+    }
+}
+
+/**
  * @brief 获取默认配置。
  *
  * @return 返回填充默认值后的配置结构体。
@@ -312,6 +397,7 @@ label_cfg_t label_default_cfg(void) {
     cfg.align = LABEL_ALIGN_CENTER;
     cfg.overflow = LABEL_OVERFLOW_CLIP;
     cfg.max_lines = 0;
+    cfg.auto_fit_width = false;
     cfg.text = "";
 
     return cfg;
@@ -357,6 +443,7 @@ label_t* label_create(lv_obj_t* parent, const label_cfg_t* cfg) {
 
     lv_obj_set_user_data(obj, label);
     lv_obj_add_event_cb(obj, label_on_delete, LV_EVENT_DELETE, NULL);
+    lv_obj_add_event_cb(obj, label_on_size_changed, LV_EVENT_SIZE_CHANGED, NULL);
     lv_obj_add_event_cb(obj,
                         label_clip_draw_event_cb,
                         LV_EVENT_DRAW_MAIN_BEGIN | LV_EVENT_PREPROCESS,
@@ -426,6 +513,9 @@ void label_set_text(label_t* label, const char* text) {
     old_height = lv_obj_get_height(label->base.obj);
 
     lv_label_set_text(label->base.obj, new_text);
+    if (label->auto_fit_width && label_refresh_font(label)) {
+        label_apply_max_lines(label);
+    }
     label_notify_layout_changed_if_size_changed(label, old_width, old_height);
 }
 
@@ -456,6 +546,9 @@ void label_append_text(label_t* label, const char* text) {
     }
 
     lv_label_ins_text(label->base.obj, LV_LABEL_POS_LAST, text);
+    if (label->auto_fit_width && label_refresh_font(label)) {
+        label_apply_max_lines(label);
+    }
     label_notify_layout_changed(label);
 }
 
@@ -481,6 +574,9 @@ void label_set_padding(label_t* label, int32_t pad_hor, int32_t pad_ver) {
 
     lv_obj_set_style_pad_hor(label->base.obj, (lv_coord_t)pad_hor, 0);
     lv_obj_set_style_pad_ver(label->base.obj, (lv_coord_t)pad_ver, 0);
+    if (label->auto_fit_width && label_refresh_font(label)) {
+        label_apply_max_lines(label);
+    }
 }
 
 /**
@@ -607,6 +703,24 @@ void label_set_max_lines(label_t* label, uint32_t max_lines) {
 }
 
 /**
+ * @brief 设置是否根据组件可用宽度自动缩小字体。
+ * @param label 目标组件句柄。
+ * @param enabled 是否开启宽度自适应。
+ * @return 无返回值。
+ */
+void label_set_auto_fit_width(label_t* label, bool enabled) {
+    if (!label_handle_is_valid(label) || label->auto_fit_width == enabled) {
+        return;
+    }
+
+    label->auto_fit_width = enabled;
+    if (label_refresh_font(label)) {
+        label_apply_max_lines(label);
+        label_notify_layout_changed(label);
+    }
+}
+
+/**
  * @brief 设置字体信息。
  *
  * @param label 目标组件句柄。
@@ -679,6 +793,7 @@ void label_apply_cfg(label_t* label, const label_cfg_t* cfg) {
     }
     label_set_align(label, cfg->align);
     label_set_overflow(label, cfg->overflow);
+    label->auto_fit_width = cfg->auto_fit_width;
     label_set_font_info(label, &cfg->font);
     label_set_max_lines(label, cfg->max_lines);
 }

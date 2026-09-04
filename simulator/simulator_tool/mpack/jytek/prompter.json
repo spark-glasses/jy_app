@@ -1,0 +1,124 @@
+[
+    {
+        "biz": "SystemControl",
+        "cmd": "setView",
+        "data": {
+            "viewName": "prompter"
+        },
+        "id": 0,
+        "name": "进入",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemControl",
+        "cmd": "setView",
+        "data": {
+            "viewName": "home"
+        },
+        "id": 0,
+        "name": "退出",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "prompter",
+        "cmd": "getTextLayout",
+        "data": {
+        },
+        "id": 5,
+        "name": "获取布局",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "prompter",
+        "cmd": "setFontConfig",
+        "data": {
+            "fontConfig": {
+                "rowSpace": 0,
+                "weight": 32,
+                "wordSpace": 0
+            }
+        },
+        "id": 5,
+        "name": "设置文字配置",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "prompter",
+        "cmd": "setFileListMenu",
+        "data": {
+            "defaultItemId": 1,
+            "itemCount": 2,
+            "items": [
+                {
+                    "id": 1,
+                    "label": "demo.txt"
+                },
+                {
+                    "id": 2,
+                    "label": "demo2.txt"
+                }
+            ],
+            "menuId": 1
+        },
+        "id": 5,
+        "name": "设置文件列表",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "prompter",
+        "cmd": "setPrompterFile",
+        "data": {
+            "crc32": 62142,
+            "dir": "/jyt_d/apps/prompter",
+            "name": "demo.txt",
+            "size": 5338
+        },
+        "id": 5,
+        "name": "设置预加载文件",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "prompter",
+        "cmd": "seekTo",
+        "data": {
+            "bottomMaskHeight": 0,
+            "duration": 300,
+            "length": 256,
+            "offset": 0,
+            "topMaskHeight": 0
+        },
+        "id": 5,
+        "name": "加载文件并设置偏移",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "prompter",
+        "cmd": "setTick",
+        "data": {
+            "tick": 30
+        },
+        "id": 5,
+        "name": "设置提词时间",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "prompter",
+        "cmd": "setState",
+        "data": {
+            "state": 1
+        },
+        "id": 5,
+        "name": "开始提词（state=1）",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "prompter",
+        "cmd": "setState",
+        "data": {
+            "state": 0
+        },
+        "id": 5,
+        "name": "暂停提词（state=0）",
+        "type": "DATA_RELIABLE"
+    }
+]

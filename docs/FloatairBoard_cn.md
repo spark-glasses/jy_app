@@ -84,9 +84,13 @@ SDK 包包含：
 | `romfs/` | 固件只读资源，ARM 构建时会复制到构建目录 staging 后打包 |
 | `lfsc/` | LittleFS C 分区源目录，构建产物 `uimain` 会复制到这里参与打包 |
 | `lfsd/` | LittleFS D 分区源目录，会生成 `nuttx_lfsd.bin` |
+| `left_romfs/` | 默认左耳只读资源；当前包含 `kws/kws_firmware.bin` 和 `kws/kws_model.bin` |
+| `products/<product>/left_romfs/` | 可选的产品专属左耳资源；存在时替代根目录默认资源，不执行目录覆盖 |
 | `StringPool.csv` | 多语言字符串池输入，打包时生成 i18n JSON |
 | `ui.res.json` | UI 资源描述输入 |
 | `apps/**/*.ui.json` / `system/**/*.ui.json` | UI 编译器输入，生成到构建目录 `generated/ui` |
+
+`left_romfs` 的产品选择和镜像生成仅用于 ARM 构建，PC 模拟器不读取或生成该资源。
 
 ## 5. 启动 Logo
 
@@ -108,8 +112,8 @@ ARM 构建的核心流程：
 1. CMake 识别 `arm` 平台并加载 `cmake/PlatformArm.cmake`。
 2. 收集 `apps/`、`system/`、`common/`、`lvgl/`、`thirdparty/` 和生成 UI 源码。
 3. 生成 `uimain` ELF。
-4. 构建后复制 `romfs/` 到构建目录 staging。
-5. 调用 `scripts/fs_img.py --source <uimain> --romfs-dir <romfs_staging>`。
+4. 选择左耳资源：优先使用 `products/<product>/left_romfs/`，不存在时使用根目录 `left_romfs/`；复制到构建目录 staging。
+5. 调用 `scripts/fs_img.py --source <uimain> --romfs-dir <romfs_staging> --left-romfs-dir <left_romfs_staging>`。
 6. 生成文件系统镜像。
 
 常见 CMake 配置形式：
@@ -133,6 +137,7 @@ ARM 构建后，构建目录中会生成：
 | `nuttx_lfsc.bin` | LittleFS C 分区镜像 |
 | `nuttx_lfsd.bin` | LittleFS D 分区镜像 |
 | `nuttx_romfs.bin` | ROMFS 镜像 |
+| `nuttx_lromfs.bin` | 左耳 ROMFS 镜像，分区容量 1 MiB，包含所选 product 的 KWS 固件和模型 |
 | `generated/` | UI 编译、资源头文件和构建配置等生成内容 |
 
 ## 8. 常见问题

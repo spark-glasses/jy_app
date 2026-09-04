@@ -14,7 +14,12 @@ extern "C" {
 #endif
 
 extern int Waiting4SystemMessage(void *pMsg);
+extern int Waiting4SystemMessageTimeout(void *pMsg, int timeout_ms);
 extern int simulator_shutdown_requested(void);
+extern void simulator_handle_local_mq_msg(MQ_NAME_ID qid,
+                                          LOCAL_MSG_ID msg_id,
+                                          const void *payload,
+                                          uint32_t payload_len);
 
 extern long int GetMicroSecondsCount(void);
 
@@ -45,10 +50,8 @@ static inline OSAL_MQ_MSG *__linux_osal_timeout_waiting_mq_msg(MQ_NAME_ID qid, C
 {
     (void)qid;
     (void)speed;
-    static int s_inited = 0;
-    if (!s_inited) { sim_socket_rx_init(9999); s_inited = 1; }
     JYT_ELF_MQ_MSG *sysmsg = NULL;
-    int r = sim_socket_rx_wait(&sysmsg, timeout);
+    int r = Waiting4SystemMessageTimeout(&sysmsg, timeout);
     if (r != (int)sizeof(JYT_ELF_MQ_MSG*) || !sysmsg) return NULL;
     OSAL_MQ_MSG *m = (OSAL_MQ_MSG *)malloc(sizeof(OSAL_MQ_MSG));
     if (!m) { free(sysmsg); return NULL; }
@@ -82,10 +85,10 @@ static inline void __linux_osal_delete_mq_msg(OSAL_MQ_MSG *msg)
 #undef OSAL_INST_SEND_LOCAL_MQ_MSG
 #define OSAL_INST_SEND_LOCAL_MQ_MSG(qid, MSG_ID, PDU, PDU_SIZE) \
     do {                                                       \
-        (void)(qid);                                           \
-        (void)(MSG_ID);                                        \
-        (void)(PDU);                                           \
-        (void)(PDU_SIZE);                                      \
+        simulator_handle_local_mq_msg((qid),                   \
+                                       (MSG_ID),                \
+                                       (PDU),                   \
+                                       (PDU_SIZE));             \
     } while (0)
 
 #undef OSAL_INST_SEND_REMOTE_MQ_MSG

@@ -6,8 +6,16 @@
 
 #include "app_lcd.h"
 #include "common/app_framework/app_manager.h"
+#include "common/stt/stt_view_common.h"
 #include "message.h"
 #include "system/stt_common.h"
+
+static stt_view_deferred_update_t s_assistant_stt_deferred_update;
+
+static void assistant_stt_deferred_update_cb(void* user_data) {
+    (void)user_data;
+    assistant_stt_update();
+}
 
 /**
  * @brief 处理打开 assistant 弹窗命令。
@@ -19,7 +27,7 @@ bool assistant_open_cmd(mpack_node_t node, msg_pack_t* msg) {
     (void)node;
     floatair_assert(msg != NULL, "msg is NULL");
 
-    if (!assistant_open()) {
+    if (!assistant_open(false)) {
         floatair_err("assistant open failed");
         return app_mpack_send_ack(msg, ErrNotReady);
     }
@@ -48,9 +56,12 @@ bool assistant_update_stt_info_cmd(mpack_node_t node, msg_pack_t* msg) {
     }
 
     ret = stt_update_sttinfo(node, msg);
-    if (ret && !stt_update_sttinfo_was_skipped()) {
+    if (ret || stt_update_sttinfo_was_skipped()) {
         assistant_stt_note_update(area);
-        assistant_stt_update();
+        stt_view_request_deferred_update(&s_assistant_stt_deferred_update,
+                                         "assistant",
+                                         assistant_stt_deferred_update_cb,
+                                         NULL);
     }
     return ret;
 }
@@ -67,6 +78,7 @@ bool assistant_close_cmd(mpack_node_t node, msg_pack_t* msg) {
     (void)node;
     floatair_assert(msg != NULL, "msg is NULL");
 
+    stt_view_cancel_deferred_update(&s_assistant_stt_deferred_update);
     if (!assistant_close(false)) {
         floatair_err("assistant close failed");
         return app_mpack_send_ack(msg, ErrNotReady);

@@ -1,0 +1,87 @@
+[
+    {
+        "biz": "File",
+        "cmd": "getFileList",
+        "data": {
+            "dir": "/jyt_d/apps/gallery",
+            "type": 1
+        },
+        "id": 0,
+        "name": "获取文件列表",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "File",
+        "cmd": "writeFile",
+        "data": {
+            "crc32": "$file.crc()",
+            "dir": "/jyt_d/apps/prompter",
+            "name": "$file.name()",
+            "pkt": {
+                "bytes": "$file.chunkBytes(1024)",
+                "crc32": "$file.chunkCrc(1024)",
+                "cur": "$file.chunkCur(1024)",
+                "total": "$file.chunkTotal(1024)"
+            },
+            "size": "$file.size()",
+            "type": 1
+        },
+        "id": 0,
+        "name": "写入文件",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "File",
+        "cmd": "writeFileByBinary",
+        "data": {
+            "crc32": "$file.crc()",
+            "dir": "/jyt_d/apps/prompter",
+            "name": "$file.name()",
+            "pkt": {
+                "bytes": "$file.chunkBytes(1024)",
+                "crc32": "$file.chunkCrc(1024)",
+                "cur": "$file.chunkCur(1024)",
+                "total": "$file.chunkTotal(1024)"
+            },
+            "size": "$file.size()",
+            "type": 1
+        },
+        "id": 0,
+        "name": "以二进制写入文件",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "File",
+        "cmd": "removeFile",
+        "data": {
+            "dir": "/jyt_d/apps/prompter",
+            "name": "demo.txt",
+            "type": 0
+        },
+        "id": 0,
+        "name": "删除文件",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "File",
+        "cmd": "isFileExist",
+        "data": {
+            "dir": "/jyt_d/apps/prompter",
+            "name": "demo.txt",
+            "type": 0
+        },
+        "id": 0,
+        "name": "检查文件是否存在",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "File",
+        "cmd": "clearFolder",
+        "data": {
+            "dir": "/jyt_d/apps/prompter"
+        },
+        "id": 0,
+        "name": "清空目录",
+        "type": "DATA_RELIABLE"
+    }
+]

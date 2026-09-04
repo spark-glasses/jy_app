@@ -12,9 +12,14 @@
 #include "app_def.h"
 #include "elf_common.h"
 #include "floatair_dbg.h"
+#include "floatair_fs.h"
 #include "message.h"
 #include "common/app_framework/app_router.h"
 #include "common/guide_runtime.h"
+#if defined(APP_NAME_HOME)
+#include "home/home.h"
+#endif
+#include "product_app.h"
 #include "system/system.h"
 #include "system/system_file_transfer.h"
 #include "system/system_runtime_ui.h"
@@ -33,16 +38,10 @@ static bool system_systemcontrol_unbind(mpack_node_t node, msg_pack_t* msg) {
 static bool system_systemcontrol_factoryreset(mpack_node_t node, msg_pack_t* msg) {
     (void) node;
     floatair_assert(msg != NULL, "msg is NULL");
-    if (!system_cfgfile_reset_to_default()) {
-        floatair_err("system_cfgfile_reset_to_default failed");
+    if (!system_factoryreset_execute()) {
+        floatair_err("factory reset request failed");
         return app_mpack_send_ack(msg, ErrBizErr);
     }
-    system_factoryreset_invoke();
-    floatair_lcd_set_brightness(system_config_get_brightness());
-    system_sync_config_to_device();
-    system_request_device_state();
-    app_sleep_timer_reset();
-    (void)system_request_bt_reset_pair();
     return app_mpack_send_ack(msg, Dp_ErrNone);
 }
 
@@ -57,18 +56,26 @@ static bool system_systemcontrol_recovery(mpack_node_t node, msg_pack_t* msg) {
 }
 
 static bool system_systemcontrol_getview(mpack_node_t node, msg_pack_t* msg) {
+    const char* protocol_view = NULL;
+
     (void) node;
     floatair_assert(msg != NULL, "msg is NULL");
+    protocol_view = app_router_app_to_protocol_name(app_router_get_app());
+    if (protocol_view == NULL) {
+        return app_mpack_send_ack(msg, ErrBizErr);
+    }
     msg_pack_writer_t* writer = app_mpack_create_writer(msg, MSG_TYPE_ACK);
     floatair_assert(writer, "writer err");
     mpack_start_map(&writer->writer, 1);
     mpack_write_cstr(&writer->writer, "view");
-    mpack_write_cstr(&writer->writer, app_router_get_app());
+    mpack_write_cstr(&writer->writer, protocol_view);
     mpack_finish_map(&writer->writer);
     return app_mpack_send_writer(writer);
 }
 
 static bool system_systemcontrol_setview(mpack_node_t node, msg_pack_t* msg) {
+    const char* target_app = NULL;
+
     floatair_assert(msg != NULL, "msg is NULL");
     char view[MSG_STR_MAX_LEN] = {0};
     if (!app_msg_get_str(node, "viewName", view, sizeof(view))) {
@@ -76,18 +83,23 @@ static bool system_systemcontrol_setview(mpack_node_t node, msg_pack_t* msg) {
         return app_mpack_send_ack(msg, ErrBadParam);
     }
     floatair_info("view %s", view);
+    target_app = app_router_protocol_to_app_name(view);
+    if (target_app == NULL) {
+        floatair_err("resolve protocol view failed: %s", view);
+        return app_mpack_send_ack(msg, ErrBadParam);
+    }
     if (app_router_is_busy()) {
         return app_mpack_send_ack(msg, ErrNotReady);
     }
     if (floatair_lcd_get_state() == LCD_OFF) {
-        system_set_sys_state(1);
-        (void)system_report_sys_state(1);
+        system_set_sys_state(LCD_ON);
+        (void)system_report_sys_state(LCD_ON, SYSTEM_SYS_STATE_TRIGGER_PHONE_SET_VIEW);
     }
-    if (!app_router_set_app(view, APP_ROUTER_ENTRY_REMOTE)) {
-        floatair_err("set app failed");
+    if (!app_router_set_app(target_app, APP_ROUTER_ENTRY_REMOTE)) {
+        floatair_err("set app failed: protocol=%s target=%s", view, target_app);
         return app_mpack_send_ack(msg, app_router_is_busy() ? ErrNotReady : ErrBadParam);
     }
-    floatair_info("view %s done", view);
+    floatair_info("view %s done, target=%s", view, target_app);
     return app_mpack_send_ack(msg, Dp_ErrNone);
 }
 
@@ -114,11 +126,12 @@ static bool system_systemcontrol_sendtouchevent(mpack_node_t node, msg_pack_t* m
 static bool system_systemcontrol_openguide(mpack_node_t node, msg_pack_t* msg) {
     (void)node;
     char previous_progress[MSG_STR_MAX_LEN] = {0};
+    const char* guide_app = product_app_role_name(PRODUCT_APP_ROLE_GUIDE);
     const char* progress = NULL;
 
     floatair_assert(msg != NULL, "msg is NULL");
 
-    if (app_router_is_busy()) {
+    if (guide_app == NULL || app_router_is_busy()) {
         return app_mpack_send_ack(msg, ErrNotReady);
     }
     progress = system_config_get_userguide();
@@ -130,7 +143,7 @@ static bool system_systemcontrol_openguide(mpack_node_t node, msg_pack_t* msg) {
     if (!system_config_set_userguide(SYSTEM_USERGUIDE_PROGRESS_FALSE)) {
         return app_mpack_send_ack(msg, ErrBizErr);
     }
-    if (!app_router_set_app(APP_NAME_GUIDE, APP_ROUTER_ENTRY_REMOTE)) {
+    if (!app_router_set_app(guide_app, APP_ROUTER_ENTRY_REMOTE)) {
         if (previous_progress[0] != '\0' && !system_config_set_userguide(previous_progress)) {
             floatair_warn("restore userguide progress failed: %s", previous_progress);
         }
@@ -148,11 +161,12 @@ static bool system_systemcontrol_openguide(mpack_node_t node, msg_pack_t* msg) {
 static bool system_systemcontrol_closeguide(mpack_node_t node, msg_pack_t* msg) {
     (void)node;
     char previous_progress[MSG_STR_MAX_LEN] = {0};
+    const char* home_app = product_app_role_name(PRODUCT_APP_ROLE_HOME);
     const char* progress = NULL;
 
     floatair_assert(msg != NULL, "msg is NULL");
 
-    if (app_router_is_busy()) {
+    if (home_app == NULL || app_router_is_busy()) {
         return app_mpack_send_ack(msg, ErrNotReady);
     }
     progress = system_config_get_userguide();
@@ -164,13 +178,16 @@ static bool system_systemcontrol_closeguide(mpack_node_t node, msg_pack_t* msg) 
     if (!system_config_set_userguide(SYSTEM_USERGUIDE_PROGRESS_TRUE)) {
         return app_mpack_send_ack(msg, ErrBizErr);
     }
-    if (!app_router_set_app(APP_NAME_HOME, APP_ROUTER_ENTRY_REMOTE)) {
+    if (!app_router_set_app(home_app, APP_ROUTER_ENTRY_REMOTE)) {
         if (previous_progress[0] != '\0' && !system_config_set_userguide(previous_progress)) {
             floatair_warn("restore userguide progress failed: %s", previous_progress);
         }
         return app_mpack_send_ack(msg, app_router_is_busy() ? ErrNotReady : ErrBizErr);
     }
-    (void)system_report_view_change(APP_NAME_HOME);
+#if defined(APP_NAME_HOME)
+    home_view_reset_selection();
+#endif
+    (void)system_report_view_change(home_app);
     return app_mpack_send_ack(msg, Dp_ErrNone);
 }
 
@@ -181,8 +198,7 @@ static bool system_systemcontrol_closeguide(mpack_node_t node, msg_pack_t* msg) 
 static bool system_systemcontrol_upload_progress_page_supported(void) {
     const char* current_app = app_router_get_app();
 
-    return strcmp(current_app, APP_NAME_PROMPTER) == 0 ||
-           strcmp(current_app, APP_NAME_GALLERY) == 0;
+    return product_app_name_has_capability(current_app, PRODUCT_APP_CAP_UPLOAD_PROGRESS);
 }
 
 /**

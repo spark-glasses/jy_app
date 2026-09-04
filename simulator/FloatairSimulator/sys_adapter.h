@@ -15,6 +15,9 @@ int simulator_shutdown_requested(void);
 void simulator_shutdown_runtime(void);
 void simulator_lvgl_enter_ui_critical(void);
 void simulator_lvgl_leave_ui_critical(void);
+void simulator_request_display_refresh(lv_display_t* display);
+void simulator_refresh_display_sync(lv_display_t* display);
+void simulator_process_display_refresh_requests(void);
 
 /**
  * @brief 向模拟器系统消息队列投递一个系统事件。
@@ -35,4 +38,9 @@ void simulator_post_system_event_ex(uint16_t event_type,
                                     uint8_t simple_data,
                                     const void* payload,
                                     uint16_t payload_len);
+time_t simulator_system_time_now(void);
+void simulator_handle_local_mq_msg(MQ_NAME_ID qid,
+                                   LOCAL_MSG_ID msg_id,
+                                   const void* payload,
+                                   uint32_t payload_len);
 void simulator_update_lcd_visual(uint8_t brightness, lcd_state_t state);

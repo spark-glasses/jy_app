@@ -4,7 +4,7 @@
     "type": "container",
     "id": "popup_root",
     "geometry": { "x": 0, "y": 0, "w": "100%", "h": "100%" },
-    "opa": 178,
+    "opa": 0,
     "children": [
       {
         "type": "container",

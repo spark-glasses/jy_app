@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "product": "jytek",
+  "status_bar_headset": true,
+  "common_modules": ["stt", "speech"],
+  "modules": [
+    "home",
+    {"directory": "transcribe", "registration": "descriptor", "runtime": "speech"},
+    {"directory": "translate", "registration": "descriptor", "runtime": "speech"},
+    "gallery",
+    "navigation",
+    "guide",
+    "music",
+    "reader",
+    "recorder",
+    "langselection",
+    "ai",
+    "imagefusion",
+    {
+      "directory": "prompter",
+      "api": "prompter"
+    }
+  ],
+  "apps": [
+    {"key": "assistant", "macro": "ASSISTANT", "name": "assistant"},
+    {"key": "home", "macro": "HOME", "module": "home", "name": "home", "msg_id": 1},
+    {"key": "transcribe", "macro": "TRANSCRIBE", "module": "transcribe", "name": "transcribe", "msg_id": 2, "capabilities": ["assistant_open_blocked"]},
+    {"key": "translate", "macro": "TRANSLATE", "module": "translate", "name": "translate", "msg_id": 3, "capabilities": ["assistant_open_blocked"]},
+    {"key": "prompter", "macro": "PROMPTER", "module": "prompter", "name": "prompter", "msg_id": 5, "capabilities": ["upload_progress", "assistant_open_blocked"]},
+    {"key": "gallery", "macro": "GALLERY", "module": "gallery", "name": "gallery", "msg_id": 7, "capabilities": ["upload_progress"]},
+    {"key": "navigation", "macro": "NAVIGATION", "module": "navigation", "name": "navigation", "msg_id": 4},
+    {"key": "guide", "macro": "GUIDE", "module": "guide", "name": "guide", "msg_id": 13, "capabilities": ["guide", "guide_simple"]},
+    {"key": "music", "macro": "MUSIC", "module": "music", "name": "music", "msg_id": 6},
+    {"key": "reader", "macro": "READER", "module": "reader", "name": "reader", "msg_id": 9},
+    {"key": "recorder", "macro": "RECORDER", "module": "recorder", "name": "recorder", "msg_id": 1002},
+    {"key": "langselection", "macro": "LANGSELECTION", "module": "langselection", "name": "langselection"},
+    {"key": "ai", "macro": "AI", "module": "ai", "name": "ai", "msg_id": 8, "capabilities": ["assistant_open_blocked", "stt_question_no_skip"]},
+    {"key": "imagefusion", "macro": "IMAGEFUSION", "module": "imagefusion", "name": "imagefusion", "msg_id": 1001}
+  ],
+  "roles": {
+    "home": "home",
+    "langselection": "langselection",
+    "watch_home": "transcribe",
+    "guide": "guide",
+    "assistant": "assistant"
+  }
+}

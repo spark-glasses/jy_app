@@ -40,6 +40,18 @@ GROUPS = [
     ]),
 ]
 
+ATTACHMENT_TYPES = [  # 与 JYT_ATTACHMENT_TYPE 的协议值保持一致。
+    ("Glasses Case", 1),
+    ("Charging Cable", 2),
+    ("Headset", 3),
+    ("Empty", 0),
+]
+
+ATTACHMENT_SIDES = [  # 当前硬件定义：从侧为左侧，主侧为右侧。
+    ("Left", 1),
+    ("Right", 0),
+]
+
 
 class EventPanel:
     def __init__(self, fifo_path: str) -> None:
@@ -47,7 +59,7 @@ class EventPanel:
         self.root = tk.Tk()
         self.root.title("Floatair OS Events")
         self.root.geometry("760x760")
-        self.root.resizable(False, False)
+        self.root.resizable(True, True)
         self.status_var = tk.StringVar(value=f"FIFO: {fifo_path}")
         self.battery_soc_value = tk.StringVar(value="80")
         self.time_text_value = tk.StringVar(value=dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
@@ -59,8 +71,36 @@ class EventPanel:
         except tk.TclError:
             pass
 
-        container = ttk.Frame(self.root, padding=12)
-        container.pack(fill="both", expand=True)
+        viewport = ttk.Frame(self.root)
+        viewport.pack(fill="both", expand=True)
+
+        canvas = tk.Canvas(
+            viewport,
+            borderwidth=0,
+            highlightthickness=0,
+            background=self.root.cget("background"),
+        )
+        scrollbar = ttk.Scrollbar(viewport, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        container = ttk.Frame(canvas, padding=12)
+        container_window = canvas.create_window((0, 0), window=container, anchor="nw")
+        container.bind(
+            "<Configure>",
+            lambda _event: canvas.configure(scrollregion=canvas.bbox("all")),
+        )
+        canvas.bind(
+            "<Configure>",
+            lambda event: canvas.itemconfigure(container_window, width=event.width),
+        )
+        self.root.bind(
+            "<MouseWheel>",
+            lambda event: canvas.yview_scroll(-1 if event.delta > 0 else 1, "units"),
+        )
+        self.root.bind("<Button-4>", lambda _event: canvas.yview_scroll(-1, "units"))
+        self.root.bind("<Button-5>", lambda _event: canvas.yview_scroll(1, "units"))
         container.columnconfigure(0, weight=1)
 
         title = ttk.Label(container, text="OS Event Pad")
@@ -97,6 +137,32 @@ class EventPanel:
                         width=6,
                     ).grid(row=0, column=col, padx=(0 if col == 0 else 6, 0))
 
+        attachment_frame = ttk.LabelFrame(groups_frame, text="Attachments", padding=8)
+        attachment_frame.grid(row=len(GROUPS), column=0, pady=(8, 0), sticky="ew")
+        for col in range(1, len(ATTACHMENT_TYPES) + 1):
+            attachment_frame.columnconfigure(col, weight=1)
+
+        for row, (side_label, side_value) in enumerate(ATTACHMENT_SIDES):
+            ttk.Label(attachment_frame, text=side_label, width=8).grid(
+                row=row,
+                column=0,
+                sticky="w",
+                pady=(0 if row == 0 else 8, 0),
+            )
+            for col, (type_label, type_value) in enumerate(ATTACHMENT_TYPES, start=1):
+                event_line = f"SET_JYT_ACC_TYPE_CHANGED {type_value} {side_value}"
+                ttk.Button(
+                    attachment_frame,
+                    text=type_label,
+                    command=lambda line=event_line: self._write_line(line),
+                ).grid(
+                    row=row,
+                    column=col,
+                    sticky="ew",
+                    padx=(8, 0),
+                    pady=(0 if row == 0 else 8, 0),
+                )
+
         tools_frame = ttk.LabelFrame(container, text="Tools", padding=8)
         tools_frame.pack(fill="x", expand=False, pady=(10, 0))
         tools_frame.columnconfigure(1, weight=1)
@@ -115,8 +181,9 @@ class EventPanel:
         phone_frame.columnconfigure(0, weight=1)
         ttk.Entry(phone_frame, textvariable=self.caller_value, width=18).grid(row=0, column=0, sticky="ew")
         ttk.Button(phone_frame, text="Ringing", command=lambda: self.send_call_event("SET_BT_CALL_RINGING")).grid(row=0, column=1, padx=(8, 0))
-        ttk.Button(phone_frame, text="Connected", command=lambda: self.send_call_event("SET_BT_CALL_CONNECTED")).grid(row=0, column=2, padx=(8, 0))
-        ttk.Button(phone_frame, text="Disconnected", command=lambda: self.send_call_event("SET_BT_CALL_DISCONNECTED")).grid(row=0, column=3, padx=(8, 0))
+        ttk.Button(phone_frame, text="Outgoing", command=lambda: self.send_call_event("SET_BT_CALL_OUTGOING")).grid(row=0, column=2, padx=(8, 0))
+        ttk.Button(phone_frame, text="Connected", command=lambda: self.send_call_event("SET_BT_CALL_CONNECTED")).grid(row=0, column=3, padx=(8, 0))
+        ttk.Button(phone_frame, text="Disconnected", command=lambda: self.send_call_event("SET_BT_CALL_DISCONNECTED")).grid(row=0, column=4, padx=(8, 0))
 
         status = ttk.Label(container, textvariable=self.status_var, foreground="#445")
         status.pack(anchor="w", pady=(10, 0))

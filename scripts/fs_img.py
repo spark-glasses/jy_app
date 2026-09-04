@@ -21,16 +21,17 @@ DEFAULT_SOURCE = Path("./uimain")
 DEFAULT_SYMBOL_FILE = REPO_ROOT / "bes28" / "SymbolTable.def"
 LFSC_DIR = REPO_ROOT / "lfsc"
 LFSD_DIR = REPO_ROOT / "lfsd"
-LFSD_OVERLAY = REPO_ROOT / "lfsd_overlay"
 STRING_POOL_CSV = REPO_ROOT / "StringPool.csv"
 STRING_POOL_SCRIPT = REPO_ROOT / "scripts" / "StringPool.py"
 LFSC_BIN = Path("./nuttx_lfsc.bin")
 LFSD_BIN = Path("./nuttx_lfsd.bin")
-LFSD_LEFT_BIN = Path("./nuttx_lfsd_left.bin")
-LFSD_RIGHT_BIN = Path("./nuttx_lfsd_right.bin")
 ROMFS_DIR = REPO_ROOT / "romfs"
 ROMFS_BIN = Path("./nuttx_romfs.bin")
+LEFT_ROMFS_DIR = REPO_ROOT / "left_romfs"
+LEFT_ROMFS_BIN = Path("./nuttx_lromfs.bin")
+ROMFS_LFSD_DEFAULT_DIR = Path("lfsd")
 ROMFS_SIZE = 16 * 1024 * 1024  # 0x1000000
+LEFT_ROMFS_SIZE = 1 * 1024 * 1024  # 0x100000
 LFSC_SIZE = 2 * 1024 * 1024
 LFSD_SIZE = 6 * 1024 * 1024    # 0x600000
 MAX_FILE_SIZE = 2 * 1024 * 1024
@@ -63,18 +64,16 @@ class RomfsNode:
 class FilesystemOutputs:
     lfsc: Path
     lfsd: Path
-    lfsd_left: Path
-    lfsd_right: Path
     romfs: Path
+    left_romfs: Path
 
 
 def default_filesystem_outputs() -> FilesystemOutputs:
     return FilesystemOutputs(
         lfsc=LFSC_BIN,
         lfsd=LFSD_BIN,
-        lfsd_left=LFSD_LEFT_BIN,
-        lfsd_right=LFSD_RIGHT_BIN,
         romfs=ROMFS_BIN,
+        left_romfs=LEFT_ROMFS_BIN,
     )
 
 
@@ -427,6 +426,7 @@ def create_lfs_image(source_dir: Path, output_file: Path, fs_size: int) -> None:
 
 
 def copy_tree_contents(source_dir: Path, target_dir: Path) -> None:
+    target_dir.mkdir(parents=True, exist_ok=True)
     for item in source_dir.iterdir():
         destination = target_dir / item.name
         if item.is_dir():
@@ -435,8 +435,8 @@ def copy_tree_contents(source_dir: Path, target_dir: Path) -> None:
             shutil.copy2(item, destination)
 
 
-def generate_i18n_json(lfsd_dir: Path) -> None:
-    output_dir = lfsd_dir / "system" / "i18n"
+def generate_i18n_json(romfs_dir: Path) -> None:
+    output_dir = romfs_dir / "system" / "i18n"
     print_info(f"生成i18n JSON: {STRING_POOL_CSV} -> {output_dir}")
     result = run_command([
         sys.executable,
@@ -450,46 +450,34 @@ def generate_i18n_json(lfsd_dir: Path) -> None:
         print(result.stdout, end="")
 
 
-def process_overlays(lfsd_source_dir: Path, lfsd_left_bin: Path, lfsd_right_bin: Path) -> None:
-    if not LFSD_OVERLAY.is_dir():
-        print_info(f"Overlay目录不存在: {LFSD_OVERLAY}，跳过overlay处理")
-        return
-
-    for side in ("left", "right"):
-        overlay_dir = LFSD_OVERLAY / side
-        if not overlay_dir.is_dir():
-            continue
-
-        print_info(f"处理{side} overlay...")
-        with tempfile.TemporaryDirectory(prefix=f"lfsd_{side}_") as temp_dir:
-            temp_path = Path(temp_dir)
-            copy_tree_contents(lfsd_source_dir, temp_path)
-            copy_tree_contents(overlay_dir, temp_path)
-            output = lfsd_left_bin if side == "left" else lfsd_right_bin
-            create_lfs_image(temp_path, output, fs_size=LFSD_SIZE)
-
-    print_success("Overlay LFS文件生成完成")
-
-
-def create_romfs_image(source_dir: Path, output_file: Path, volume_label: str = "romfs") -> None:
+def create_romfs_image(
+    source_dir: Path,
+    output_file: Path,
+    volume_label: str = "romfs",
+    partition_size: int = ROMFS_SIZE,
+) -> None:
     if not source_dir.is_dir():
         raise FileNotFoundError(f"ROMFS source directory not found: {source_dir}")
 
     total_size = calc_dir_size(source_dir)
-    print_info(f"ROMFS source size: {total_size} bytes, partition limit: {ROMFS_SIZE} bytes")
-    if total_size > ROMFS_SIZE:
-        raise RuntimeError(f"ROMFS content ({total_size} bytes) exceeds partition size ({ROMFS_SIZE} bytes)")
+    print_info(f"ROMFS source size: {total_size} bytes, partition limit: {partition_size} bytes")
+    if total_size > partition_size:
+        raise RuntimeError(f"ROMFS content ({total_size} bytes) exceeds partition size ({partition_size} bytes)")
 
     genromfs = shutil.which("genromfs")
     if genromfs:
         run_command([genromfs, "-f", str(output_file), "-d", str(source_dir), "-V", volume_label])
+        image_size = output_file.stat().st_size
+        if image_size > partition_size:
+            output_file.unlink(missing_ok=True)
+            raise RuntimeError(f"ROMFS image ({image_size} bytes) exceeds partition size ({partition_size} bytes)")
         print_success(f"ROMFS image created by genromfs: {output_file}")
         return
 
     print_warning("genromfs not found in PATH, fallback to Python ROMFS writer")
     image = build_romfs_image(source_dir, volume_label)
-    if len(image) > ROMFS_SIZE:
-        raise RuntimeError(f"ROMFS image ({len(image)} bytes) exceeds partition size ({ROMFS_SIZE} bytes)")
+    if len(image) > partition_size:
+        raise RuntimeError(f"ROMFS image ({len(image)} bytes) exceeds partition size ({partition_size} bytes)")
 
     output_file.write_bytes(image)
     print_success(f"ROMFS image created: {output_file}")
@@ -499,6 +487,7 @@ def create_filesystem(
     source_file: Path,
     outputs: FilesystemOutputs,
     romfs_dir: Path,
+    left_romfs_dir: Path,
 ) -> None:
     print_info("开始创建文件系统...")
 
@@ -509,22 +498,56 @@ def create_filesystem(
     shutil.copy2(source_file, LFSC_DIR / source_file.name)
 
     create_lfs_image(LFSC_DIR, outputs.lfsc, fs_size=LFSC_SIZE)
-    with tempfile.TemporaryDirectory(prefix="lfsd_base_") as temp_dir:
-        lfsd_source_dir = Path(temp_dir)
-        copy_tree_contents(LFSD_DIR, lfsd_source_dir)
-        generate_i18n_json(lfsd_source_dir)
+    with tempfile.TemporaryDirectory(prefix="filesystem_staging_") as temp_dir:
+        staging_dir = Path(temp_dir)
+        lfsd_source_dir = staging_dir / "lfsd"
+        romfs_source_dir = staging_dir / "romfs"
+        lfsd_source_dir.mkdir(parents=True, exist_ok=True)
+        copy_tree_contents(romfs_dir, romfs_source_dir)
+        lfsd_default_dir = romfs_source_dir / ROMFS_LFSD_DEFAULT_DIR
+        if lfsd_default_dir.is_dir():
+            shutil.rmtree(lfsd_default_dir)
+        elif lfsd_default_dir.exists():
+            lfsd_default_dir.unlink()
+        copy_tree_contents(LFSD_DIR, lfsd_default_dir)
+        generate_i18n_json(romfs_source_dir)
+
         create_lfs_image(lfsd_source_dir, outputs.lfsd, fs_size=LFSD_SIZE)
-        process_overlays(lfsd_source_dir, outputs.lfsd_left, outputs.lfsd_right)
+        create_romfs_image(romfs_source_dir, outputs.romfs)
 
-    create_romfs_image(romfs_dir, outputs.romfs)
+    expected_kws_files = ("kws_firmware.bin", "kws_model.bin")
+    missing_kws_files = [
+        name for name in expected_kws_files if not (left_romfs_dir / "kws" / name).is_file()
+    ]
+    if missing_kws_files:
+        outputs.left_romfs.unlink(missing_ok=True)
+        print_warning(
+            f"左耳 ROMFS 缺少 KWS 文件，跳过生成: {', '.join(missing_kws_files)}; "
+            f"expected under {left_romfs_dir / 'kws'}"
+        )
+    else:
+        create_romfs_image(
+            left_romfs_dir,
+            outputs.left_romfs,
+            volume_label="romfs",
+            partition_size=LEFT_ROMFS_SIZE,
+        )
 
-    print_success(f"文件系统创建完成: {outputs.lfsc} {outputs.lfsd} {outputs.romfs}")
+    generated_outputs = [outputs.lfsc, outputs.lfsd, outputs.romfs]
+    if outputs.left_romfs.is_file():
+        generated_outputs.append(outputs.left_romfs)
+    print_success(f"文件系统创建完成: {' '.join(str(path) for path in generated_outputs)}")
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Cross-platform filesystem packaging for ARM builds")
     parser.add_argument("--source", default=str(DEFAULT_SOURCE), help="Path to the built ELF file")
     parser.add_argument("--romfs-dir", default=str(ROMFS_DIR), help="ROMFS source directory")
+    parser.add_argument(
+        "--left-romfs-dir",
+        default=str(LEFT_ROMFS_DIR),
+        help="Left-temple ROMFS source directory containing kws/",
+    )
     parser.add_argument("--symbol-file", default=str(DEFAULT_SYMBOL_FILE), help="Symbol table used for undefined symbol verification")
     parser.add_argument("--max-size", type=int, default=MAX_FILE_SIZE, help="Maximum ELF file size in bytes")
     parser.add_argument("--no-symbol-check", action="store_true", help="Skip undefined symbol verification")
@@ -535,6 +558,7 @@ def main() -> int:
     args = parse_args()
     source_file = Path(args.source)
     romfs_dir = Path(args.romfs_dir)
+    left_romfs_dir = Path(args.left_romfs_dir)
     outputs = default_filesystem_outputs()
 
     print_info("========================================")
@@ -547,6 +571,9 @@ def main() -> int:
     if not romfs_dir.is_dir():
         print_error(f"ROMFS 源目录不存在: {romfs_dir}")
         return 1
+    if not left_romfs_dir.is_dir():
+        print_error(f"左耳 ROMFS 源目录不存在: {left_romfs_dir}")
+        return 1
 
     print_success("源文件检查通过")
 
@@ -555,7 +582,7 @@ def main() -> int:
             check_symbols(source_file, Path(args.symbol_file))
 
         check_file_size(source_file, args.max_size)
-        create_filesystem(source_file, outputs, romfs_dir)
+        create_filesystem(source_file, outputs, romfs_dir, left_romfs_dir)
     except Exception as exc:  # noqa: BLE001
         print_error(str(exc))
         return 1

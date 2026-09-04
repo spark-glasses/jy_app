@@ -1,0 +1,62 @@
+[
+    {
+        "biz": "SystemControl",
+        "cmd": "setView",
+        "data": {
+            "viewName": "recorder"
+        },
+        "id": 0,
+        "name": "进入录音应用",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "recorder",
+        "cmd": "setState",
+        "data": {
+            "state": 1
+        },
+        "id": 1002,
+        "name": "开始录音（显示圆点并重置时间）",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "recorder",
+        "cmd": "setTick",
+        "data": {
+            "tick": 1
+        },
+        "id": 1002,
+        "name": "更新录音时间（圆点灭）",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "recorder",
+        "cmd": "setTick",
+        "data": {
+            "tick": 2
+        },
+        "id": 1002,
+        "name": "更新录音时间（圆点亮）",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "recorder",
+        "cmd": "setState",
+        "data": {
+            "state": 0
+        },
+        "id": 1002,
+        "name": "暂停录音（显示三角）",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemControl",
+        "cmd": "setView",
+        "data": {
+            "viewName": "home"
+        },
+        "id": 0,
+        "name": "退出录音应用",
+        "type": "DATA_RELIABLE"
+    }
+]

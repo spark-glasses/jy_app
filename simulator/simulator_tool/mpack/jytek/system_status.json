@@ -1,0 +1,62 @@
+[
+    {
+        "biz": "SystemStatus",
+        "cmd": "getAll",
+        "data": {},
+        "id": 0,
+        "name": "获取全部系统状态",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemStatus",
+        "cmd": "getSysState",
+        "data": {},
+        "id": 0,
+        "name": "获取屏幕状态",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemStatus",
+        "cmd": "setSysState",
+        "data": {
+            "sysState": 1
+        },
+        "id": 0,
+        "name": "亮屏",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemStatus",
+        "cmd": "setSysState",
+        "data": {
+            "sysState": 0
+        },
+        "id": 0,
+        "name": "灭屏",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemStatus",
+        "cmd": "getChargeState",
+        "data": {},
+        "id": 0,
+        "name": "获取充电状态",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemStatus",
+        "cmd": "getBattery",
+        "data": {},
+        "id": 0,
+        "name": "获取电量",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemStatus",
+        "cmd": "getRomUsage",
+        "data": {},
+        "id": 0,
+        "name": "获取Rom使用情况",
+        "type": "DATA_RELIABLE"
+    }
+]

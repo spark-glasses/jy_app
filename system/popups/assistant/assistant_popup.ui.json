@@ -5,7 +5,7 @@
     "id": "root",
     "geometry": { "x": 0, "y": 0, "w": "100%", "h": "100%" },
     "padding": [12, 12, 100, 10],
-    "opa": 178,
+    "opa": 0,
     "layout": {
       "type": "vbox",
       "spacing": 0,

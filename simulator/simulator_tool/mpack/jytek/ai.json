@@ -1,0 +1,238 @@
+[
+    {
+        "biz": "SystemControl",
+        "cmd": "setView",
+        "data": {
+            "viewName": "ai"
+        },
+        "id": 0,
+        "name": "进入",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemControl",
+        "cmd": "setView",
+        "data": {
+            "viewName": "home"
+        },
+        "id": 0,
+        "name": "退出",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "ai",
+        "cmd": "clearView",
+        "data": {},
+        "id": 8,
+        "name": "清空界面",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "ai",
+        "cmd": "setFontConfig",
+        "data": {
+            "fontConfig": {
+                "rowSpace": 0,
+                "weight": 32,
+                "wordSpace": 0
+            }
+        },
+        "id": 8,
+        "name": "设置文字配置",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "ai",
+        "cmd": "setAudioTrackState",
+        "data": {
+            "audioTrack": 1
+        },
+        "id": 8,
+        "name": "下发音轨状态1（当前代码仅校验参数）",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "ai",
+        "cmd": "setAudioTrackState",
+        "data": {
+            "audioTrack": 0
+        },
+        "id": 8,
+        "name": "下发音轨状态0（当前代码仅校验参数）",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "ai",
+        "cmd": "setMaxLine",
+        "data": {
+            "maxLine": 3
+        },
+        "id": 8,
+        "name": "设置最大行数",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "ai",
+        "cmd": "setAudioSourceIndicator",
+        "data": {
+            "audioSourceIndicator": 0
+        },
+        "id": 8,
+        "name": "音源指示器-眼镜",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "ai",
+        "cmd": "setAudioSourceIndicator",
+        "data": {
+            "audioSourceIndicator": 1
+        },
+        "id": 8,
+        "name": "音源指示器-手机",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "ai",
+        "cmd": "setAudioSourceIndicator",
+        "data": {
+            "audioSourceIndicator": 2
+        },
+        "id": 8,
+        "name": "音源指示器-手表",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "ai",
+        "cmd": "setMicDirectional",
+        "data": {
+            "micDirectional": 0
+        },
+        "id": 8,
+        "name": "全向麦克风（micDirectional=0）",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "ai",
+        "cmd": "setMicDirectional",
+        "data": {
+            "micDirectional": 1
+        },
+        "id": 8,
+        "name": "定向麦克风（micDirectional=1）",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "ai",
+        "cmd": "updateSttInfo",
+        "data": {
+            "actionType": 1,
+            "area": 0,
+            "createdAt": 1776916800000,
+            "id": 1,
+            "isFinal": 1,
+            "msgId": "ai_1",
+            "msgType": 0,
+            "transcribe": "左侧：你好，我是智能助理。",
+            "translate": "",
+            "user": "Alice"
+        },
+        "id": 8,
+        "name": "更新识别信息1",
+        "type": "DATA_UNRELIABLE"
+    },
+    {
+        "biz": "ai",
+        "cmd": "updateSttInfo",
+        "data": {
+            "actionType": 1,
+            "area": 1,
+            "createdAt": 1776916801000,
+            "id": 2,
+            "isFinal": 1,
+            "msgId": "ai_2",
+            "msgType": 0,
+            "transcribe": "右侧：很高兴见到你！",
+            "translate": "",
+            "user": "Bob"
+        },
+        "id": 8,
+        "name": "更新识别信息2",
+        "type": "DATA_UNRELIABLE"
+    },
+    {
+        "biz": "ai",
+        "cmd": "updateSttInfo",
+        "data": {
+            "actionType": 1,
+            "area": 0,
+            "createdAt": 1776916802000,
+            "id": 3,
+            "isFinal": 1,
+            "msgId": "ai_3",
+            "msgType": 0,
+            "transcribe": "左侧：请问我能帮你做些什么？",
+            "translate": "",
+            "user": "Alice"
+        },
+        "id": 8,
+        "name": "更新识别信息3",
+        "type": "DATA_UNRELIABLE"
+    },
+    {
+        "biz": "ai",
+        "cmd": "updateSttInfo",
+        "data": {
+            "actionType": 1,
+            "area": 1,
+            "createdAt": 1776916803000,
+            "id": 4,
+            "isFinal": 1,
+            "msgId": "ai_4",
+            "msgType": 0,
+            "transcribe": "右侧：帮我查一下今天的安排，并设置一个提醒。",
+            "translate": "",
+            "user": "Bob"
+        },
+        "id": 8,
+        "name": "更新识别信息4",
+        "type": "DATA_UNRELIABLE"
+    },
+    {
+        "biz": "ai",
+        "cmd": "updateSttInfo",
+        "data": {
+            "actionType": 1,
+            "area": 0,
+            "createdAt": 1776916804000,
+            "id": 5,
+            "isFinal": 1,
+            "msgId": "ai_5",
+            "msgType": 0,
+            "transcribe": "左侧：好的，我已为你准备日程摘要。",
+            "translate": "",
+            "user": "Alice"
+        },
+        "id": 8,
+        "name": "更新识别信息5",
+        "type": "DATA_UNRELIABLE"
+    },
+    {
+        "biz": "ai",
+        "cmd": "updateSttInfo",
+        "data": {
+            "actionType": 1,
+            "area": 1,
+            "createdAt": 1776916805000,
+            "id": 6,
+            "isFinal": 1,
+            "msgId": "ai_6",
+            "msgType": 0,
+            "transcribe": "右侧：谢谢，另外把待办清单同步到手机。",
+            "translate": "",
+            "user": "Bob"
+        },
+        "id": 8,
+        "name": "更新识别信息6",
+        "type": "DATA_UNRELIABLE"
+    }
+]

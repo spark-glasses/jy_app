@@ -29,11 +29,15 @@ typedef struct {
 /**
  * @brief 创建 Home 教学覆盖控件。
  * @param[in] parent 父对象。
+ * @param[in] home_float_content Home 挂载到 app_float 层的内容容器。
  * @param[in] font 教学文案字体。
  * @param[in] font_height 教学文案默认高度。
  * @return 无返回值。
  */
-void home_guide_create_controls(lv_obj_t* parent, const lv_font_t* font, int font_height);
+void home_guide_create_controls(lv_obj_t* parent,
+                                lv_obj_t* home_float_content,
+                                const lv_font_t* font,
+                                int font_height);
 /**
  * @brief 销毁 Home 教学中可能挂载到页面外部浮层的控件。
  * @return 无返回值。

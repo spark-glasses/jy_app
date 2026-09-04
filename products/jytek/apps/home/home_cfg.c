@@ -16,10 +16,10 @@ bool only_center_name    = false;
 
 int32_t idle_img_center_h = 80;
 int32_t idle_img_center_w = 80;
-int32_t idle_img_left_h = 48;
-int32_t idle_img_left_w = 48;
-int32_t idle_img_right_h = 48;
-int32_t idle_img_right_w = 48;
+int32_t idle_img_left_h = 60;
+int32_t idle_img_left_w = 60;
+int32_t idle_img_right_h = 60;
+int32_t idle_img_right_w = 60;
 int32_t layout_gap = LVGL_UI_MARGIN_100;
 bool home_enable_app_float = true;
 

@@ -21,7 +21,6 @@ typedef enum {
     UI_WIDGET_TYPE_BUTTON,
     UI_WIDGET_TYPE_OVERLAY,
     UI_WIDGET_TYPE_ROLLER,
-    UI_WIDGET_TYPE_MSGBOX,
     UI_WIDGET_TYPE_PAGED_TEXT, ///< 分页文本组件。
     UI_WIDGET_TYPE_PROGRESS_INDICATOR, ///< 图文状态提示组件。
 } ui_widget_type_t;

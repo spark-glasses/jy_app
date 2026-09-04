@@ -276,6 +276,8 @@ class UicTests(unittest.TestCase):
                         "border_width": 2,
                         "opa_normal": "60%",
                         "opa_selected": "cover",
+                        "show_hint": True,
+                        "hint_gap": 48,
                         "visible": False,
                     }
                 ],
@@ -300,6 +302,8 @@ class UicTests(unittest.TestCase):
         self.assertIn("document_roller_cfg.row_height = 60;", source)
         self.assertIn("document_roller_cfg.opa_normal = LV_OPA_60;", source)
         self.assertIn("document_roller_cfg.opa_selected = LV_OPA_COVER;", source)
+        self.assertIn("document_roller_cfg.show_hint = true;", source)
+        self.assertIn("document_roller_cfg.hint_gap = 48;", source)
         self.assertIn("ui->document_roller = roller_create(root_obj, &document_roller_cfg);", source)
         self.assertIn("lv_obj_t* document_roller_obj = roller_get_obj(ui->document_roller);", source)
         self.assertIn("ui_widget_set_position(UI_WIDGET(ui->document_roller), 12, 20);", source)

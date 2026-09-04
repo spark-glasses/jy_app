@@ -760,6 +760,13 @@ class UiCompiler:
             self.source_lines.append(
                 f"    {cfg}.overflow_mode = {_roller_overflow_mode(node['overflow_mode'], f'{path}.overflow_mode')};"
             )
+        if "show_hint" in node:
+            show_hint = node["show_hint"]
+            if not isinstance(show_hint, bool):
+                raise ValueError(f"{path}.show_hint must be a boolean")
+            self.source_lines.append(
+                f"    {cfg}.show_hint = {'true' if show_hint else 'false'};"
+            )
         for key in (
             "row_height",
             "row_gap",
@@ -768,6 +775,7 @@ class UiCompiler:
             "border_width",
             "opa_normal",
             "opa_selected",
+            "hint_gap",
         ):
             value = (
                 _opa_value(node, key, path)

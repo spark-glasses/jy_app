@@ -84,9 +84,13 @@ The SDK package contains:
 | `romfs/` | Firmware read-only resources. ARM builds copy it into build-directory staging before packaging. |
 | `lfsc/` | LittleFS C partition source directory. The built `uimain` is copied here for packaging. |
 | `lfsd/` | LittleFS D partition source directory. Generates `nuttx_lfsd.bin`. |
+| `left_romfs/` | Default left-temple read-only resources; currently contains `kws/kws_firmware.bin` and `kws/kws_model.bin` |
+| `products/<product>/left_romfs/` | Optional product-specific left-temple resources; replaces the default source when present without overlaying the directory |
 | `StringPool.csv` | Multi-language string pool input. Packaging generates i18n JSON. |
 | `ui.res.json` | UI resource description input |
 | `apps/**/*.ui.json` / `system/**/*.ui.json` | UI compiler inputs. Outputs are generated under build-directory `generated/ui`. |
+
+Product selection and image generation for `left_romfs` apply only to ARM builds. PC simulators do not read or generate this resource.
 
 ## 5. Startup Logo
 
@@ -108,8 +112,8 @@ Core ARM build flow:
 1. CMake detects the `arm` platform and loads `cmake/PlatformArm.cmake`.
 2. Sources are collected from `apps/`, `system/`, `common/`, `lvgl/`, `thirdparty/`, and generated UI output.
 3. The `uimain` ELF is generated.
-4. After build, `romfs/` is copied into build-directory staging.
-5. `scripts/fs_img.py --source <uimain> --romfs-dir <romfs_staging>` is executed.
+4. Select left-temple resources from `products/<product>/left_romfs/` when present, otherwise use repository-root `left_romfs/`, then copy them into build-directory staging.
+5. `scripts/fs_img.py --source <uimain> --romfs-dir <romfs_staging> --left-romfs-dir <left_romfs_staging>` is executed.
 6. Filesystem images are generated.
 
 Common CMake configuration:
@@ -133,6 +137,7 @@ After an ARM build, the build directory contains:
 | `nuttx_lfsc.bin` | LittleFS C partition image |
 | `nuttx_lfsd.bin` | LittleFS D partition image |
 | `nuttx_romfs.bin` | ROMFS image |
+| `nuttx_lromfs.bin` | 1 MiB left-temple ROMFS image containing the selected product's KWS firmware and model |
 | `generated/` | Generated UI code, resource headers, build config, and related generated content |
 
 ## 8. Common Issues

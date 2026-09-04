@@ -10,39 +10,17 @@
 
 #include "app_def.h"
 #include "common/app_framework/app_router.h"
+#include "common/stt/stt_view_common.h"
 #include "floatair_fs.h"
 #include "message.h"
 #include "system/system_config_json.h"
 #include "system/stt_common.h"
 
-static bool ai_config_ensure_by_path(const char* config_path) {
-    cJSON* root = load_json(config_path);
-    if (root) {
-        cJSON* fontinfo = cJSON_GetObjectItemCaseSensitive(root, "fontinfo");
-        cJSON* weight = cJSON_IsObject(fontinfo) ? cJSON_GetObjectItemCaseSensitive(fontinfo, "weight") : NULL;
-        cJSON* word_space = cJSON_IsObject(fontinfo) ? cJSON_GetObjectItemCaseSensitive(fontinfo, "wordSpace") : NULL;
-        cJSON* row_space = cJSON_IsObject(fontinfo) ? cJSON_GetObjectItemCaseSensitive(fontinfo, "rowSpace") : NULL;
-        bool ok = cJSON_IsObject(fontinfo) && cJSON_IsNumber(weight) && cJSON_IsNumber(word_space) && cJSON_IsNumber(row_space);
-        cJSON_Delete(root);
-        if (ok) {
-            return true;
-        }
-    }
-    root = cJSON_CreateObject();
-    if (!root) {
-        return false;
-    }
-    cJSON* fontinfo = cJSON_AddObjectToObject(root, "fontinfo");
-    if (!fontinfo) {
-        cJSON_Delete(root);
-        return false;
-    }
-    cJSON_AddItemToObject(fontinfo, "weight", cJSON_CreateNumber(32));
-    cJSON_AddItemToObject(fontinfo, "wordSpace", cJSON_CreateNumber(0));
-    cJSON_AddItemToObject(fontinfo, "rowSpace", cJSON_CreateNumber(0));
-    int ret = save_json(config_path, root);
-    cJSON_Delete(root);
-    return ret == 0;
+static stt_view_deferred_update_t s_ai_stt_deferred_update;
+
+static void ai_stt_deferred_update_cb(void* user_data) {
+    (void)user_data;
+    ai_stt_update();
 }
 
 /**
@@ -58,6 +36,7 @@ static bool ai_clearview(mpack_node_t node, msg_pack_t* msg) {
         floatair_err("ai page visible failed");
         return app_mpack_send_ack(msg, ErrNotReady);
     }
+    stt_view_cancel_deferred_update(&s_ai_stt_deferred_update);
     ai_stt_clear();
     return app_mpack_send_ack(msg, Dp_ErrNone);
 }
@@ -74,11 +53,9 @@ static bool ai_setfontconfig(mpack_node_t node, msg_pack_t* msg) {
         floatair_err("get app config file failed");
         return app_mpack_send_ack(msg, ErrFileNotExistFailed);
     }
-    if (!ai_config_ensure_by_path(config_path)) {
-        return app_mpack_send_ack(msg, ErrDataErr);
-    }
     bool ret = stt_set_fontconfig(node, msg, config_path);
     if (ret) {
+        stt_view_cancel_deferred_update(&s_ai_stt_deferred_update);
         ai_on_fontconfig_changed();
     }
     return ret;
@@ -102,9 +79,14 @@ static bool ai_updatesttinfo(mpack_node_t node, msg_pack_t* msg) {
     (void)app_msg_get_u8(node, false, "msgType", &msg_type);
 
     bool ret = stt_update_sttinfo(node, msg);
-    if (ret && !stt_update_sttinfo_was_skipped()) {
+    bool skipped = stt_update_sttinfo_was_skipped();
+
+    if (ret || skipped) {
         ai_stt_note_update(area, msg_type);
-        ai_stt_update();
+        stt_view_request_deferred_update(&s_ai_stt_deferred_update,
+                                         "ai",
+                                         ai_stt_deferred_update_cb,
+                                         NULL);
     }
     return ret;
 }
@@ -118,6 +100,7 @@ static bool ai_updatesttinfo(mpack_node_t node, msg_pack_t* msg) {
 static bool ai_setaudiosourceindicator(mpack_node_t node, msg_pack_t* msg) {
     bool ret = stt_set_audiosourceindicator(node, msg);
     if (ret) {
+        stt_view_cancel_deferred_update(&s_ai_stt_deferred_update);
         ai_stt_update();
     }
     return ret;
@@ -132,6 +115,7 @@ static bool ai_setaudiosourceindicator(mpack_node_t node, msg_pack_t* msg) {
 static bool ai_setmicdirectional(mpack_node_t node, msg_pack_t* msg) {
     bool ret = stt_set_micdirectional(node, msg);
     if (ret) {
+        stt_view_cancel_deferred_update(&s_ai_stt_deferred_update);
         ai_stt_update();
     }
     return ret;

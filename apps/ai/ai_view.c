@@ -9,7 +9,7 @@
  */
 #include "ai.h"
 #include "home/home.h"
-#include "stt_view_common.h"
+#include "common/stt/stt_view_common.h"
 
 #include "common/app_framework/app_manager.h"
 #include "common/widgets/container.h"
@@ -658,12 +658,12 @@ static void touch_event_handle(lv_event_t* event) {
     switch (code) {
     case LV_EVENT_GESTURE_LEFT:
         if (can_scroll) {
-            container_scroll_up(s_scroll, 3.0f / 4.0f);
+            container_scroll_up(s_scroll, 1.0f / 2.0f, LV_ANIM_ON);
         }
         break;
     case LV_EVENT_GESTURE_RIGHT:
         if (can_scroll) {
-            container_scroll_down(s_scroll, 3.0f / 4.0f);
+            container_scroll_down(s_scroll, 1.0f / 2.0f, LV_ANIM_ON);
         }
         break;
     case LV_EVENT_DCLICKED:

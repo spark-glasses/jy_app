@@ -2,6 +2,7 @@
 
 #include <string.h>
 
+#include "app_def.h"
 #include "system/system_res.h"
 
 /**
@@ -20,6 +21,7 @@ struct roller_t {
     label_t* label_prev;                          ///< 上一项文本组件。
     label_t* label_cur;                           ///< 当前项文本组件。
     label_t* label_next;                          ///< 下一项文本组件。
+    label_t* label_hint;                          ///< 可选的底部操作提示文本组件。
     int32_t pad;                                  ///< 当前项上下内边距缓存。
     int32_t gap;                                  ///< 行间距缓存。
 
@@ -147,8 +149,31 @@ roller_cfg_t roller_default_cfg(void) {
     cfg.border_width = 2;
     cfg.opa_normal = LV_OPA_70;
     cfg.opa_selected = LV_OPA_100;
+    cfg.show_hint = false;
+    cfg.hint_gap = 48;
 
     return cfg;
+}
+
+/**
+ * @brief 获取当前承载选中项的文本槽位。
+ *
+ * 两个选项时，两个文本固定显示在上下槽位，选中样式在槽位间移动；
+ * 其他数量仍由中间槽位承载当前选中项。
+ *
+ * @param roller 目标滚轮组件句柄。
+ * @return 返回当前选中项对应的文本组件。
+ */
+static label_t* roller_get_selected_slot(roller_t* roller) {
+    if (!roller_is_valid(roller)) {
+        return NULL;
+    }
+
+    if (roller->count == 2 && (roller->selected % roller->count) == 0) {
+        return roller->label_prev;
+    }
+
+    return roller->label_cur;
 }
 
 /**
@@ -159,6 +184,7 @@ roller_cfg_t roller_default_cfg(void) {
  */
 static void roller_apply_label_styles(roller_t* roller) {
     label_t* labels[3];
+    label_t* selected_label = NULL;
     uint32_t i = 0;
 
     if (!roller_is_valid(roller)) {
@@ -168,37 +194,29 @@ static void roller_apply_label_styles(roller_t* roller) {
     labels[0] = roller->label_prev;
     labels[1] = roller->label_cur;
     labels[2] = roller->label_next;
+    selected_label = roller_get_selected_slot(roller);
 
     for (i = 0; i < 3; ++i) {
-        lv_obj_set_style_bg_color(label_get_obj(labels[i]), lv_color_black(), 0);
-        lv_obj_set_style_bg_opa(label_get_obj(labels[i]), LV_OPA_COVER, 0);
+        bool selected = labels[i] == selected_label;
+        lv_obj_t* label_obj = label_get_obj(labels[i]);
+
+        lv_obj_set_style_bg_color(label_obj, lv_color_black(), 0);
+        lv_obj_set_style_bg_opa(label_obj, LV_OPA_COVER, 0);
         label_set_radius(labels[i], roller->cfg.radius);
-        lv_obj_set_style_border_color(label_get_obj(labels[i]), lv_color_white(), 0);
-        lv_obj_set_style_text_color(label_get_obj(labels[i]), lv_color_white(), 0);
+        lv_obj_set_style_border_color(label_obj, lv_color_white(), 0);
+        lv_obj_set_style_text_color(label_obj, lv_color_white(), 0);
         label_set_align(labels[i], LABEL_ALIGN_CENTER);
+        label_set_border_width(labels[i], selected ? roller->cfg.border_width : 0);
+        label_set_opacity(labels[i],
+                          selected ? roller->cfg.opa_selected : roller->cfg.opa_normal);
+        obj_set_text_font(label_obj,
+                          selected ? roller->font_selected : roller->font_normal);
+        lv_label_set_long_mode(
+            label_obj,
+            selected && roller->overflow_mode == ROLLER_OVERFLOW_SCROLL
+                ? LV_LABEL_LONG_SCROLL_CIRCULAR
+                : LV_LABEL_LONG_CLIP);
     }
-
-    label_set_border_width(roller->label_cur, roller->cfg.border_width);
-    label_set_opacity(roller->label_cur, roller->cfg.opa_selected);
-
-    label_set_border_width(roller->label_prev, 0);
-    label_set_opacity(roller->label_prev, roller->cfg.opa_normal);
-
-    label_set_border_width(roller->label_next, 0);
-    label_set_opacity(roller->label_next, roller->cfg.opa_normal);
-
-    if (roller->legacy_font_override) {
-        obj_set_text_font(label_get_obj(roller->label_prev), roller->font_normal);
-        obj_set_text_font(label_get_obj(roller->label_cur), roller->font_selected);
-        obj_set_text_font(label_get_obj(roller->label_next), roller->font_normal);
-    }
-
-    lv_label_set_long_mode(label_get_obj(roller->label_cur),
-                           roller->overflow_mode == ROLLER_OVERFLOW_SCROLL
-                               ? LV_LABEL_LONG_SCROLL_CIRCULAR
-                               : LV_LABEL_LONG_CLIP);
-    lv_label_set_long_mode(label_get_obj(roller->label_prev), LV_LABEL_LONG_CLIP);
-    lv_label_set_long_mode(label_get_obj(roller->label_next), LV_LABEL_LONG_CLIP);
 }
 
 /**
@@ -224,27 +242,32 @@ static void roller_update_labels(roller_t* roller) {
         return;
     }
 
-    sel = roller->selected % roller->count;
-    prev = (sel + roller->count - 1) % roller->count;
-    next = (sel + 1) % roller->count;
-
-    label_set_text(roller->label_cur, roller->items[sel]);
-    ui_widget_set_visible(UI_WIDGET(roller->label_cur), true);
-
-    if (roller->count >= 2) {
-        label_set_text(roller->label_prev, roller->items[prev]);
-        ui_widget_set_visible(UI_WIDGET(roller->label_prev), true);
-    } else {
-        label_set_text(roller->label_prev, "");
-        ui_widget_set_visible(UI_WIDGET(roller->label_prev), false);
-    }
-
-    if (roller->count >= 3) {
-        label_set_text(roller->label_next, roller->items[next]);
-        ui_widget_set_visible(UI_WIDGET(roller->label_next), true);
-    } else {
+    if (roller->count == 2) {
+        label_set_text(roller->label_prev, roller->items[0]);
+        label_set_text(roller->label_cur, roller->items[1]);
         label_set_text(roller->label_next, "");
+        ui_widget_set_visible(UI_WIDGET(roller->label_prev), true);
+        ui_widget_set_visible(UI_WIDGET(roller->label_cur), true);
         ui_widget_set_visible(UI_WIDGET(roller->label_next), false);
+    } else {
+        sel = roller->selected % roller->count;
+        prev = (sel + roller->count - 1) % roller->count;
+        next = (sel + 1) % roller->count;
+
+        label_set_text(roller->label_cur, roller->items[sel]);
+        ui_widget_set_visible(UI_WIDGET(roller->label_cur), true);
+
+        if (roller->count >= 3) {
+            label_set_text(roller->label_prev, roller->items[prev]);
+            label_set_text(roller->label_next, roller->items[next]);
+            ui_widget_set_visible(UI_WIDGET(roller->label_prev), true);
+            ui_widget_set_visible(UI_WIDGET(roller->label_next), true);
+        } else {
+            label_set_text(roller->label_prev, "");
+            label_set_text(roller->label_next, "");
+            ui_widget_set_visible(UI_WIDGET(roller->label_prev), false);
+            ui_widget_set_visible(UI_WIDGET(roller->label_next), false);
+        }
     }
 
     roller_apply_label_styles(roller);
@@ -280,6 +303,40 @@ static int32_t roller_resolve_row_height(int32_t configured_height,
 }
 
 /**
+ * @brief 为固定高度槽位应用垂直居中所需的内边距。
+ *
+ * @param label 目标文本组件。
+ * @param font 当前槽位字体。
+ * @param height 槽位高度。
+ * @param base_pad 基础上下留白。
+ * @param border_width 当前边框宽度。
+ * @return 无返回值。
+ */
+static void roller_apply_slot_padding(label_t* label,
+                                      const lv_font_t* font,
+                                      int32_t height,
+                                      int32_t base_pad,
+                                      int32_t border_width) {
+    int32_t line_height = 0;
+    int32_t available = 0;
+    int32_t pad = base_pad;
+    lv_obj_t* label_obj = label_get_obj(label);
+
+    if (!label_obj || !font) {
+        return;
+    }
+
+    line_height = (int32_t)lv_font_get_line_height(font);
+    available = height - (border_width * 2) - (base_pad * 2);
+    if (available > line_height) {
+        pad += (available - line_height) / 2;
+    }
+
+    lv_obj_set_style_pad_top(label_obj, (lv_coord_t)pad, 0);
+    lv_obj_set_style_pad_bottom(label_obj, (lv_coord_t)pad, 0);
+}
+
+/**
  * @brief 刷新滚轮内部布局。
  *
  * @param roller 目标滚轮组件句柄。
@@ -291,16 +348,20 @@ static void roller_update_layout(roller_t* roller) {
     int32_t lh_selected = 0;
     int32_t h_cur = 0;
     int32_t h_normal = 0;
+    int32_t h_slot = 0;
     int32_t offset = 0;
     int32_t rows = 0;
     int32_t height = 0;
-    int32_t line_height = 0;
-    int32_t available = 0;
-    int32_t pad = 0;
+    int32_t main_height = 0;
+    int32_t main_offset = 0;
+    int32_t hint_height = 0;
+    int32_t hint_gap = 0;
     bool show_prev = false;
     bool show_next = false;
+    bool show_hint = false;
+    bool two_item_mode = false;
+    label_t* selected_label = NULL;
     lv_obj_t* obj = NULL;
-    lv_obj_t* label_obj = NULL;
 
     if (!roller_is_valid(roller)) {
         return;
@@ -323,88 +384,140 @@ static void roller_update_layout(roller_t* roller) {
                                       roller->pad,
                                       roller->cfg.border_width);
     h_normal = roller_resolve_row_height(roller->cfg.row_height, lh_normal, 0, 0);
+    h_slot = h_cur > h_normal ? h_cur : h_normal;
     offset = h_cur / 2 + h_normal / 2 + roller->gap;
+    two_item_mode = roller->count == 2;
+    selected_label = roller_get_selected_slot(roller);
 
-    if (roller->cfg.row_height > 0) {
-        ui_widget_set_size(UI_WIDGET(roller->label_cur), width, h_cur);
-        ui_widget_set_size(UI_WIDGET(roller->label_prev), width, h_normal);
+    if (roller->cfg.row_height > 0 || two_item_mode) {
+        ui_widget_set_size(UI_WIDGET(roller->label_cur),
+                           width,
+                           two_item_mode ? h_slot : h_cur);
+        ui_widget_set_size(UI_WIDGET(roller->label_prev),
+                           width,
+                           two_item_mode ? h_slot : h_normal);
         ui_widget_set_size(UI_WIDGET(roller->label_next), width, h_normal);
 
-        label_obj = label_get_obj(roller->label_cur);
-        if (label_obj && roller->font_selected) {
-            line_height = (int32_t)lv_font_get_line_height(roller->font_selected);
-            available = h_cur - (roller->cfg.border_width * 2) - (roller->pad * 2);
-            pad = roller->pad;
-            if (available > line_height) {
-                pad += (available - line_height) / 2;
-            }
-            lv_obj_set_style_pad_top(label_obj, (lv_coord_t)pad, 0);
-            lv_obj_set_style_pad_bottom(label_obj, (lv_coord_t)pad, 0);
-        }
-
-        label_obj = label_get_obj(roller->label_prev);
-        if (label_obj && roller->font_normal) {
-            line_height = (int32_t)lv_font_get_line_height(roller->font_normal);
-            pad = 0;
-            if (h_normal > line_height) {
-                pad = (h_normal - line_height) / 2;
-            }
-            lv_obj_set_style_pad_top(label_obj, (lv_coord_t)pad, 0);
-            lv_obj_set_style_pad_bottom(label_obj, (lv_coord_t)pad, 0);
-        }
-
-        label_obj = label_get_obj(roller->label_next);
-        if (label_obj && roller->font_normal) {
-            line_height = (int32_t)lv_font_get_line_height(roller->font_normal);
-            pad = 0;
-            if (h_normal > line_height) {
-                pad = (h_normal - line_height) / 2;
-            }
-            lv_obj_set_style_pad_top(label_obj, (lv_coord_t)pad, 0);
-            lv_obj_set_style_pad_bottom(label_obj, (lv_coord_t)pad, 0);
-        }
+        roller_apply_slot_padding(
+            roller->label_cur,
+            selected_label == roller->label_cur ? roller->font_selected : roller->font_normal,
+            two_item_mode ? h_slot : h_cur,
+            selected_label == roller->label_cur ? roller->pad : 0,
+            selected_label == roller->label_cur ? roller->cfg.border_width : 0);
+        roller_apply_slot_padding(
+            roller->label_prev,
+            selected_label == roller->label_prev ? roller->font_selected : roller->font_normal,
+            two_item_mode ? h_slot : h_normal,
+            selected_label == roller->label_prev ? roller->pad : 0,
+            selected_label == roller->label_prev ? roller->cfg.border_width : 0);
+        roller_apply_slot_padding(roller->label_next,
+                                  roller->font_normal,
+                                  h_normal,
+                                  0,
+                                  0);
     } else {
         ui_widget_set_size(UI_WIDGET(roller->label_cur), width, LV_SIZE_CONTENT);
         ui_widget_set_size(UI_WIDGET(roller->label_prev), width, LV_SIZE_CONTENT);
         ui_widget_set_size(UI_WIDGET(roller->label_next), width, LV_SIZE_CONTENT);
-        label_set_padding(roller->label_cur, 0, roller->pad);
-        label_set_padding(roller->label_prev, 0, 0);
-        label_set_padding(roller->label_next, 0, 0);
+        label_set_padding(roller->label_cur,
+                          0,
+                          selected_label == roller->label_cur ? roller->pad : 0);
+        label_set_padding(roller->label_prev,
+                          0,
+                          selected_label == roller->label_prev ? roller->pad : 0);
+        label_set_padding(roller->label_next,
+                          0,
+                          selected_label == roller->label_next ? roller->pad : 0);
     }
 
     show_prev = !ui_widget_is_hidden(UI_WIDGET(roller->label_prev));
     show_next = !ui_widget_is_hidden(UI_WIDGET(roller->label_next));
+    show_hint = roller->label_hint != NULL;
 
-    if (show_prev && show_next) {
-        lv_obj_align(label_get_obj(roller->label_cur), LV_ALIGN_CENTER, 0, 0);
-        lv_obj_align(label_get_obj(roller->label_prev), LV_ALIGN_CENTER, 0, -offset);
-        lv_obj_align(label_get_obj(roller->label_next), LV_ALIGN_CENTER, 0, offset);
+    rows = 1 + (show_prev ? 1 : 0) + (show_next ? 1 : 0);
+    main_height = two_item_mode
+                      ? (2 * h_slot + roller->gap)
+                      : ((rows == 1) ? h_cur
+                                     : (rows == 2 ? (h_cur + h_normal + roller->gap)
+                                                  : (h_cur + 2 * (h_normal + roller->gap))));
+    /* 带提示的滚轮始终保留三槽位高度，避免少于三项时提示上浮。 */
+    if (show_hint && rows < 3) {
+        main_height = 3 * h_slot + 2 * roller->gap;
+    }
+    height = main_height;
+
+    if (show_hint) {
+        lv_obj_t* hint_obj = label_get_obj(roller->label_hint);
+
+        ui_widget_set_size(UI_WIDGET(roller->label_hint), width, LV_SIZE_CONTENT);
+        lv_obj_update_layout(hint_obj);
+        hint_height = (int32_t)lv_obj_get_height(hint_obj);
+        hint_gap = roller->cfg.hint_gap > 0 ? roller->cfg.hint_gap : 0;
+        main_offset = -(hint_gap + hint_height) / 2;
+        height += hint_gap + hint_height;
+    }
+
+    lv_obj_set_height(obj, (lv_coord_t)height);
+
+    if (two_item_mode) {
+        int32_t slot_offset = (h_slot + roller->gap) / 2;
+        lv_obj_align(label_get_obj(roller->label_prev),
+                     LV_ALIGN_CENTER,
+                     0,
+                     main_offset - slot_offset);
+        lv_obj_align(label_get_obj(roller->label_cur),
+                     LV_ALIGN_CENTER,
+                     0,
+                     main_offset + slot_offset);
+    } else if (show_prev && show_next) {
+        lv_obj_align(label_get_obj(roller->label_cur), LV_ALIGN_CENTER, 0, main_offset);
+        lv_obj_align(label_get_obj(roller->label_prev),
+                     LV_ALIGN_CENTER,
+                     0,
+                     main_offset - offset);
+        lv_obj_align(label_get_obj(roller->label_next),
+                     LV_ALIGN_CENTER,
+                     0,
+                     main_offset + offset);
     } else if (show_prev && !show_next) {
         int32_t y_prev = -(h_cur + roller->gap) / 2;
         int32_t y_cur = (h_normal + roller->gap) / 2;
-        lv_obj_align(label_get_obj(roller->label_prev), LV_ALIGN_CENTER, 0, y_prev);
-        lv_obj_align(label_get_obj(roller->label_cur), LV_ALIGN_CENTER, 0, y_cur);
+        lv_obj_align(label_get_obj(roller->label_prev),
+                     LV_ALIGN_CENTER,
+                     0,
+                     main_offset + y_prev);
+        lv_obj_align(label_get_obj(roller->label_cur),
+                     LV_ALIGN_CENTER,
+                     0,
+                     main_offset + y_cur);
     } else if (!show_prev && show_next) {
         int32_t y_cur = -(h_normal + roller->gap) / 2;
         int32_t y_next = (h_cur + roller->gap) / 2;
-        lv_obj_align(label_get_obj(roller->label_cur), LV_ALIGN_CENTER, 0, y_cur);
-        lv_obj_align(label_get_obj(roller->label_next), LV_ALIGN_CENTER, 0, y_next);
+        lv_obj_align(label_get_obj(roller->label_cur),
+                     LV_ALIGN_CENTER,
+                     0,
+                     main_offset + y_cur);
+        lv_obj_align(label_get_obj(roller->label_next),
+                     LV_ALIGN_CENTER,
+                     0,
+                     main_offset + y_next);
     } else {
-        lv_obj_align(label_get_obj(roller->label_cur), LV_ALIGN_CENTER, 0, 0);
+        lv_obj_align(label_get_obj(roller->label_cur), LV_ALIGN_CENTER, 0, main_offset);
     }
-    lv_obj_move_foreground(label_get_obj(roller->label_cur));
 
-    rows = 1 + (show_prev ? 1 : 0) + (show_next ? 1 : 0);
-    height = (rows == 1) ? h_cur
-             : (rows == 2 ? (h_cur + h_normal + roller->gap)
-                          : (h_cur + 2 * (h_normal + roller->gap)));
-    lv_obj_set_height(obj, (lv_coord_t)height);
+    if (show_hint) {
+        lv_obj_align(label_get_obj(roller->label_hint),
+                     LV_ALIGN_CENTER,
+                     0,
+                     (main_height + hint_gap) / 2);
+    }
+    lv_obj_move_foreground(label_get_obj(selected_label));
 }
 
 /**
  * @brief 通知外部当前选中项变化。
  *
- * 新旧回调若同时存在，会在同一次状态变更里按各自签名各通知一次。
+ * 新旧回调是两套互斥接口；新接口优先，回调执行后不再访问滚轮实例。
  *
  * @param roller 目标滚轮组件句柄。
  * @param notify 是否触发通知。
@@ -421,6 +534,7 @@ static void roller_notify_selected_changed(roller_t* roller, bool notify) {
 
     if (roller->on_selected_changed) {
         roller->on_selected_changed(roller, selected, roller->callback_user_data);
+        return;
     }
     if (roller->legacy_on_selected_changed) {
         roller->legacy_on_selected_changed(roller->base.obj, selected, roller->callback_user_data);
@@ -479,6 +593,47 @@ static void roller_on_size_changed(lv_event_t* e) {
     }
 
     roller_update_layout(roller);
+}
+
+/**
+ * @brief 应用可选底部操作提示的样式和文案。
+ *
+ * @param roller 目标滚轮组件句柄。
+ * @param cfg 当前滚轮配置。
+ * @return 无返回值。
+ */
+static void roller_apply_hint_cfg(roller_t* roller, const roller_cfg_t* cfg) {
+    label_cfg_t hint_cfg;
+
+    if (!roller || !cfg) {
+        return;
+    }
+
+    if (!cfg->show_hint) {
+        if (roller->label_hint) {
+            ui_widget_destroy(UI_WIDGET(roller->label_hint));
+            roller->label_hint = NULL;
+        }
+        return;
+    }
+
+    if (!roller->label_hint) {
+        roller->label_hint = label_create(roller->base.obj, NULL);
+        if (!roller->label_hint) {
+            LV_LOG_ERROR("roller create hint failed");
+            return;
+        }
+    }
+
+    hint_cfg = label_default_cfg();
+    hint_cfg.w = LV_PCT(100);
+    hint_cfg.h = LV_SIZE_CONTENT;
+    hint_cfg.opa = cfg->opa_selected;
+    hint_cfg.align = LABEL_ALIGN_CENTER;
+    hint_cfg.overflow = LABEL_OVERFLOW_CLIP;
+    hint_cfg.font = cfg->label.font;
+    hint_cfg.text = app_get_str("ROLLER_OPERATION_HINT");
+    label_apply_cfg(roller->label_hint, &hint_cfg);
 }
 
 /**
@@ -547,7 +702,11 @@ roller_t* roller_create(lv_obj_t* parent, const roller_cfg_t* cfg) {
     roller->label_prev = label_create(obj, NULL);
     roller->label_cur = label_create(obj, NULL);
     roller->label_next = label_create(obj, NULL);
-    if (!roller->label_prev || !roller->label_cur || !roller->label_next) {
+    if (cfg->show_hint) {
+        roller->label_hint = label_create(obj, NULL);
+    }
+    if (!roller->label_prev || !roller->label_cur || !roller->label_next
+        || (cfg->show_hint && !roller->label_hint)) {
         lv_obj_delete(obj);
         return NULL;
     }
@@ -615,6 +774,7 @@ void roller_apply_cfg(roller_t* roller, const roller_cfg_t* cfg) {
     }
     roller->legacy_font_override = false;
     roller->cfg = *cfg;
+    roller_apply_hint_cfg(roller, cfg);
     roller_update_labels(roller);
     roller_update_layout(roller);
 }
@@ -663,7 +823,10 @@ bool roller_key_handler(roller_t* roller, lv_event_code_t code) {
     }
     if (code == LV_EVENT_GESTURE_RIGHT) {
         if (roller->count > 1) {
-            roller_set_selected_internal(roller, roller->selected - 1, true);
+            roller_set_selected_internal(
+                roller,
+                roller->selected + roller->count - 1,
+                true);
         }
         return true;
     }
@@ -671,6 +834,7 @@ bool roller_key_handler(roller_t* roller, lv_event_code_t code) {
         selected = roller->selected % roller->count;
         if (roller->on_activate) {
             roller->on_activate(roller, selected, code, roller->callback_user_data);
+            return true;
         }
         if (roller->legacy_on_activate) {
             roller->legacy_on_activate(roller->base.obj, selected, code, roller->callback_user_data);
@@ -809,7 +973,7 @@ label_t* roller_get_selected_label(roller_t* roller) {
         return NULL;
     }
 
-    return roller->label_cur;
+    return roller_get_selected_slot(roller);
 }
 
 

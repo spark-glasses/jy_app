@@ -1,0 +1,241 @@
+[
+    {
+        "biz": "Draw",
+        "cmd": "drawText",
+        "data": {
+            "align": 2,
+            "font_size": 26,
+            "h": 80,
+            "id": 100,
+            "isbolder": 1,
+            "isfloat": 0,
+            "text": "Hello Draw Text",
+            "w": 460,
+            "x": 40,
+            "y": 40
+        },
+        "id": 0,
+        "name": "绘制文字",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "Draw",
+        "cmd": "drawText",
+        "data": {
+            "align": 3,
+            "font_size": 26,
+            "h": 80,
+            "id": 100,
+            "isbolder": 1,
+            "isfloat": 0,
+            "text": "Hello Draw Text (Updated)",
+            "w": 460,
+            "x": 40,
+            "y": 40
+        },
+        "id": 0,
+        "name": "更新同编号文字",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "Draw",
+        "cmd": "drawText",
+        "data": {
+            "align": 0,
+            "font_size": 20,
+            "h": 40,
+            "id": 102,
+            "isbolder": 0,
+            "isfloat": 0,
+            "text": "AUTO align (0)",
+            "w": 460,
+            "x": 40,
+            "y": 90
+        },
+        "id": 0,
+        "name": "绘制自动对齐文字",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "Draw",
+        "cmd": "drawText",
+        "data": {
+            "align": 2,
+            "font_size": 26,
+            "h": 80,
+            "id": 101,
+            "isbolder": 0,
+            "isfloat": 1,
+            "text": "Float Text (3D)",
+            "w": 460,
+            "x": 40,
+            "y": 140
+        },
+        "id": 0,
+        "name": "绘制悬浮文字",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "Draw",
+        "cmd": "drawText",
+        "data": {
+            "align": 9,
+            "font_size": 20,
+            "h": 40,
+            "id": 103,
+            "isbolder": 0,
+            "isfloat": 0,
+            "text": "Invalid align",
+            "w": 460,
+            "x": 40,
+            "y": 120
+        },
+        "id": 0,
+        "name": "使用无效对齐绘制文字-预期NAK",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "Draw",
+        "cmd": "drawText",
+        "data": {
+            "align": 2,
+            "font_size": 10,
+            "h": 40,
+            "id": 104,
+            "isbolder": 0,
+            "isfloat": 0,
+            "text": "Invalid font_size",
+            "w": 460,
+            "x": 40,
+            "y": 160
+        },
+        "id": 0,
+        "name": "使用无效字号绘制文字-预期NAK",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "Draw",
+        "cmd": "drawProgress",
+        "data": {
+            "h": 20,
+            "id": 200,
+            "isfloat": 0,
+            "progress": 66,
+            "w": 460,
+            "x": 40,
+            "y": 240
+        },
+        "id": 0,
+        "name": "绘制进度条",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "Draw",
+        "cmd": "drawProgress",
+        "data": {
+            "h": 20,
+            "id": 201,
+            "isfloat": 1,
+            "progress": 20,
+            "w": 460,
+            "x": 40,
+            "y": 265
+        },
+        "id": 0,
+        "name": "绘制悬浮进度条",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "Draw",
+        "cmd": "updateProgress",
+        "data": {
+            "id": 200,
+            "progress": 90
+        },
+        "id": 0,
+        "name": "更新进度到90%",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "Draw",
+        "cmd": "updateProgress",
+        "data": {
+            "id": 200,
+            "progress": 100
+        },
+        "id": 0,
+        "name": "更新进度到100%",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "Draw",
+        "cmd": "updateProgress",
+        "data": {
+            "id": 9999,
+            "progress": 10
+        },
+        "id": 0,
+        "name": "更新未知进度条-预期NAK",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "Draw",
+        "cmd": "drawImage",
+        "data": {
+            "h": 160,
+            "id": 300,
+            "isfloat": 0,
+            "path": "/romfs/system/images/ota.jpg",
+            "w": 160,
+            "x": 40,
+            "y": 290
+        },
+        "id": 0,
+        "name": "按路径绘制图片",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "Draw",
+        "cmd": "drawImage",
+        "data": {
+            "h": 160,
+            "id": 301,
+            "isfloat": 0,
+            "path": "/romfs/system/images/__not_exist__.jpg",
+            "w": 160,
+            "x": 220,
+            "y": 290
+        },
+        "id": 0,
+        "name": "绘制无效路径图片-预期NAK",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "Draw",
+        "cmd": "clearDrawId",
+        "data": {
+            "id": 100
+        },
+        "id": 0,
+        "name": "清除指定绘制项",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "Draw",
+        "cmd": "clearDrawId",
+        "data": {
+            "id": 9999
+        },
+        "id": 0,
+        "name": "清除未知绘制项-预期成功",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "Draw",
+        "cmd": "clearDrawAll",
+        "data": {},
+        "id": 0,
+        "name": "清除全部绘制项",
+        "type": "DATA_RELIABLE"
+    }
+]

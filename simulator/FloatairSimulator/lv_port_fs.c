@@ -24,6 +24,10 @@ void lv_port_fs_init(void)
     fs_drv.write_cb = fs_write;
     fs_drv.seek_cb = fs_seek;
     fs_drv.tell_cb = fs_tell;
+#if defined(FLOATAIR_SIMULATOR_LV_FS_CACHE_SIZE)
+    /* Windows CRT 对 Tiny TTF 的大量小块随机读取开销较高，由平台配置启用 LVGL 文件缓存。 */
+    fs_drv.cache_size = FLOATAIR_SIMULATOR_LV_FS_CACHE_SIZE;
+#endif
     
     lv_fs_drv_register(&fs_drv);
 }

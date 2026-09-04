@@ -4,11 +4,29 @@
 #include <nuttx/lcd/lcd_dev.h>
 #include <lvgl.h>
 #include "lvgl/src/core/lv_refr_private.h"
+#include "common/message.h"
 #include "system/system.h"
 #include "system/system_runtime_ui.h"
+#include "system/system_timer.h"
 
 static lcd_state_t current_lcd_state = LCD_ON;
 static uint8_t current_lcd_brightness = UINT8_MAX; ///< 最近一次设置到 LCD 硬件的亮度。
+
+bool floatair_lcd_state_is_valid(lcd_state_t state)
+{
+    return state == LCD_OFF || state == LCD_ON;
+}
+
+const char* floatair_lcd_state_name(lcd_state_t state)
+{
+    if (state == LCD_OFF) {
+        return "OFF";
+    }
+    if (state == LCD_ON) {
+        return "ON";
+    }
+    return "INVALID";
+}
 
 /**
  * @brief 亮屏恢复后强制标记完整显示区域，确保双眼画面都重新刷新。
@@ -35,7 +53,9 @@ static void floatair_lcd_invalidate_full_display(void)
 
 lcd_state_t floatair_lcd_get_state(void)
 {
-    floatair_info("current_lcd_state: %d", current_lcd_state);
+    floatair_info("current lcd state: %u(%s)",
+                  (unsigned)current_lcd_state,
+                  floatair_lcd_state_name(current_lcd_state));
     return current_lcd_state;
 }
 
@@ -50,20 +70,35 @@ bool floatair_lcd_is_off(void)
 
 void floatair_lcd_set_state(lcd_state_t state)
 {
-    floatair_info("lcd state: %d -> %d", current_lcd_state, state);
+    if (!floatair_lcd_state_is_valid(state)) {
+        floatair_err("reject invalid lcd state: %d, expected 0(OFF) or 1(ON)", (int)state);
+        return;
+    }
+    floatair_info("lcd state: %u(%s) -> %u(%s)",
+                  (unsigned)current_lcd_state,
+                  floatair_lcd_state_name(current_lcd_state),
+                  (unsigned)state,
+                  floatair_lcd_state_name(state));
     if (current_lcd_state == state) {
         return;
     }
-    current_lcd_state = state;
     if (state == LCD_ON) {
-        system_request_os_sleep(false);
+        current_lcd_state = state;
+        system_timer_os_sleep_delay_cancel();
         floatair_lcd_set_brightness(system_runtime_state_get_lcd_resume_brightness());
         system_update_time();
         floatair_lcd_invalidate_full_display();
+        system_runtime_state_flush_pending_after_screen_on();
+        system_timer_flush_pending_after_screen_on();
+        app_message_flush_pending_after_screen_on();
         system_ui_flush_pending_after_screen_on();
     } else {
+        system_ui_render_screen_off_frame();
+        current_lcd_state = state;
         floatair_lcd_set_brightness(0);
-        system_request_os_sleep(true);
+        if (!system_timer_os_sleep_delay_start()) {
+            floatair_warn("start os sleep delay timer failed");
+        }
     }
 }
 
@@ -80,6 +115,16 @@ void floatair_lcd_set_brightness(uint8_t brightness)
     }
     current_lcd_brightness = brightness;
     return;
+}
+
+void floatair_lcd_commit_frame(lv_obj_t* target)
+{
+    if (target == NULL || !lv_obj_is_valid(target)) {
+        return;
+    }
+
+    lv_obj_invalidate(target);
+    lv_refr_now(lv_obj_get_display(target));
 }
 
 uint16_t floatair_lcd_get_brightness(void)

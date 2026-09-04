@@ -1,6 +1,6 @@
 /**
  * @file status_bar.h
- * @brief Bottom status bar implementation
+ * @brief Product-selected status bar API
  */
 #ifndef STATUS_BAR_H
 #define STATUS_BAR_H
@@ -67,6 +67,13 @@ typedef struct {
 lv_obj_t* status_bar_create_with_pos(lv_obj_t* parent, int32_t width, const lv_font_t* font, status_bar_widget_pos_t pos);
 
 /**
+ * @brief Update status bar position inside its parent.
+ * @param status_bar Status bar object.
+ * @param pos Target top or bottom position.
+ */
+void status_bar_set_position(lv_obj_t* status_bar, status_bar_widget_pos_t pos);
+
+/**
  * @brief Destroy status bar
  * @param status_bar Status bar object
  */
@@ -85,6 +92,25 @@ void status_bar_update_width(lv_obj_t* status_bar, int32_t width);
  * @param time_str Time string (format: "HH:MM")
  */
 void status_bar_update_time(lv_obj_t* status_bar, const char* time_str);
+
+/**
+ * @brief Update the localized calendar text used by a top status bar.
+ * @param status_bar Status bar object.
+ * @param day Day of month, range 1-31.
+ * @param month Month, range 1-12.
+ * @param weekday Weekday, range 0-6 where 0 is Sunday.
+ */
+void status_bar_update_calendar(lv_obj_t* status_bar,
+                                uint8_t day,
+                                uint8_t month,
+                                uint8_t weekday);
+
+/**
+ * @brief Update the fixed app name shown in the leftmost bottom slot.
+ * @param status_bar Status bar object.
+ * @param app_name Display name, or NULL/empty to hide it.
+ */
+void status_bar_update_app_name(lv_obj_t* status_bar, const char* app_name);
 
 /**
  * @brief 设置状态栏时间文本显隐。
@@ -108,6 +134,23 @@ void status_bar_update_battery(lv_obj_t* status_bar, uint8_t level);
  */
 void status_bar_update_charge_state(lv_obj_t* status_bar, uint8_t state);
 
+/**
+ * @brief Update Bluetooth connection state display.
+ * @param status_bar Status bar object
+ * @param connected `true` when Bluetooth is connected
+ */
+void status_bar_update_bt_state(lv_obj_t* status_bar, bool connected);
+
+/**
+ * @brief 更新左右耳机附件连接状态显示。
+ * @param[in] status_bar 状态栏对象。
+ * @param[in] left_connected `true` 表示左侧耳机附件已连接。
+ * @param[in] right_connected `true` 表示右侧耳机附件已连接。
+ * @return 无返回值。
+ */
+void status_bar_update_headset_state(lv_obj_t* status_bar,
+                                     bool left_connected,
+                                     bool right_connected);
 
 /**
  * @brief Add text to status bar
@@ -177,14 +220,6 @@ void status_bar_set_visible(lv_obj_t* status_bar, bool visible);
  * @param visible Visibility flag
  */
 void status_bar_set_widget_visible(lv_obj_t* status_bar, lv_obj_t* widget, bool visible);
-
-/**
- * @brief 设置佩戴检测图标占位槽位显隐。
- * @param[in] status_bar 状态栏对象。
- * @param[in] visible `true` 表示显示占位槽位，`false` 表示隐藏占位槽位。
- * @return 无返回值。
- */
-void status_bar_set_wear_detection_visible(lv_obj_t* status_bar, bool visible);
 
 void status_bar_clear_custom_widgets(lv_obj_t* status_bar);
 

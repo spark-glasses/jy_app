@@ -43,11 +43,13 @@ enum {
     SIM_FIFO_PARAM_DEVICE_STATE_NOW,
     SIM_FIFO_PARAM_DEVICE_STATE_EPOCH,
     SIM_FIFO_PARAM_CALL_STATE_TEXT,
+    SIM_FIFO_PARAM_ATTACHMENT_STATE, ///< 两参数附件状态：附件类型和主从侧身份。
 };
 
 #define SIM_CALL_EVENT_RINGING 0
 #define SIM_CALL_EVENT_CONNECTED 1
 #define SIM_CALL_EVENT_DISCONNECTED 2
+#define SIM_CALL_EVENT_OUTGOING 3
 
 static const simulator_fifo_event_map_t g_simulator_fifo_events[] = {
     {"SET_JYP_HOST_CONNECTED", SET_JYP_HOST_CONNECTED, SIM_FIFO_PARAM_NONE, 0},
@@ -76,8 +78,10 @@ static const simulator_fifo_event_map_t g_simulator_fifo_events[] = {
     {"SET_BT_CALL_RINGING", SET_BT_CALL_SETUP_EVENT, SIM_FIFO_PARAM_CALL_STATE_TEXT, SIM_CALL_EVENT_RINGING},
     {"SET_BT_CALL_CONNECTED", SET_BT_CALL_SETUP_EVENT, SIM_FIFO_PARAM_CALL_STATE_TEXT, SIM_CALL_EVENT_CONNECTED},
     {"SET_BT_CALL_DISCONNECTED", SET_BT_CALL_SETUP_EVENT, SIM_FIFO_PARAM_CALL_STATE_TEXT, SIM_CALL_EVENT_DISCONNECTED},
+    {"SET_BT_CALL_OUTGOING", SET_BT_CALL_SETUP_EVENT, SIM_FIFO_PARAM_CALL_STATE_TEXT, SIM_CALL_EVENT_OUTGOING},
     {"SET_JYT_BT_VISIBLE_CHANGED", SET_JYT_BT_VISIBLE_CHANGED, SIM_FIFO_PARAM_PAYLOAD_U8, 0},
     {"SET_JYT_TIMER_TRIGGER", SET_JYT_TIMER_TRIGGER, SIM_FIFO_PARAM_PAYLOAD_U32, 0},
+    {"SET_JYT_ACC_TYPE_CHANGED", SET_JYT_ACC_TYPE_CHANGED, SIM_FIFO_PARAM_ATTACHMENT_STATE, 0},
 };
 
 static pthread_t g_simulator_event_fifo_thread;
@@ -246,7 +250,7 @@ static void simulator_event_fifo_handle_line(char* line) {
                 device_state.host_connected = sim_socket_get_connection_status() ? 1 : 0;
 
                 if (g_simulator_fifo_events[i].param_mode == SIM_FIFO_PARAM_DEVICE_STATE_NOW) {
-                    device_state.time_now = time(NULL);
+                    device_state.time_now = simulator_system_time_now();
                 } else {
                     if (!arg) {
                         floatair_warn("fifo device state missing epoch");
@@ -284,6 +288,55 @@ static void simulator_event_fifo_handle_line(char* line) {
                                                0,
                                                payload,
                                                (uint16_t)(1 + caller_len));
+                return;
+            }
+
+            if (g_simulator_fifo_events[i].param_mode == SIM_FIFO_PARAM_ATTACHMENT_STATE) {
+                char* side_arg = NULL;
+                unsigned long attachment_type = 0;
+                unsigned long attachment_side = 0;
+                uint8_t payload[2] = {0};
+
+                if (!arg) {
+                    floatair_warn("fifo attachment event missing args");
+                    return;
+                }
+
+                side_arg = arg;
+                while (*side_arg && *side_arg != ' ' && *side_arg != '\t') {
+                    side_arg++;
+                }
+                if (*side_arg == '\0') {
+                    floatair_warn("fifo attachment event missing side: %s", arg);
+                    return;
+                }
+                *side_arg++ = '\0';
+                while (*side_arg == ' ' || *side_arg == '\t') {
+                    side_arg++;
+                }
+                if (*side_arg == '\0') {
+                    floatair_warn("fifo attachment event missing side");
+                    return;
+                }
+
+                attachment_type = strtoul(arg, &end, 0);
+                if (end == arg || *end != '\0' || attachment_type > JYT_ACC_SPEAKER) {
+                    floatair_warn("fifo attachment event bad type: %s", arg);
+                    return;
+                }
+                attachment_side = strtoul(side_arg, &end, 0);
+                if (end == side_arg || *end != '\0' ||
+                    attachment_side >= SYSTEM_ATTACHMENT_SIDE_COUNT) {
+                    floatair_warn("fifo attachment event bad side: %s", side_arg);
+                    return;
+                }
+
+                payload[0] = (uint8_t)attachment_type;
+                payload[1] = (uint8_t)attachment_side;
+                simulator_post_system_event_ex(g_simulator_fifo_events[i].event_type,
+                                               0,
+                                               payload,
+                                               (uint16_t)sizeof(payload));
                 return;
             }
 

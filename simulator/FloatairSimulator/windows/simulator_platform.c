@@ -291,7 +291,11 @@ int simulator_platform_rename_path(const char* old_path, const char* new_path)
         !simulator_platform_utf8_to_wide(new_path, new_wpath, sizeof(new_wpath) / sizeof(new_wpath[0]))) {
         return -1;
     }
-    return _wrename(old_wpath, new_wpath);
+    return MoveFileExW(old_wpath,
+                       new_wpath,
+                       MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)
+               ? 0
+               : -1;
 }
 
 int simulator_platform_mkdir_one(const char* path)

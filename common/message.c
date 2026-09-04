@@ -8,21 +8,26 @@
 
 #include <inttypes.h>
 #include <lvgl/lvgl.h>
+#include <stdarg.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 #include "common/app_framework/app_manager.h"
 #include "common/app_framework/app_router.h"
+#include "product_app.h"
 #include "common/widgets/toast.h"
 #include "common/widgets/status_bar.h"
 #include "system/system.h"
+#include "system/system_avrcp.h"
 #include "system/system_res.h"
 #include "system/system_notification.h"
+#include "system/system_runtime_state.h"
 #include "system/system_runtime_ui.h"
 #include "system/system_timer.h"
 #include "sys_adapter.h"
 #include "app_lcd.h"
+#include "ui_res.h"
 
 /* ------------------
  * Version constraints check
@@ -42,6 +47,19 @@ typedef struct list_node {
 
 #define LIST_INITIAL_CLEARED_VALUE { NULL, NULL }
 #define APP_TOAST_ID_LOW_BATTERY 1U ///< 低电量报警 Toast 业务标识。
+
+/**
+ * @brief 灭屏期间低电量 Toast 等待亮屏执行的最终动作。
+ */
+typedef enum {
+    APP_LOW_BATTERY_TOAST_PENDING_NONE = 0, ///< 无待处理动作。
+    APP_LOW_BATTERY_TOAST_PENDING_SHOW,     ///< 亮屏后显示低电量 Toast。
+    APP_LOW_BATTERY_TOAST_PENDING_DISMISS,  ///< 亮屏后关闭低电量 Toast。
+} app_low_battery_toast_pending_action_t;
+
+static app_low_battery_toast_pending_action_t s_low_battery_toast_pending =
+    APP_LOW_BATTERY_TOAST_PENDING_NONE; ///< 灭屏期间最后一次低电量 Toast 动作。
+static char s_pending_emerg_toast[MSG_STR_MAX_LEN] = {0}; ///< 灭屏期间等待亮屏显示的紧急消息。
 
 static inline int list_is_clear(const list_node* list) {
     return list->next == NULL && list->prev == NULL;
@@ -186,7 +204,7 @@ static bool app_msg_guide_is_non_guide_home_view(void) {
     if (current_app == NULL || home_viewname == NULL) {
         return false;
     }
-    if (strcmp(home_viewname, APP_NAME_GUIDE) == 0) {
+    if (product_app_name_has_capability(home_viewname, PRODUCT_APP_CAP_GUIDE)) {
         return false;
     }
 
@@ -586,6 +604,7 @@ static const char* system_event_type_to_str(uint16_t event_type) {
         EVT_CASE(SET_JYT_BT_VISIBLE_CHANGED)
         EVT_CASE(SET_ANCS_EVENT)
         EVT_CASE(SET_JYT_REFRESH_UI_REQ)
+        EVT_CASE(SET_JYT_ACC_TYPE_CHANGED)
         default: return "UNKNOWN_SYSTEM_EVENT";
     }
 #undef EVT_CASE
@@ -615,16 +634,93 @@ static bool system_handle_bt_visible_changed_event(const JYT_ELF_MQ_MSG* msg) {
     return system_request_bt_visibility(target_visibility);
 }
 
+#define SYSTEM_ATTACHMENT_EVENT_PAYLOAD_LEN 2u ///< 附件事件负载长度：附件类型和主从侧身份。
+
+/**
+ * @brief 主从两侧附件状态及业务计数。
+ */
+typedef struct {
+    uint8_t type_by_side[SYSTEM_ATTACHMENT_SIDE_COUNT]; ///< 各侧最近一次上报的附件类型。
+    uint8_t headset_count;                              ///< 当前检测到扬声器附件的侧数。
+    uint8_t glasses_case_count;                         ///< 当前检测到眼镜盒附件的侧数。
+} system_attachment_state_t;
+
+static system_attachment_state_t s_attachment_state = {
+    .type_by_side = {JYT_ACC_NONE, JYT_ACC_NONE},
+};
+
+/**
+ * @brief 处理主从两侧附件变化，并按附件数量更新本机业务状态。
+ * @param[in] msg 系统事件消息，payload[0] 为附件类型，payload[1] 为主从侧身份。
+ * @return `true` 表示本机处理和手机上报均成功，`false` 表示消息无效或上报失败。
+ */
+static bool system_handle_attachment_changed_event(const JYT_ELF_MQ_MSG* msg) {
+    uint8_t attachment_type = 0;
+    system_attachment_side_t attachment_side = SYSTEM_ATTACHMENT_SIDE_MASTER;
+    uint8_t previous_type = 0;
+    uint8_t previous_glasses_case_count = 0;
+    bool ret = true;
+
+    if (msg == NULL || msg->payload_len != SYSTEM_ATTACHMENT_EVENT_PAYLOAD_LEN) {
+        floatair_err("invalid attachment payload_len: %u",
+                     msg == NULL ? 0u : (unsigned)msg->payload_len);
+        return false;
+    }
+
+    attachment_type = msg->payload[0];
+    attachment_side = (system_attachment_side_t)msg->payload[1];
+    if (attachment_type > JYT_ACC_SPEAKER) {
+        floatair_err("invalid attachment type: %u", (unsigned)attachment_type);
+        return false;
+    }
+    if ((unsigned)attachment_side >= SYSTEM_ATTACHMENT_SIDE_COUNT) {
+        floatair_err("invalid attachment side: %u", (unsigned)attachment_side);
+        return false;
+    }
+
+    previous_type = s_attachment_state.type_by_side[attachment_side];
+    previous_glasses_case_count = s_attachment_state.glasses_case_count;
+    if (previous_type != attachment_type) {
+        if (previous_type == JYT_ACC_SPEAKER && s_attachment_state.headset_count > 0u) {
+            s_attachment_state.headset_count--;
+        } else if (previous_type == JYT_ACC_GLASSES_CASE &&
+                   s_attachment_state.glasses_case_count > 0u) {
+            s_attachment_state.glasses_case_count--;
+        }
+
+        if (attachment_type == JYT_ACC_SPEAKER) {
+            s_attachment_state.headset_count++;
+        } else if (attachment_type == JYT_ACC_GLASSES_CASE) {
+            s_attachment_state.glasses_case_count++;
+        }
+        s_attachment_state.type_by_side[attachment_side] = attachment_type;
+    }
+
+    floatair_info("attachment changed: side=%u type=%u headset_count=%u case_count=%u",
+                  (unsigned)attachment_side,
+                  (unsigned)attachment_type,
+                  (unsigned)s_attachment_state.headset_count,
+                  (unsigned)s_attachment_state.glasses_case_count);
+
+    system_ui_update_headset_state(
+        s_attachment_state.type_by_side[SYSTEM_ATTACHMENT_SIDE_SLAVE] == JYT_ACC_SPEAKER,
+        s_attachment_state.type_by_side[SYSTEM_ATTACHMENT_SIDE_MASTER] == JYT_ACC_SPEAKER);
+    ret = system_report_attachment_type(attachment_type, attachment_side);
+    if (previous_glasses_case_count == 0u && s_attachment_state.glasses_case_count > 0u &&
+        !floatair_lcd_is_off()) {
+        system_set_sys_state(LCD_OFF);
+        if (!system_report_sys_state(LCD_OFF, SYSTEM_SYS_STATE_TRIGGER_GLASSES_CASE)) {
+            ret = false;
+        }
+    }
+    return ret;
+}
+
 typedef enum {
     ANCS_EVT_ADDED = 0,
     ANCS_EVT_MODIFIED = 1,
     ANCS_EVT_REMOVED = 2,
 } ancs_event_id_t;
-
-typedef enum {
-    ANCS_CMD_GET_NTF_ATTR = 0,
-    ANCS_CMD_GET_APP_ATTR = 1,
-} ancs_cmd_id_t;
 
 typedef enum {
     ANCS_ATTR_APP_IDENTIFIER = 0,
@@ -634,6 +730,54 @@ typedef enum {
     ANCS_ATTR_MESSAGE_SIZE = 4,
     ANCS_ATTR_DATE = 5,
 } ancs_attr_id_t;
+
+typedef enum {
+    ANCS_CATEGORY_OTHER = 0,
+    ANCS_CATEGORY_INCOMING_CALL = 1,
+    ANCS_CATEGORY_MISSED_CALL = 2,
+    ANCS_CATEGORY_SOCIAL = 4,
+} ancs_category_id_t;
+
+#define ANCS_CMD_GET_NTF_ATTR 0u ///< Get Notification Attributes 命令 ID。
+#define ANCS_APP_ID_MAX 96u ///< iOS AppIdentifier 本地缓存长度。
+#define ANCS_SKELETON_EVENT_ID_OFF 0u ///< skeleton 中 EventID 的偏移。
+#define ANCS_SKELETON_EVENT_FLAGS_OFF 1u ///< skeleton 中 EventFlags 的偏移。
+#define ANCS_SKELETON_CATEGORY_ID_OFF 2u ///< skeleton 中 CategoryID 的偏移。
+#define ANCS_SKELETON_UID_OFF 4u ///< skeleton 中 NotificationUID 的偏移。
+#define ANCS_EVENT_FLAG_PRE_EXISTING 0x04u ///< iOS 连接后重放的历史通知标志。
+#define ANCS_DETAIL_CMD_ID_OFF 0u ///< detail 中 CommandID 的偏移。
+#define ANCS_DETAIL_UID_OFF 1u ///< detail 中 NotificationUID 的偏移。
+#define ANCS_DETAIL_ATTRS_OFF 5u ///< detail 中属性链的起始偏移。
+#define ANCS_DETAIL_ATTR_HEADER_LEN 3u ///< detail 属性头 `[attrId][attrLen u16 LE]` 的长度。
+#define ANCS_DETAIL_ATTR_LEN_OFF 1u ///< detail 属性头中 attrLen 的偏移。
+#ifndef ANCS_BATCH_TYPE_UNSUPPORTED
+#define ANCS_BATCH_TYPE_UNSUPPORTED 2u ///< 当前 ACL 连接已熔断 ANCS 的批记录类型。
+#endif
+#ifndef ANCS_UNSUPPORTED_DATA_LEN
+#define ANCS_UNSUPPORTED_DATA_LEN 0u ///< ANCS 熔断记录不携带 data。
+#endif
+#define ANCS_UNSUPPORTED_NOTIFICATION_ID 0x414E4353u ///< “ANCS”系统提示通知 ID。
+#define ANCS_UNSUPPORTED_MESSAGE_KEY "NOTIFY_ANCS_UNSUPPORTED" ///< ANCS 熔断后的国际化用户指引键。
+
+/**
+ * @brief Get Notification Attributes 详情解析结果。
+ */
+typedef struct {
+    char app_id[ANCS_APP_ID_MAX];     ///< detail 属性链中的 AppIdentifier。
+    char title[MSG_STR_MAX_LEN];      ///< 通知标题。
+    char subtitle[MSG_STR_MAX_LEN];   ///< 通知副标题。
+    char message[MSG_STR_MAX_LEN];    ///< 通知正文。
+    time_t notify_time;               ///< 解析成功的通知时间。
+    bool has_time;                    ///< notify_time 是否来自有效 DATE 属性。
+} ancs_notification_detail_t;
+
+static system_notification_entry_t
+    s_ancs_batch_entries[SYSTEM_NOTIFICATION_QUEUE_MAX] = {0}; ///< 当前批次去重后的待入队通知。
+static uint32_t s_ancs_batch_warning_count = 0u; ///< 批量协议异常日志限频计数。
+
+void app_message_reset_ancs_state(void) {
+    s_ancs_batch_warning_count = 0u;
+}
 
 static uint16_t ancs_u16_le(const uint8_t* p) {
     return (uint16_t)p[0] | ((uint16_t)p[1] << 8);
@@ -702,149 +846,536 @@ static void ancs_copy_str(char* out, size_t out_cap, const uint8_t* s, size_t le
     out[copy_len] = '\0';
 }
 
+/**
+ * @brief 从第三方来电标题中提取联系人名称。
+ * @param[in,out] title ANCS 标题缓存。
+ * @return 无返回值。
+ */
+static void ancs_trim_call_title(char* title) {
+    char* invite = NULL;
+
+    if (title == NULL || title[0] == '\0') {
+        return;
+    }
+    invite = strstr(title, "邀请");
+    if (invite != NULL) {
+        *invite = '\0';
+    }
+}
+
+/**
+ * @brief 判断本次批量协议异常是否需要输出日志。
+ * @return 首次异常及之后每 16 次异常返回 `true`。
+ */
+static bool ancs_batch_warning_due(void) {
+    s_ancs_batch_warning_count++;
+    return s_ancs_batch_warning_count == 1u ||
+           (s_ancs_batch_warning_count % 16u) == 0u;
+}
+
+/**
+ * @brief 解析 FULL 记录携带的 Get Notification Attributes 原始详情。
+ * @param[in] detail Data Source 原始回包，可为空。
+ * @param[in] detail_len detail 字节数。
+ * @param[in] expected_uid skeleton 中的通知 UID。
+ * @param[out] parsed 详情解析结果。
+ * @return 格式合法返回 `true`。
+ */
+static bool ancs_parse_detail(const uint8_t* detail,
+                              size_t detail_len,
+                              uint32_t expected_uid,
+                              ancs_notification_detail_t* parsed) {
+    size_t offset = ANCS_DETAIL_ATTRS_OFF;
+
+    if (parsed == NULL) {
+        return false;
+    }
+    memset(parsed, 0, sizeof(*parsed));
+    if (detail_len == 0u) {
+        return true;
+    }
+    if (detail == NULL || detail_len < ANCS_DETAIL_ATTRS_OFF) {
+        if (ancs_batch_warning_due()) {
+            floatair_warn("ANCS detail too short len=%u", (unsigned)detail_len);
+        }
+        return false;
+    }
+    if (detail[ANCS_DETAIL_CMD_ID_OFF] != ANCS_CMD_GET_NTF_ATTR) {
+        if (ancs_batch_warning_due()) {
+            floatair_warn("ANCS detail unknown cmd=%u",
+                          (unsigned)detail[ANCS_DETAIL_CMD_ID_OFF]);
+        }
+        return false;
+    }
+    if (ancs_u32_le(&detail[ANCS_DETAIL_UID_OFF]) != expected_uid) {
+        if (ancs_batch_warning_due()) {
+            floatair_warn("ANCS detail uid mismatch expected=%" PRIu32
+                          " actual=%" PRIu32,
+                          expected_uid,
+                          ancs_u32_le(&detail[ANCS_DETAIL_UID_OFF]));
+        }
+        return false;
+    }
+
+    while (offset < detail_len) {
+        uint8_t attr_id = 0u;
+        uint16_t attr_len = 0u;
+        const uint8_t* attr_data = NULL;
+
+        if (offset + ANCS_DETAIL_ATTR_HEADER_LEN > detail_len) {
+            if (ancs_batch_warning_due()) {
+                floatair_warn("ANCS detail truncated attribute header off=%u len=%u",
+                              (unsigned)offset,
+                              (unsigned)detail_len);
+            }
+            return false;
+        }
+        attr_id = detail[offset];
+        attr_len = ancs_u16_le(&detail[offset + ANCS_DETAIL_ATTR_LEN_OFF]);
+        offset += ANCS_DETAIL_ATTR_HEADER_LEN;
+        if (offset + attr_len > detail_len) {
+            if (ancs_batch_warning_due()) {
+                floatair_warn("ANCS detail truncated attr=%u attr_len=%u remain=%u",
+                              (unsigned)attr_id,
+                              (unsigned)attr_len,
+                              (unsigned)(detail_len - offset));
+            }
+            return false;
+        }
+
+        attr_data = &detail[offset];
+        switch (attr_id) {
+            case ANCS_ATTR_APP_IDENTIFIER:
+                ancs_copy_str(parsed->app_id,
+                              sizeof(parsed->app_id),
+                              attr_data,
+                              attr_len);
+                break;
+            case ANCS_ATTR_TITLE:
+                ancs_copy_str(parsed->title,
+                              sizeof(parsed->title),
+                              attr_data,
+                              attr_len);
+                break;
+            case ANCS_ATTR_SUBTITLE:
+                ancs_copy_str(parsed->subtitle,
+                              sizeof(parsed->subtitle),
+                              attr_data,
+                              attr_len);
+                break;
+            case ANCS_ATTR_MESSAGE:
+                ancs_copy_str(parsed->message,
+                              sizeof(parsed->message),
+                              attr_data,
+                              attr_len);
+                break;
+            case ANCS_ATTR_DATE:
+                parsed->has_time = ancs_parse_date_time(attr_data,
+                                                        attr_len,
+                                                        &parsed->notify_time);
+                break;
+            default:
+                break;
+        }
+        offset += attr_len;
+    }
+    return true;
+}
+
+/**
+ * @brief 解析一条 FULL 批量记录并执行来电分流。
+ * @param[in] rec 记录起点，指向 item_len 字段。
+ * @param[in] item_len type 与 data 的总长度。
+ * @param[out] entry 普通通知条目。
+ * @param[out] should_enqueue 是否需要将 entry 加入普通通知队列。
+ * @param[out] notification_uid iOS 通知 UID。
+ * @return 记录格式合法返回 `true`。
+ */
+static bool ancs_parse_full_record(const uint8_t* rec,
+                                   uint16_t item_len,
+                                   system_notification_entry_t* entry,
+                                   bool* should_enqueue,
+                                   uint32_t* notification_uid) {
+    uint16_t data_len = 0u;
+    uint32_t rec_total = 0u;
+    uint32_t app_id_len_off = 0u;
+    uint32_t detail_len_off = 0u;
+    uint32_t detail_off = 0u;
+    uint8_t name_len = 0u;
+    uint8_t app_id_len = 0u;
+    uint16_t detail_len = 0u;
+    const uint8_t* skeleton = NULL;
+    uint8_t event_id = 0u;
+    uint8_t event_flags = 0u;
+    uint8_t category = 0u;
+    bool is_pre_existing = false;
+    uint32_t uid = 0u;
+    char app_id[ANCS_APP_ID_MAX] = {0};
+    ancs_notification_detail_t parsed = {0};
+
+    if (rec == NULL || entry == NULL || should_enqueue == NULL ||
+        notification_uid == NULL || item_len < 1u) {
+        return false;
+    }
+    *should_enqueue = false;
+    *notification_uid = 0u;
+    data_len = item_len - 1u;
+    rec_total = ANCS_ITEM_WIRE_TOTAL(item_len);
+    if (data_len < ANCS_FULL_DATA_LEN(0, 0, 0)) {
+        if (ancs_batch_warning_due()) {
+            floatair_warn("ANCS FULL too short data_len=%u", (unsigned)data_len);
+        }
+        return false;
+    }
+
+    skeleton = &rec[ANCS_REC_SKELETON_OFF];
+    event_id = skeleton[ANCS_SKELETON_EVENT_ID_OFF];
+    event_flags = skeleton[ANCS_SKELETON_EVENT_FLAGS_OFF];
+    category = skeleton[ANCS_SKELETON_CATEGORY_ID_OFF];
+    is_pre_existing = (event_flags & ANCS_EVENT_FLAG_PRE_EXISTING) != 0u;
+    uid = ancs_u32_le(&skeleton[ANCS_SKELETON_UID_OFF]);
+    *notification_uid = uid;
+    if (event_id != ANCS_EVT_ADDED && event_id != ANCS_EVT_MODIFIED) {
+        if (ancs_batch_warning_due()) {
+            floatair_warn("ANCS FULL invalid event=%u uid=%" PRIu32,
+                          (unsigned)event_id,
+                          uid);
+        }
+        return false;
+    }
+
+    name_len = rec[ANCS_REC_NAME_LEN_OFF];
+    app_id_len_off = ANCS_REC_APP_ID_LEN_OFF(name_len);
+    if (app_id_len_off >= rec_total) {
+        if (ancs_batch_warning_due()) {
+            floatair_warn("ANCS FULL missing appIdLen name_len=%u item_len=%u",
+                          (unsigned)name_len,
+                          (unsigned)item_len);
+        }
+        return false;
+    }
+    app_id_len = rec[app_id_len_off];
+    detail_len_off = ANCS_REC_DETAIL_LEN_OFF(name_len, app_id_len);
+    detail_off = ANCS_REC_DETAIL_OFF(name_len, app_id_len);
+    if (detail_len_off + sizeof(uint16_t) > rec_total || detail_off > rec_total) {
+        if (ancs_batch_warning_due()) {
+            floatair_warn("ANCS FULL missing detailLen name_len=%u app_id_len=%u",
+                          (unsigned)name_len,
+                          (unsigned)app_id_len);
+        }
+        return false;
+    }
+    detail_len = ancs_u16_le(&rec[detail_len_off]);
+    if ((uint32_t)ANCS_ITEM_WIRE_LEN(
+            ANCS_FULL_DATA_LEN(name_len, app_id_len, detail_len)) != rec_total) {
+        if (ancs_batch_warning_due()) {
+            floatair_warn("ANCS FULL length mismatch item_len=%u name=%u app=%u detail=%u",
+                          (unsigned)item_len,
+                          (unsigned)name_len,
+                          (unsigned)app_id_len,
+                          (unsigned)detail_len);
+        }
+        return false;
+    }
+
+    ancs_copy_str(app_id,
+                  sizeof(app_id),
+                  &rec[ANCS_REC_APP_ID_OFF(name_len)],
+                  app_id_len);
+    if (!ancs_parse_detail(&rec[detail_off], detail_len, uid, &parsed)) {
+        return false;
+    }
+    if (app_id[0] == '\0' && parsed.app_id[0] != '\0') {
+        ancs_copy_str(app_id,
+                      sizeof(app_id),
+                      (const uint8_t*)parsed.app_id,
+                      strlen(parsed.app_id));
+    } else if (app_id[0] != '\0' && parsed.app_id[0] != '\0' &&
+               strcmp(app_id, parsed.app_id) != 0) {
+        if (ancs_batch_warning_due()) {
+            floatair_warn("ANCS AppID mismatch record=%s detail=%s", app_id, parsed.app_id);
+        }
+    }
+    /* 系统电话由 HFP 统一生成来电和未接来电通知，避免 ANCS 再次入队。 */
+    if (strcmp(app_id, "com.apple.mobilephone") == 0) {
+        floatair_dbg("ANCS ignore phone notification uid=%" PRIu32, uid);
+        return true;
+    }
+
+    if (category == ANCS_CATEGORY_INCOMING_CALL && !is_pre_existing) {
+        const char* caller = NULL;
+
+        ancs_trim_call_title(parsed.title);
+        caller = parsed.title[0] != '\0' ? parsed.title : parsed.message;
+        floatair_info("ANCS third-party incoming call uid=%" PRIu32 " app=%s caller=%s",
+                      uid,
+                      app_id,
+                      caller != NULL ? caller : "");
+        system_runtime_state_set_ancs_call_info(caller, app_id);
+        return true;
+    }
+
+    memset(entry, 0, sizeof(*entry));
+    entry->id = ancs_internal_notification_id(uid);
+    entry->mode = NOTIFY_MODE_MESSAGE;
+    entry->duration_ms = 3000u;
+    entry->level = 1u;
+    entry->action = 1u;
+    entry->silent = is_pre_existing;
+    if (category == ANCS_CATEGORY_MISSED_CALL) {
+        entry->icon = SYSTEM_NOTIFICATION_ICON_MISSED_CALL;
+    }
+
+    if (parsed.subtitle[0] != '\0' && parsed.message[0] != '\0') {
+        char merged[MSG_STR_MAX_LEN] = {0};
+
+        snprintf(merged,
+                 sizeof(merged),
+                 "%s\n%s",
+                 parsed.subtitle,
+                 parsed.message);
+        memcpy(parsed.message, merged, sizeof(parsed.message));
+        parsed.message[sizeof(parsed.message) - 1u] = '\0';
+    } else if (parsed.message[0] == '\0' && parsed.subtitle[0] != '\0') {
+        memcpy(parsed.message, parsed.subtitle, sizeof(parsed.message));
+        parsed.message[sizeof(parsed.message) - 1u] = '\0';
+    }
+
+    if (parsed.has_time) {
+        entry->notify_time = parsed.notify_time;
+    } else {
+        time(&entry->notify_time);
+    }
+    if (parsed.title[0] != '\0' && parsed.message[0] != '\0') {
+        snprintf(entry->title,
+                 sizeof(entry->title),
+                 "%s\n%s",
+                 parsed.title,
+                 parsed.message);
+    } else if (parsed.title[0] != '\0') {
+        ancs_copy_str(entry->title,
+                      sizeof(entry->title),
+                      (const uint8_t*)parsed.title,
+                      strlen(parsed.title));
+    } else if (parsed.message[0] != '\0') {
+        ancs_copy_str(entry->title,
+                      sizeof(entry->title),
+                      (const uint8_t*)parsed.message,
+                      strlen(parsed.message));
+    }
+    entry->has_title = entry->title[0] != '\0';
+    *should_enqueue = true;
+    return true;
+}
+
+/**
+ * @brief 从当前批次待入队列表移除指定通知。
+ * @param[in] id 内部通知 ID。
+ * @param[in,out] count 当前待入队数量。
+ * @return 无返回值。
+ */
+static void ancs_pending_remove(uint32_t id, size_t* count) {
+    if (count == NULL) {
+        return;
+    }
+    for (size_t i = 0u; i < *count; ++i) {
+        if (s_ancs_batch_entries[i].id != id) {
+            continue;
+        }
+        if (i + 1u < *count) {
+            memmove(&s_ancs_batch_entries[i],
+                    &s_ancs_batch_entries[i + 1u],
+                    sizeof(s_ancs_batch_entries[0]) * (*count - i - 1u));
+        }
+        (*count)--;
+        return;
+    }
+}
+
+/**
+ * @brief 将通知按 UID 去重后追加到当前批次，超量时保留最新条目。
+ * @param[in] entry 待加入通知。
+ * @param[in,out] count 当前待入队数量。
+ * @return 无返回值。
+ */
+static void ancs_pending_upsert(const system_notification_entry_t* entry,
+                                size_t* count) {
+    if (entry == NULL || count == NULL) {
+        return;
+    }
+    ancs_pending_remove(entry->id, count);
+    if (*count == SYSTEM_NOTIFICATION_QUEUE_MAX) {
+        memmove(&s_ancs_batch_entries[0],
+                &s_ancs_batch_entries[1],
+                sizeof(s_ancs_batch_entries[0]) *
+                    (SYSTEM_NOTIFICATION_QUEUE_MAX - 1u));
+        (*count)--;
+    }
+    s_ancs_batch_entries[*count] = *entry;
+    (*count)++;
+}
+
+/**
+ * @brief 在通知列表和弹窗追加 ANCS 熔断指引，不影响已有通知。
+ * @return 指引通知成功入队并展示返回 `true`。
+ */
+static bool ancs_show_unsupported_notification(void) {
+    system_notification_entry_t entry = {0};
+    const char* message = app_get_str(ANCS_UNSUPPORTED_MESSAGE_KEY);
+
+    entry.id = ANCS_UNSUPPORTED_NOTIFICATION_ID;
+    entry.mode = NOTIFY_MODE_MESSAGE;
+    entry.duration_ms = 3000u;
+    entry.level = 1u;
+    entry.action = 1u;
+    time(&entry.notify_time);
+    ancs_copy_str(entry.title,
+                  sizeof(entry.title),
+                  (const uint8_t*)message,
+                  strlen(message));
+    entry.has_title = true;
+
+    floatair_warn("ANCS unsupported, preserve notifications and show reconnect guide");
+    return system_notification_add_entry(&entry);
+}
+
 static bool system_handle_ancs_event(const JYT_ELF_MQ_MSG* msg) {
-    if (!msg || msg->payload_len < 2) {
+    const uint8_t* payload = NULL;
+    uint16_t payload_len = 0u;
+    uint16_t count = 0u;
+    uint32_t offset = ANCS_BATCH_CNT_LEN;
+    uint32_t full_count = 0u;
+    uint32_t removed_count = 0u;
+    uint32_t unsupported_count = 0u;
+    size_t pending_count = 0u;
+
+    if (msg == NULL || msg->payload_len < ANCS_BATCH_CNT_LEN) {
+        floatair_err("invalid ANCS batch payload_len=%u",
+                     msg != NULL ? (unsigned)msg->payload_len : 0u);
         return false;
     }
     if (!system_config_is_userguide_finished()) {
-        floatair_info("userguide unfinished, ignore ancs event");
+        floatair_info("userguide unfinished, ignore ANCS batch");
         return true;
     }
 
-    const uint8_t* p = msg->payload;
-    uint16_t len = msg->payload_len;
-    uint8_t type = p[0];
-    const uint8_t* data = &p[1];
-    uint16_t data_len = len - 1;
+    payload = msg->payload;
+    payload_len = msg->payload_len;
+    count = ancs_u16_le(payload);
 
-    if (type == ANCS_FWD_TYPE_NOTIFICATION) {
-        if (data_len < 8) {
-            floatair_err("invalid ancs notification payload_len: %d", data_len);
-            return false;
+    for (uint16_t i = 0u; i < count; ++i) {
+        uint16_t item_len = 0u;
+        uint16_t data_len = 0u;
+        uint8_t type = 0u;
+        uint32_t rec_total = 0u;
+        const uint8_t* rec = NULL;
+
+        if (offset + ANCS_BATCH_ITEM_HDR_LEN > payload_len) {
+            if (ancs_batch_warning_due()) {
+                floatair_warn("ANCS batch truncated header i=%u count=%u off=%u len=%u",
+                              (unsigned)i,
+                              (unsigned)count,
+                              (unsigned)offset,
+                              (unsigned)payload_len);
+            }
+            break;
         }
-        uint8_t evt_id = data[0];
-        uint32_t uid = ancs_u32_le(&data[4]);
-        uint32_t id = ancs_internal_notification_id(uid);
+        rec = &payload[offset];
+        item_len = ancs_u16_le(rec);
+        rec_total = ANCS_ITEM_WIRE_TOTAL(item_len);
+        if (item_len < 1u || rec_total > ANCS_MAX_ITEM_WIRE ||
+            offset + rec_total > payload_len) {
+            if (ancs_batch_warning_due()) {
+                floatair_warn("ANCS batch invalid item i=%u item_len=%u off=%u len=%u",
+                              (unsigned)i,
+                              (unsigned)item_len,
+                              (unsigned)offset,
+                              (unsigned)payload_len);
+            }
+            break;
+        }
+        type = rec[sizeof(uint16_t)];
+        data_len = item_len - 1u;
 
-        if (evt_id == ANCS_EVT_REMOVED) {
+        if (type == ANCS_BATCH_TYPE_FULL) {
+            system_notification_entry_t entry = {0};
+            bool should_enqueue = false;
+            uint32_t uid = 0u;
+
+            if (ancs_parse_full_record(rec,
+                                       item_len,
+                                       &entry,
+                                       &should_enqueue,
+                                       &uid)) {
+                full_count++;
+                if (should_enqueue) {
+                    ancs_pending_upsert(&entry, &pending_count);
+                }
+            }
+        } else if (type == ANCS_BATCH_TYPE_REMOVED) {
+            const uint8_t* skeleton = &rec[ANCS_REC_SKELETON_OFF];
+            uint8_t event_id = UINT8_MAX;
+            uint32_t uid = 0u;
+            uint32_t id = 0u;
+
+            if (data_len > ANCS_SKELETON_EVENT_ID_OFF) {
+                event_id = skeleton[ANCS_SKELETON_EVENT_ID_OFF];
+            }
+            if (data_len != ANCS_REMOVED_DATA_LEN || event_id != ANCS_EVT_REMOVED) {
+                if (ancs_batch_warning_due()) {
+                    floatair_warn("ANCS REMOVED invalid i=%u data_len=%u event=%u",
+                                  (unsigned)i,
+                                  (unsigned)data_len,
+                                  (unsigned)event_id);
+                }
+                offset += rec_total;
+                continue;
+            }
+            uid = ancs_u32_le(&skeleton[ANCS_SKELETON_UID_OFF]);
+            id = ancs_internal_notification_id(uid);
+            ancs_pending_remove(id, &pending_count);
             (void)system_notification_remove_id(id);
-            return true;
+            removed_count++;
+        } else if (type == ANCS_BATCH_TYPE_UNSUPPORTED) {
+            if (data_len != ANCS_UNSUPPORTED_DATA_LEN) {
+                if (ancs_batch_warning_due()) {
+                    floatair_warn("ANCS UNSUPPORTED invalid i=%u data_len=%u",
+                                  (unsigned)i,
+                                  (unsigned)data_len);
+                }
+                offset += rec_total;
+                continue;
+            }
+            unsupported_count++;
+        } else if (ancs_batch_warning_due()) {
+            floatair_warn("ANCS batch unknown type=%u i=%u item_len=%u",
+                          (unsigned)type,
+                          (unsigned)i,
+                          (unsigned)item_len);
         }
-
-        floatair_info("ANCS ignore notification evt_id=%u uid=%" PRIu32 " id=%" PRIu32, evt_id, uid, id);
-        return true;
+        offset += rec_total;
     }
 
-    if (type == ANCS_FWD_TYPE_DATA_SOURCE) {
-        if (data_len < 1) {
-            floatair_err("invalid ancs data source payload_len: %d", data_len);
-            return false;
-        }
-
-        uint8_t cmd_id = data[0];
-        if (cmd_id != ANCS_CMD_GET_NTF_ATTR) {
-            floatair_info("ANCS ignore data source cmd_id=%u", cmd_id);
-            return true;
-        }
-        if (data_len < 5) {
-            floatair_err("invalid ancs data source payload_len: %d", data_len);
-            return false;
-        }
-
-        uint32_t uid = ancs_u32_le(&data[1]);
-        uint32_t id = ancs_internal_notification_id(uid);
-
-        system_notification_entry_t entry = {0};
-        entry.id = id;
-        entry.mode = NOTIFY_MODE_MESSAGE;
-        entry.duration_ms = 3000;
-        entry.level = 1;
-        entry.action = 1;
-
-        char app_id[MSG_STR_MAX_LEN] = {0};
-        char title[MSG_STR_MAX_LEN] = {0};
-        char subtitle[MSG_STR_MAX_LEN] = {0};
-        char message[MSG_STR_MAX_LEN] = {0};
-
-        time_t parsed_time = 0;
-        bool has_time = false;
-
-        size_t offset = 5;
-        while (offset + 3 <= data_len) {
-            uint8_t attr_id = data[offset];
-            uint16_t attr_len = ancs_u16_le(&data[offset + 1]);
-            offset += 3;
-
-            if (offset + attr_len > data_len) {
-                break;
-            }
-
-            const uint8_t* attr_data = &data[offset];
-            switch (attr_id) {
-                case ANCS_ATTR_APP_IDENTIFIER:
-                    ancs_copy_str(app_id, sizeof(app_id), attr_data, attr_len);
-                    break;
-                case ANCS_ATTR_TITLE:
-                    ancs_copy_str(title, sizeof(title), attr_data, attr_len);
-                    break;
-                case ANCS_ATTR_SUBTITLE:
-                    ancs_copy_str(subtitle, sizeof(subtitle), attr_data, attr_len);
-                    break;
-                case ANCS_ATTR_MESSAGE:
-                    ancs_copy_str(message, sizeof(message), attr_data, attr_len);
-                    break;
-                case ANCS_ATTR_DATE:
-                    has_time = ancs_parse_date_time(attr_data, attr_len, &parsed_time);
-                    break;
-                default:
-                    break;
-            }
-
-            offset += attr_len;
-        }
-
-        if (title[0] == '\0' && app_id[0] != '\0') {
-            ancs_copy_str(title, sizeof(title), (const uint8_t*)app_id, strlen(app_id));
-        }
-
-        if (subtitle[0] != '\0' && message[0] != '\0') {
-            char merged[MSG_STR_MAX_LEN] = {0};
-            snprintf(merged, sizeof(merged), "%s\n%s", subtitle, message);
-            memcpy(message, merged, sizeof(message));
-            message[MSG_STR_MAX_LEN - 1] = '\0';
-        } else if (message[0] == '\0' && subtitle[0] != '\0') {
-            memcpy(message, subtitle, sizeof(message));
-            message[MSG_STR_MAX_LEN - 1] = '\0';
-        }
-
-        if (has_time) {
-            entry.notify_time = parsed_time;
-        } else {
-            time(&entry.notify_time);
-        }
-
-        entry.title[0] = '\0';
-        if (entry.mode == NOTIFY_MODE_CALL) {
-            const char* call_text = message[0] != '\0' ? message : title;
-            if (call_text && call_text[0] != '\0') {
-                strncpy(entry.title, call_text, sizeof(entry.title) - 1);
-                entry.title[sizeof(entry.title) - 1] = '\0';
-            }
-        } else if (title[0] != '\0' && message[0] != '\0') {
-            snprintf(entry.title, sizeof(entry.title), "%s\n%s", title, message);
-        } else if (title[0] != '\0') {
-            strncpy(entry.title, title, sizeof(entry.title) - 1);
-            entry.title[sizeof(entry.title) - 1] = '\0';
-        } else if (message[0] != '\0') {
-            strncpy(entry.title, message, sizeof(entry.title) - 1);
-            entry.title[sizeof(entry.title) - 1] = '\0';
-        }
-        entry.has_title = entry.title[0] != '\0';
-
-        return system_notification_add_entry(&entry);
+    if (offset != payload_len && ancs_batch_warning_due()) {
+        floatair_warn("ANCS batch trailing or dropped bytes off=%u len=%u count=%u",
+                      (unsigned)offset,
+                      (unsigned)payload_len,
+                      (unsigned)count);
     }
-
-    floatair_info("ANCS ignore unknown type=%u payload_len=%u", type, (unsigned)msg->payload_len);
+    floatair_info("ANCS batch count=%u len=%u full=%u removed=%u unsupported=%u queued=%u",
+                  (unsigned)count,
+                  (unsigned)payload_len,
+                  (unsigned)full_count,
+                  (unsigned)removed_count,
+                  (unsigned)unsupported_count,
+                  (unsigned)pending_count);
+    if (unsupported_count > 0u) {
+        return ancs_show_unsupported_notification();
+    }
+    if (pending_count > 0u) {
+        return system_notification_add_entries_batch(s_ancs_batch_entries,
+                                                     pending_count);
+    }
     return true;
 }
 
@@ -902,7 +1433,12 @@ bool app_system_msg_handle_payload(JYT_ELF_MQ_MSG* msg) {
         {
             ret = system_update_bat_status(msg);
             if (ret && system_get_charge_state() == 1) {
-                toast_dismiss(APP_TOAST_ID_LOW_BATTERY);
+                if (floatair_lcd_is_off()) {
+                    s_low_battery_toast_pending = APP_LOW_BATTERY_TOAST_PENDING_DISMISS;
+                    floatair_info("low battery toast dismiss deferred: lcd off");
+                } else {
+                    toast_dismiss(APP_TOAST_ID_LOW_BATTERY);
+                }
             }
             break;
         }
@@ -927,15 +1463,18 @@ bool app_system_msg_handle_payload(JYT_ELF_MQ_MSG* msg) {
             bool is_wear_on = (event_type == SET_IED_WEAR_ON);
             floatair_info("wear detection update[%d]", is_wear_on);
 
-            system_runtime_input_set_wearing_state(is_wear_on);
+            if (!system_runtime_input_update_wearing_state(is_wear_on)) {
+                ret = true;
+                break;
+            }
             if (system_config_get_wear_detection_enabled()) {
-                system_ui_set_wear_detection_visible(is_wear_on);
-                if (is_wear_on && system_get_sys_state() == 0) {
-                    system_set_sys_state(1);
-                    (void)system_report_sys_state(1);
-                } else if (!is_wear_on && system_get_sys_state() != 0) {
-                    system_set_sys_state(0);
-                    (void)system_report_sys_state(0);
+                app_sleep_timer_set_wear_removed(!is_wear_on);
+                if (is_wear_on) {
+                    if (system_get_sys_state() == LCD_OFF) {
+                        system_set_sys_state(LCD_ON);
+                        (void)system_report_sys_state(LCD_ON,
+                                                      SYSTEM_SYS_STATE_TRIGGER_WEAR_ON);
+                    }
                 }
             }
             ret = true;
@@ -967,6 +1506,7 @@ bool app_system_msg_handle_payload(JYT_ELF_MQ_MSG* msg) {
         }
         case SET_BT_AVRCP_POSITION_CHANGED:
         {
+            ret = system_avrcp_handle_event(msg);
             break;
         }
         case SET_TWS_LINK_BROKEN:
@@ -985,12 +1525,17 @@ bool app_system_msg_handle_payload(JYT_ELF_MQ_MSG* msg) {
         case SET_JYT_LOW_BATTERY_WARNING:
         {
             toast_cfg_t toast_cfg = toast_default_cfg();
-            const char* toast_text = app_get_str("TOAST_LOW_BATTERY_WARNING");
 
             floatair_info("low battery warning: battery=%u", (unsigned)system_get_battery());
+            if (floatair_lcd_is_off()) {
+                s_low_battery_toast_pending = APP_LOW_BATTERY_TOAST_PENDING_SHOW;
+                floatair_info("low battery toast show deferred: lcd off");
+                ret = true;
+                break;
+            }
             toast_cfg.id = APP_TOAST_ID_LOW_BATTERY;
             toast_cfg.duration_ms = 0;
-            ret = (toast_show_with_cfg(toast_text, &toast_cfg) != NULL);
+            ret = (toast_show_localized("TOAST_LOW_BATTERY_WARNING", &toast_cfg) != NULL);
             break;
         }
         case SET_JYT_TIMER_TRIGGER:
@@ -1021,7 +1566,12 @@ bool app_system_msg_handle_payload(JYT_ELF_MQ_MSG* msg) {
         }
         case SET_JYT_REFRESH_UI_REQ:
         {
-            ret = system_ui_refresh_screen_now();
+            ret = system_ui_request_screen_refresh();
+            break;
+        }
+        case SET_JYT_ACC_TYPE_CHANGED:
+        {
+            ret = system_handle_attachment_changed_event(msg);
             break;
         }
         default:
@@ -1046,6 +1596,8 @@ out:
 }
 
 bool app_emerg_msg_handle(char* msg, size_t msg_size) {
+    size_t copy_len = 0;
+
     if (!msg || msg_size == 0) {
         floatair_err("msg is NULL or msg_size is 0");
         return false;
@@ -1059,6 +1611,15 @@ bool app_emerg_msg_handle(char* msg, size_t msg_size) {
             return true;
         }
     }
+    if (floatair_lcd_is_off()) {
+        copy_len = msg_size < sizeof(s_pending_emerg_toast) - 1U
+                       ? msg_size
+                       : sizeof(s_pending_emerg_toast) - 1U;
+        memcpy(s_pending_emerg_toast, msg, copy_len);
+        s_pending_emerg_toast[copy_len] = '\0';
+        floatair_info("emergency toast deferred: lcd off, len=%u", (unsigned)copy_len);
+        return true;
+    }
     char* safe_msg = (char*)malloc(msg_size + 1);
     if (!safe_msg) {
         floatair_err("malloc safe_msg failed");
@@ -1069,6 +1630,34 @@ bool app_emerg_msg_handle(char* msg, size_t msg_size) {
     toast_show(safe_msg);
     free(safe_msg);
     return true;
+}
+
+/**
+ * @brief 亮屏后显示灭屏期间延迟的系统 Toast 消息。
+ * @return 无返回值。
+ */
+void app_message_flush_pending_after_screen_on(void) {
+    if (floatair_lcd_is_off()) {
+        return;
+    }
+
+    system_avrcp_flush_pending_after_screen_on();
+
+    if (s_low_battery_toast_pending == APP_LOW_BATTERY_TOAST_PENDING_DISMISS) {
+        toast_dismiss(APP_TOAST_ID_LOW_BATTERY);
+    } else if (s_low_battery_toast_pending == APP_LOW_BATTERY_TOAST_PENDING_SHOW) {
+        toast_cfg_t toast_cfg = toast_default_cfg();
+
+        toast_cfg.id = APP_TOAST_ID_LOW_BATTERY;
+        toast_cfg.duration_ms = 0;
+        (void)toast_show_localized("TOAST_LOW_BATTERY_WARNING", &toast_cfg);
+    }
+    s_low_battery_toast_pending = APP_LOW_BATTERY_TOAST_PENDING_NONE;
+
+    if (s_pending_emerg_toast[0] != '\0') {
+        toast_show(s_pending_emerg_toast);
+        s_pending_emerg_toast[0] = '\0';
+    }
 }
 
 bool app_system_msg_handle(JYT_ELF_MQ_MSG* msg) {
@@ -1084,253 +1673,401 @@ bool app_system_msg_handle(JYT_ELF_MQ_MSG* msg) {
     return false;
 }
 
+enum {
+    APP_MSG_DUMP_CHUNK_SIZE = 384,   ///< 单次日志正文上限，给日志前缀预留空间。
+    APP_MSG_DUMP_FORMAT_SIZE = 128,  ///< 数值等短字段的临时格式化缓冲区大小。
+    APP_MSG_DUMP_LOCAL_DEPTH = 8,    ///< 常规消息使用的本地遍历栈深度。
+};
+
 /**
- * @brief Stack frame used for iterative MsgPack traversal
+ * @brief MsgPack 紧凑分段输出器。
  */
 typedef struct {
-    mpack_node_t node; ///< current node
-    int indent;        ///< indentation level
-    bool is_key;
-} dump_frame_t;
+    char chunk[APP_MSG_DUMP_CHUNK_SIZE + 1]; ///< 当前等待输出的日志正文。
+    size_t length;                           ///< 当前正文已使用字节数。
+    size_t part;                             ///< 下一段日志的分段序号。
+    const char* tag;                         ///< 本条 MsgPack 的日志标签。
+} app_msg_dump_writer_t;
 
-static bool ensure_stack(dump_frame_t** stack_ref, size_t* cap_ref, size_t needed) {
-    if (needed <= *cap_ref) {
-        return true;
+/**
+ * @brief 输出当前缓冲区并开始下一段。
+ * @param[in,out] writer 紧凑输出器。
+ * @return 无返回值。
+ */
+static void app_msg_dump_flush(app_msg_dump_writer_t* writer) {
+    if (writer == NULL || writer->length == 0) {
+        return;
     }
-    size_t new_cap          = needed * 2;
-    dump_frame_t* new_stack = (dump_frame_t*) realloc(*stack_ref, new_cap * sizeof(dump_frame_t));
-    if (!new_stack) {
-        return false;
+    writer->chunk[writer->length] = '\0';
+    floatair_dbg("[MPACK][%s][part=%zu] %s", writer->tag, writer->part, writer->chunk);
+    writer->length = 0;
+    writer->part++;
+}
+
+/**
+ * @brief 追加任意长度内容，缓冲区写满时自动分段输出。
+ * @param[in,out] writer 紧凑输出器。
+ * @param[in] data 待追加内容。
+ * @param[in] length 内容字节数。
+ * @return 无返回值。
+ */
+static void app_msg_dump_append(app_msg_dump_writer_t* writer,
+                                const char* data,
+                                size_t length) {
+    while (writer != NULL && data != NULL && length > 0) {
+        size_t space = APP_MSG_DUMP_CHUNK_SIZE - writer->length;
+        if (space == 0) {
+            app_msg_dump_flush(writer);
+            space = APP_MSG_DUMP_CHUNK_SIZE;
+        }
+        size_t copy_len = (length < space) ? length : space;
+        memcpy(writer->chunk + writer->length, data, copy_len);
+        writer->length += copy_len;
+        data += copy_len;
+        length -= copy_len;
     }
-    *stack_ref = new_stack;
-    *cap_ref   = new_cap;
+}
+
+/**
+ * @brief 原子追加一个短标记，避免 UTF-8 字符被拆到两段日志中。
+ * @param[in,out] writer 紧凑输出器。
+ * @param[in] data 待追加标记。
+ * @param[in] length 标记字节数。
+ * @return 无返回值。
+ */
+static void app_msg_dump_append_atomic(app_msg_dump_writer_t* writer,
+                                       const char* data,
+                                       size_t length) {
+    if (writer == NULL || data == NULL || length == 0) {
+        return;
+    }
+    if (length <= APP_MSG_DUMP_CHUNK_SIZE &&
+        APP_MSG_DUMP_CHUNK_SIZE - writer->length < length) {
+        app_msg_dump_flush(writer);
+    }
+    app_msg_dump_append(writer, data, length);
+}
+
+/**
+ * @brief 追加一个以 NUL 结尾的短字符串。
+ * @param[in,out] writer 紧凑输出器。
+ * @param[in] text 待追加字符串。
+ * @return 无返回值。
+ */
+static void app_msg_dump_append_cstr(app_msg_dump_writer_t* writer, const char* text) {
+    if (text != NULL) {
+        app_msg_dump_append_atomic(writer, text, strlen(text));
+    }
+}
+
+/**
+ * @brief 格式化并追加一个数值等短字段。
+ * @param[in,out] writer 紧凑输出器。
+ * @param[in] format printf 格式字符串。
+ * @return 无返回值。
+ */
+static void app_msg_dump_append_format(app_msg_dump_writer_t* writer,
+                                       const char* format,
+                                       ...) {
+    char formatted[APP_MSG_DUMP_FORMAT_SIZE];
+    va_list args;
+    va_start(args, format);
+    int written = vsnprintf(formatted, sizeof(formatted), format, args);
+    va_end(args);
+    if (written < 0) {
+        app_msg_dump_append_cstr(writer, "<format-error>");
+        return;
+    }
+    size_t length = (size_t)written;
+    if (length >= sizeof(formatted)) {
+        length = sizeof(formatted) - 1;
+    }
+    app_msg_dump_append_atomic(writer, formatted, length);
+}
+
+/**
+ * @brief 追加完整字符串，并转义日志后端不能安全承载的字符。
+ * @param[in,out] writer 紧凑输出器。
+ * @param[in] str 字符串原始字节。
+ * @param[in] length 字符串字节数。
+ * @return 无返回值。
+ */
+static void app_msg_dump_append_string(app_msg_dump_writer_t* writer,
+                                       const char* str,
+                                       size_t length) {
+    app_msg_dump_append_cstr(writer, "\"");
+    for (size_t offset = 0; offset < length;) {
+        const unsigned char value = (unsigned char)str[offset];
+        const char* escaped = NULL;
+        switch (value) {
+            case '\"': escaped = "\\\""; break;
+            case '\\': escaped = "\\\\"; break;
+            case '\b': escaped = "\\b"; break;
+            case '\f': escaped = "\\f"; break;
+            case '\n': escaped = "\\n"; break;
+            case '\r': escaped = "\\r"; break;
+            case '\t': escaped = "\\t"; break;
+            default: break;
+        }
+        if (escaped != NULL) {
+            app_msg_dump_append_cstr(writer, escaped);
+            offset++;
+            continue;
+        }
+        if (value < 0x20U || value == 0x7FU) {
+            app_msg_dump_append_format(writer, "\\u%04X", (unsigned)value);
+            offset++;
+            continue;
+        }
+
+        size_t utf8_len = 1;
+        bool utf8_valid = true;
+        if (value < 0x80U) {
+            utf8_len = 1;
+        } else if (value >= 0xC2U && value <= 0xDFU) {
+            utf8_len = 2;
+        } else if (value >= 0xE0U && value <= 0xEFU) {
+            utf8_len = 3;
+        } else if (value >= 0xF0U && value <= 0xF4U) {
+            utf8_len = 4;
+        } else {
+            utf8_valid = false;
+        }
+        if (utf8_valid) {
+            utf8_valid = offset + utf8_len <= length;
+            for (size_t i = 1; utf8_valid && i < utf8_len; ++i) {
+                utf8_valid = (((unsigned char)str[offset + i] & 0xC0U) == 0x80U);
+            }
+            if (utf8_valid && utf8_len >= 3) {
+                const unsigned char second = (unsigned char)str[offset + 1];
+                if ((value == 0xE0U && second < 0xA0U) ||
+                    (value == 0xEDU && second > 0x9FU) ||
+                    (value == 0xF0U && second < 0x90U) ||
+                    (value == 0xF4U && second > 0x8FU)) {
+                    utf8_valid = false;
+                }
+            }
+        }
+        if (!utf8_valid) {
+            app_msg_dump_append_format(writer, "\\x%02X", (unsigned)value);
+            offset++;
+            continue;
+        }
+        app_msg_dump_append_atomic(writer, str + offset, utf8_len);
+        offset += utf8_len;
+    }
+    app_msg_dump_append_cstr(writer, "\"");
+}
+
+/**
+ * @brief 紧凑输出一个非容器 MsgPack 节点。
+ * @param[in,out] writer 紧凑输出器。
+ * @param[in] node 待输出节点。
+ * @param[in] type 节点类型。
+ * @return 已处理返回 true，数组或 Map 容器返回 false。
+ */
+static bool app_msg_dump_compact_scalar(app_msg_dump_writer_t* writer,
+                                        mpack_node_t node,
+                                        mpack_type_t type) {
+    switch (type) {
+        case mpack_type_missing:
+            app_msg_dump_append_cstr(writer, "<missing>");
+            return true;
+        case mpack_type_nil:
+            app_msg_dump_append_cstr(writer, "null");
+            return true;
+        case mpack_type_bool:
+            app_msg_dump_append_cstr(writer, mpack_node_bool(node) ? "true" : "false");
+            return true;
+        case mpack_type_int:
+            app_msg_dump_append_format(writer, "%" PRId64, (int64_t)mpack_node_i64(node));
+            return true;
+        case mpack_type_uint:
+            app_msg_dump_append_format(writer, "%" PRIu64, (uint64_t)mpack_node_u64(node));
+            return true;
+        case mpack_type_float:
+            app_msg_dump_append_format(writer, "%.9g", (double)mpack_node_float(node));
+            return true;
+        case mpack_type_double:
+            app_msg_dump_append_format(writer, "%.17g", mpack_node_double(node));
+            return true;
+        case mpack_type_str: {
+            const char* str = mpack_node_str(node);
+            size_t length = mpack_node_strlen(node);
+            if (str == NULL) {
+                app_msg_dump_append_cstr(writer, "<null-string>");
+            } else {
+                app_msg_dump_append_string(writer, str, length);
+            }
+            return true;
+        }
+        case mpack_type_bin: {
+            size_t length = mpack_node_bin_size(node);
+            app_msg_dump_append_format(writer, "{\"$bin\":{\"len\":%zu}}", length);
+            return true;
+        }
+#if MPACK_EXTENSIONS
+        case mpack_type_ext: {
+            size_t length = mpack_node_data_len(node);
+            app_msg_dump_append_format(writer,
+                                       "{\"$ext\":{\"type\":%d,\"len\":%zu}}",
+                                       (int)mpack_node_exttype(node),
+                                       length);
+            return true;
+        }
+#endif
+        case mpack_type_array:
+        case mpack_type_map:
+            return false;
+        default:
+            app_msg_dump_append_format(writer, "<unknown:%d>", (int)mpack_node_type(node));
+            return true;
+    }
+}
+
+/**
+ * @brief MsgPack 容器节点的迭代遍历状态。
+ */
+typedef struct {
+    mpack_node_t node; ///< 当前待输出节点。
+    size_t index;      ///< 下一个待输出的数组元素或 Map 键值对索引。
+    size_t count;      ///< 当前容器的元素或键值对数量。
+    bool entered;      ///< 是否已经输出容器起始标记。
+    bool map_value;    ///< Map 当前是否等待输出 value。
+} app_msg_dump_frame_t;
+
+/**
+ * @brief 迭代输出完整 MsgPack 树，二进制节点仅输出长度。
+ * @param[in,out] writer 紧凑输出器。
+ * @param[in] root 根节点。
+ * @return 完整输出返回 true，遍历栈扩容失败返回 false。
+ */
+static bool app_msg_dump_compact_tree(app_msg_dump_writer_t* writer, mpack_node_t root) {
+    app_msg_dump_frame_t local_stack[APP_MSG_DUMP_LOCAL_DEPTH];
+    app_msg_dump_frame_t* stack = local_stack;
+    size_t capacity = APP_MSG_DUMP_LOCAL_DEPTH;
+    size_t depth = 1;
+
+    local_stack[0] = (app_msg_dump_frame_t){
+        .node = root,
+    };
+
+    while (depth > 0) {
+        app_msg_dump_frame_t* frame = &stack[depth - 1];
+        mpack_type_t type = mpack_node_type(frame->node);
+        mpack_node_t child;
+
+        if (app_msg_dump_compact_scalar(writer, frame->node, type)) {
+            depth--;
+            continue;
+        }
+
+        if (!frame->entered) {
+            frame->entered = true;
+            if (type == mpack_type_array) {
+                frame->count = mpack_node_array_length(frame->node);
+                app_msg_dump_append_cstr(writer, "[");
+            } else {
+                frame->count = mpack_node_map_count(frame->node);
+                app_msg_dump_append_cstr(writer, "{");
+            }
+        }
+
+        if (type == mpack_type_array) {
+            if (frame->index >= frame->count) {
+                app_msg_dump_append_cstr(writer, "]");
+                depth--;
+                continue;
+            }
+            if (frame->index > 0) {
+                app_msg_dump_append_cstr(writer, ",");
+            }
+            child = mpack_node_array_at(frame->node, frame->index);
+            frame->index++;
+        } else if (!frame->map_value) {
+            if (frame->index >= frame->count) {
+                app_msg_dump_append_cstr(writer, "}");
+                depth--;
+                continue;
+            }
+            if (frame->index > 0) {
+                app_msg_dump_append_cstr(writer, ",");
+            }
+            child = mpack_node_map_key_at(frame->node, frame->index);
+            frame->map_value = true;
+        } else {
+            app_msg_dump_append_cstr(writer, ":");
+            child = mpack_node_map_value_at(frame->node, frame->index);
+            frame->index++;
+            frame->map_value = false;
+        }
+
+        if (depth == capacity) {
+            size_t new_capacity = capacity * 2;
+            app_msg_dump_frame_t* expanded = NULL;
+            if (stack == local_stack) {
+                expanded = (app_msg_dump_frame_t*)malloc(
+                    new_capacity * sizeof(app_msg_dump_frame_t));
+                if (expanded != NULL) {
+                    memcpy(expanded, local_stack, depth * sizeof(app_msg_dump_frame_t));
+                }
+            } else {
+                expanded = (app_msg_dump_frame_t*)realloc(
+                    stack, new_capacity * sizeof(app_msg_dump_frame_t));
+            }
+            if (expanded == NULL) {
+                if (stack != local_stack) {
+                    free(stack);
+                }
+                return false;
+            }
+            stack = expanded;
+            capacity = new_capacity;
+        }
+        stack[depth] = (app_msg_dump_frame_t){
+            .node = child,
+        };
+        depth++;
+    }
+
+    if (stack != local_stack) {
+        free(stack);
+    }
     return true;
 }
 
-static void dump_scalar_node(mpack_node_t node, const char* pad, bool is_key) {
-    switch (mpack_node_type(node)) {
-        case mpack_type_nil:
-            floatair_dbg("%snil", pad);
-            break;
-        case mpack_type_bool:
-            floatair_dbg("%sbool: %s", pad, mpack_node_bool(node) ? "true" : "false");
-            break;
-        case mpack_type_int:
-            floatair_dbg("%sint: %" PRId64, pad, (int64_t)mpack_node_i64(node));
-            break;
-        case mpack_type_uint:
-            floatair_dbg("%suint: %" PRIu64, pad, (uint64_t)mpack_node_u64(node));
-            break;
-        case mpack_type_float:
-            floatair_dbg("%sfloat: %f", pad, (double) mpack_node_float(node));
-            break;
-        case mpack_type_double:
-            floatair_dbg("%sdouble: %lf", pad, mpack_node_double(node));
-            break;
-        case mpack_type_str: {
-            size_t len = mpack_node_strlen(node);
-            const char* str = mpack_node_str(node);
-            if (str == NULL) {
-                floatair_dbg("%sstr (length: %zu): <null>", pad, len);
-                break;
-            }
-            if (is_key) {
-                floatair_dbg("%sstr: %.*s", pad, (int) len, str);
-                break;
-            }
-            const size_t chunk_len = 64;
-            floatair_dbg("%sstr (length: %zu):", pad, len);
-            if (len == 0) {
-                floatair_dbg("%s  ", pad);
-                break;
-            }
-            for (size_t offset = 0; offset < len;) {
-                /* The logging backend treats line breaks and NUL as message
-                 * terminators. Dump them explicitly so bytes after them are
-                 * not lost from the log. */
-                if (str[offset] == '\r' || str[offset] == '\n' || str[offset] == '\0') {
-                    if (str[offset] == '\r' && offset + 1 < len && str[offset + 1] == '\n') {
-                        floatair_dbg("%s  [%zu..%zu): <CRLF>", pad, offset, offset + 2);
-                        offset += 2;
-                    } else {
-                        const char* escaped = (str[offset] == '\r') ? "<CR>" :
-                                              (str[offset] == '\n') ? "<LF>" : "<NUL>";
-                        floatair_dbg("%s  [%zu..%zu): %s", pad, offset, offset + 1, escaped);
-                        offset += 1;
-                    }
-                    continue;
-                }
-
-                size_t remain = len - offset;
-                size_t n      = (remain > chunk_len) ? chunk_len : remain;
-
-                /* Keep the 64-byte limit, but never start the next chunk in
-                 * the middle of a UTF-8 code point. */
-                if (n < remain) {
-                    while (n > 0 &&
-                           (((unsigned char) str[offset + n] & 0xC0U) == 0x80U)) {
-                        --n;
-                    }
-                    /* Malformed input fallback: always make progress. */
-                    if (n == 0) {
-                        n = (remain > chunk_len) ? chunk_len : remain;
-                    }
-                }
-
-                /* Do not pass an embedded terminator to one log call. It is
-                 * emitted explicitly by the next loop iteration. */
-                for (size_t i = 0; i < n; ++i) {
-                    if (str[offset + i] == '\r' || str[offset + i] == '\n' ||
-                        str[offset + i] == '\0') {
-                        n = i;
-                        break;
-                    }
-                }
-
-                floatair_dbg("%s  [%zu..%zu): %.*s", pad, offset, offset + n, (int) n, str + offset);
-                offset += n;
-            }
-            break;
-        }
-        case mpack_type_bin: {
-            size_t len = mpack_node_bin_size(node);
-            const char* bin = mpack_node_bin_data(node);
-            if (is_key) {
-                floatair_dbg("%sbin (length: %zu)", pad, len);
-                break;
-            }
-            enum { bytes_per_line = 16 };
-            floatair_dbg("%sbin (length: %zu):", pad, len);
-            if (len == 0) {
-                floatair_dbg("%s  ", pad);
-                break;
-            }
-            for (size_t offset = 0; offset < len; offset += bytes_per_line) {
-                size_t remain = len - offset;
-                size_t n      = (remain > bytes_per_line) ? bytes_per_line : remain;
-                char hex[bytes_per_line * 3];
-                size_t pos = 0;
-                for (size_t i = 0; i < n; i++) {
-                    unsigned char b = (unsigned char) bin[offset + i];
-                    int w = snprintf(hex + pos, sizeof(hex) - pos, "%02X ", b);
-                    if (w < 0) {
-                        break;
-                    }
-                    pos += (size_t) w;
-                    if (pos >= sizeof(hex)) {
-                        pos = sizeof(hex) - 1;
-                        break;
-                    }
-                }
-                if (pos > 0) {
-                    hex[pos - 1] = '\0';
-                } else {
-                    hex[0] = '\0';
-                }
-                floatair_dbg("%s  [%zu..%zu): %s", pad, offset, offset + n, hex);
-            }
-            break;
-        }
-        default:
-            floatair_dbg("%sunknown type: %d", pad, mpack_node_type(node));
-            break;
-    }
-}
-
-static void mpack_dump_node_iter(mpack_node_t root_node) {
-    dump_frame_t* stack = NULL;
-    size_t cap          = 64;
-    size_t stack_size   = 0;
-    stack               = (dump_frame_t*) malloc(cap * sizeof(dump_frame_t));
-    floatair_assert(stack, "stack err");
-    stack[stack_size++] = (dump_frame_t){.node = root_node, .indent = 0, .is_key = false};
-    while (stack_size > 0) {
-        dump_frame_t frame = stack[--stack_size];
-        char pad[64];
-        int pad_len = frame.indent * 2;
-        pad_len     = (pad_len > (int) sizeof(pad) - 1) ? (int) sizeof(pad) - 1 : pad_len;
-        memset(pad, ' ', (size_t) pad_len);
-        pad[pad_len] = '\0';
-        switch (mpack_node_type(frame.node)) {
-            case mpack_type_array: {
-                size_t count = mpack_node_array_length(frame.node);
-                floatair_dbg("%sarray (size: %zu):", pad, count);
-                if (!ensure_stack(&stack, &cap, stack_size + count)) {
-                    break;
-                }
-                for (size_t i = count; i > 0; i--) {
-                    mpack_node_t child  = mpack_node_array_at(frame.node, i - 1);
-                    stack[stack_size++] = (dump_frame_t){
-                        .node = child, .indent = frame.indent + 1, .is_key = false};
-                }
-                break;
-            }
-            case mpack_type_map: {
-                size_t count = mpack_node_map_count(frame.node);
-                floatair_dbg("%smap (size: %zu):", pad, count);
-                if (!ensure_stack(&stack, &cap, stack_size + count * 2)) {
-                    break;
-                }
-                for (size_t i = count; i > 0; i--) {
-                    mpack_node_t key_node  = mpack_node_map_key_at(frame.node, i - 1);
-                    mpack_node_t val_node  = mpack_node_map_value_at(frame.node, i - 1);
-                    dump_frame_t val_frame = {.node = val_node, .indent = frame.indent + 2, .is_key = false};
-                    dump_frame_t key_frame = {.node = key_node, .indent = frame.indent + 1, .is_key = true};
-                    stack[stack_size++]    = val_frame;
-                    stack[stack_size++]    = key_frame;
-                }
-                break;
-            }
-            default:
-                dump_scalar_node(frame.node, pad, frame.is_key);
-                break;
-        }
-    }
-    free(stack);
-}
-
-// Top-level wrapper: dump entire MsgPack data
-void app_msg_dump(char* msg, size_t msg_size, const char* tag) {
-    mpack_node_t root;
-    mpack_node_t payload;
-    mpack_node_t data;
-
+/**
+ * @brief 紧凑分段输出 MsgPack 可读字段，二进制字段仅输出类型和长度。
+ * @param[in] msg MsgPack 原始数据。
+ * @param[in] msg_size 原始数据字节数。
+ * @param[in] tag 日志标签，为空时使用默认标签。
+ * @return 无返回值。
+ */
+void app_msg_dump(const char* msg, size_t msg_size, const char* tag) {
     if (!tag) {
         tag = "msg default";
     }
-    // Create mpack parse tree
-    // Create mpack parse tree
     mpack_tree_t tree;
     mpack_tree_init_data(&tree, msg, msg_size);
     mpack_tree_parse(&tree);
 
-    // Check parse errors
     if (mpack_tree_error(&tree) != mpack_ok) {
         floatair_err("MsgPack parse error: %s", mpack_error_to_string(mpack_tree_error(&tree)));
         mpack_tree_destroy(&tree);
         return;
     }
-    floatair_info("######################begin#########################");
-    floatair_info("###################%s######################", tag);
 
-    root = mpack_tree_root(&tree);
-    payload = mpack_node_map_cstr_optional(root, "payload");
-    data = mpack_tree_missing_node(&tree);
-    if (!mpack_node_is_missing(payload) && !mpack_node_is_nil(payload) &&
-        mpack_node_type(payload) == mpack_type_map) {
-        data = mpack_node_map_cstr_optional(payload, "data");
+    app_msg_dump_writer_t writer = {
+        .length = 0,
+        .part = 1,
+        .tag = tag,
+    };
+    if (!app_msg_dump_compact_tree(&writer, mpack_tree_root(&tree))) {
+        app_msg_dump_append_cstr(&writer, "<dump-stack-allocation-failed>");
+        floatair_err("MsgPack dump stack allocation failed");
     }
-
-    if (!mpack_node_is_missing(data) && !mpack_node_is_nil(data)) {
-        mpack_dump_node_iter(data);
-    } else if (!mpack_node_is_missing(payload) && !mpack_node_is_nil(payload)) {
-        mpack_dump_node_iter(payload);
-    } else {
-        mpack_dump_node_iter(root);
-    }
-
-    floatair_info("######################end#####  ####################");
-    // Free resources
+    app_msg_dump_flush(&writer);
+    floatair_dbg("[MPACK][%s][end] parts=%zu source_bytes=%zu", tag, writer.part - 1, msg_size);
     mpack_tree_destroy(&tree);
 }
 

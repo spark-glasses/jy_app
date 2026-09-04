@@ -87,7 +87,7 @@ void simulator_update_lcd_visual(uint8_t brightness, lcd_state_t state) {
     lv_obj_set_style_bg_opa(g_lcd_mask, mask_opa, 0);
     lv_obj_invalidate(g_lcd_mask);
     if (g_disp != NULL) {
-        lv_refr_now(g_disp);
+        simulator_refresh_display_sync(g_disp);
     }
     g_lcd_visual_brightness = brightness;
     g_lcd_visual_state = state;
@@ -463,7 +463,9 @@ int main(int argc, char** argv) {
     floatair_info("10. Application loaded, entering message loop...");
 
     while (!simulator_shutdown_requested()) {
+        simulator_process_display_refresh_requests();
         uint32_t ms = lv_timer_handler();
+        simulator_process_display_refresh_requests();
         simulator_screenshot_poll();
         if (ms > 20) ms = 20;
         simulator_platform_sleep_ms(ms);

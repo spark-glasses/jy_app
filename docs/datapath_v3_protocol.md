@@ -1,4 +1,4 @@
-# Datapath V3 Protocol
+# JYTek Datapath V3 Protocol
 
 Chinese version: [datapath_v3_protocol_cn.md](datapath_v3_protocol_cn.md)
 
@@ -9,12 +9,16 @@ Main code entry points:
 - `system/system_msg_dispatch.c`
 - `system/system_msg_*.c`
 - `system/system_notification.c`
+- `system/system_msg_draw.c`
 - `system/popups/assistant/assistant_msg.c`
 - `system/stt_common.c`
-- `apps/speech/speech_msg.c`
+- `apps/common/speech/speech_msg.c`
 - `apps/ai/ai_msg.c`
-- `apps/prompter_pro/prompter_msg.c`
+- `apps/prompter/prompter_msg.c`
 - `apps/gallery/gallery_msg.c`
+- `apps/navigation/navigation_msg.c`
+- `apps/recorder/recorder_msg.c`
+- `apps/imagefusion/imagefusion_msg.c`
 
 ## 1. Protocol Boundary
 
@@ -135,11 +139,16 @@ Error codes:
 | id | Constant | Module |
 | --- | --- | --- |
 | 0 | `APP_MSG_ID_SYSTEM` | System |
+| 1 | `APP_MSG_ID_HOME` | Home; no independent business commands |
 | 2 | `APP_MSG_ID_TRANSCRIBE` | Transcribe |
 | 3 | `APP_MSG_ID_TRANSLATE` | Translate |
+| 4 | `APP_MSG_ID_NAVIGATION` | Navigation |
 | 5 | `APP_MSG_ID_PROMPTER` | Prompter |
 | 7 | `APP_MSG_ID_GALLERY` | Gallery |
 | 8 | `APP_MSG_ID_AI` | AI |
+| 13 | `APP_MSG_ID_GUIDE` | Guide; controlled through `SystemControl` |
+| 1001 | `APP_MSG_ID_IMAGEFUSION` | ImageFusion |
+| 1002 | `APP_MSG_ID_RECORDER` | Recorder |
 
 Common processing flow:
 
@@ -167,7 +176,9 @@ System uses `id=0` and routes by `payload.biz`.
 | `SystemInd` | `system_msg_sysind.c` | Remote heartbeat, keep-alive, and keyword responses |
 | `Notification` | `system_notification.c` | Notification add, update, and remove |
 | `Toast` | `system_msg_toast.c` | Toast popup display |
+| `TapMsgbox` | `system_msg_tap_msgbox.c` | Confirmation prompt and download progress |
 | `File` | `system_msg_file.c` | File list, write, remove, existence check, and clear-folder operations |
+| `Draw` | `system_msg_draw.c` | Draw text, images, and progress bars on the device display |
 
 Unknown `biz` or unknown `cmd` returns `ErrCmdErr`.
 
@@ -192,7 +203,7 @@ Unknown `biz` or unknown `cmd` returns `ErrCmdErr`.
 
 | cmd | Request `data` | ACK / NACK `data` |
 | --- | --- | --- |
-| `getAll` | `{}` | `{ "time": uint64, "timeConfig": { "time": string, "timestamp": uint64, "timezone": string, "userFormat": string }, "displayConfig": { "mode": uint8 }, "brightness": uint8, "autoBrightnessEnabled": uint8, "fontSize": uint8, "language": string, "inactivityTimeout": uint16, "poweroffTimeout": uint16, "wearDetectionEnabled": uint8, "headGestureConfig": { "upEnabled": uint8, "downEnabled": uint8, "upDeg": int32, "downDeg": int32, "baseDeg": int32 }, "touchpadEnabled": uint8, "idleDetectionEnabled": uint8, "displayDistanceLevel": uint32, "keywordSpottingEnabled": uint8, "notificationEnabled": uint8 }` |
+| `getAll` | `{}` | `{ "time": uint64, "timeConfig": { "time": string, "timestamp": uint64, "timezone": string, "userFormat": string }, "displayConfig": { "mode": uint8 }, "brightness": uint8, "autoBrightnessEnabled": uint8, "fontSize": uint8, "language": string, "homeunits": string[], "inactivityTimeout": uint16, "poweroffTimeout": uint16, "wearDetectionEnabled": uint8, "headGestureConfig": { "upEnabled": uint8, "downEnabled": uint8, "upDeg": int32, "downDeg": int32, "baseDeg": int32 }, "touchpadEnabled": uint8, "idleDetectionEnabled": uint8, "displayDistanceLevel": uint32, "keywordSpottingEnabled": uint8, "notificationEnabled": uint8 }` |
 | `setTime` | `{ "time": uint32 }` | NACK `{ "code": 12, "msg": string }` |
 | `getTimeConfig` | `{}` | NACK `{ "code": 12, "msg": string }` |
 | `setTimeConfig` | `{ "time": string, "timestamp": uint64, "timezone": string, "userFormat": string }`; `timezone` is optional | `{}` |
@@ -204,6 +215,10 @@ Unknown `biz` or unknown `cmd` returns `ErrCmdErr`.
 | `setRowSpace` | `{}` | NACK `{ "code": 12, "msg": string }` |
 | `getLanguage` | `{}` | `{ "language": string }` |
 | `setLanguage` | `{ "language": string }` | `{}` |
+| `getHomeUnits` | `{}` | `{ "homeunits": string[] }` |
+| `setHomeUnits` | `{ "homeunits": string[] }` | `{}` |
+| `getHomeMenuConfig` | `{}` | `{ "all": uint32[], "visible": uint32[], "selected": uint32 }` |
+| `setHomeMenuConfig` | `{ "visible": uint32[], "selected": uint32 }` | `{}`; `selected` must be included in `visible` |
 | `getDisplayConfig` | `{}` | NACK `{ "code": 12, "msg": string }` |
 | `setDisplayConfig` | `{}` | NACK `{ "code": 12, "msg": string }` |
 | `getDisplayDistanceLevel` | `{}` | `{ "displayDistanceLevel": uint32 }` |
@@ -233,6 +248,8 @@ Unknown `biz` or unknown `cmd` returns `ErrCmdErr`.
 
 `setTimeConfig.time` uses the `yyyy-MM-dd HH:mm:ss` format. Switch fields use `0/1` for disabled/enabled. When `autoBrightnessEnabled` is enabled, `setBrightness` returns NACK `ErrNotReady` and does not change the LCD brightness.
 
+The Jytek home protocol units are `prompter(5)`, `translate(3)`, `transcribe(2)`, `ai(8)`, and `navigation(4)`.
+
 ### 5.3 SystemStatus
 
 | cmd | Request `data` | Success ACK `data` |
@@ -243,6 +260,8 @@ Unknown `biz` or unknown `cmd` returns `ErrCmdErr`.
 | `getChargeState` | `{}` | `{ "chargeState": uint8 }` |
 | `getBattery` | `{}` | `{ "battery": uint8 }` |
 | `getRomUsage` | `{}` | `{ "total": uint32, "used": uint32, "remaining": uint32 }` |
+
+`getRomUsage` reports the LFSD file system containing `/jyt_d`; all three capacity fields are measured in bytes.
 
 ### 5.4 SystemControl
 
@@ -263,6 +282,10 @@ Unknown `biz` or unknown `cmd` returns `ErrCmdErr`.
 | `sendHeartbeat` | `{}` | `{}` |
 | `sendKeepAlive` | `{}` | `{}` |
 | `sendHandshake` | `{}` | `{}` |
+| `setProgressVisible` | Show: `{ "visible": 1, "text": string, "opa": 0..100 }`; hide: `{ "visible": 0 }` | `{}` |
+| `setUploadProgressVisible` | `{ "visible": bool/0/1 }` | Succeeds only when the current page supports upload progress and a file transfer is active; Jytek supports it on `prompter` and `gallery` |
+
+`factoryReset` writes and syncs a cleanup marker under `/jyt_d`, preserves that marker, and deletes all remaining user data without copying files back from ROMFS. Whether cleanup succeeds or fails, the device turns the display off before triggering an assert reset and does not guarantee an ACK; the marker is retained on failure. On the next startup, a remaining marker resumes cleanup before system configuration is loaded; another failure triggers another assert reset so a later startup can retry. The marker is removed only after all user data has been deleted. Configuration is then reconstructed from ROMFS defaults plus any new sparse LFSD overrides.
 
 `sendTouchEvent.event`:
 
@@ -299,13 +322,49 @@ Device report direction:
 | `onTouchEvent` | `DATA_UNRELIABLE` | `{ "event": uint8 }` |
 | `onViewChangedByName` | `DATA_UNRELIABLE` | `{ "viewName": string }` |
 | `onKeywordSpotting` | `DATA_RELIABLE` | `{}` |
+| `onAssistantOpen` | `DATA_UNRELIABLE` | `{}` |
 | `onAssistantClose` | `DATA_UNRELIABLE` | `{}` |
 | `onGuideOpen` | `DATA_UNRELIABLE` | `{}` |
 | `onGuideClose` | `DATA_UNRELIABLE` | `{}` |
-| `onSysStateChanged` | `DATA_UNRELIABLE` | `{ "sysState": uint8 }` |
+| `onSysStateChanged` | `DATA_UNRELIABLE` | `{ "sysState": uint8, "trigger": string }` |
 | `onChargeStateChanged` | `DATA_UNRELIABLE` | `{ "chargeState": uint8 }` |
 | `onBatteryChanged` | `DATA_UNRELIABLE` | `{ "battery": uint32 }` |
 | `onBrightnessChanged` | `DATA_UNRELIABLE` | `{ "brightness": uint8 }` |
+| `onAttachmentTypeChanged` | `DATA_UNRELIABLE` | `{ "attachmentType": uint8, "attachmentSide": uint8 }` |
+
+`onAttachmentTypeChanged.attachmentType`:
+
+| Value | Description |
+| --- | --- |
+| `0` | No attachment |
+| `1` | Glasses case |
+| `2` | External power |
+| `3` | Speaker |
+
+`onAttachmentTypeChanged.attachmentSide`:
+
+| Value | Description |
+| --- | --- |
+| `0` | Master side (right side on the current hardware) |
+| `1` | Slave side (left side on the current hardware) |
+
+Each event updates only the indicated side. Consumers should retain the latest type for both sides; an `attachmentType` of `0` means that side detached, not that every attachment detached.
+
+For `onSysStateChanged.sysState`, `0` means screen off and `1` means screen on. `trigger` identifies the source of the screen-state change:
+
+| `trigger` | Description |
+| --- | --- |
+| `phoneSetView` | Screen turned on by a phone-issued `SystemControl.setView` command |
+| `notification` | Screen turned on by an incoming notification |
+| `remoteDoubleClick` | Screen turned on by a phone-issued remote double-click |
+| `forceDoubleClick` | Screen turned on by a temple Force double-click |
+| `imuDoubleTap` | Screen turned on or off by an IMU double tap |
+| `imuHeadUp` | Screen turned on by an IMU head-up gesture |
+| `imuHeadDown` | Screen turned off by an IMU head-down gesture |
+| `wearOn` | Screen turned on when wear detection reports that the glasses are worn |
+| `keywordSpotting` | Screen turned on by keyword spotting |
+| `inactivityTimeout` | Screen turned off after the inactivity timeout |
+| `glassesCase` | Screen turned off when the glasses-case attachment is detected |
 
 ### 5.6 Notification
 
@@ -337,12 +396,11 @@ map(8) {
 | `title` | `string` | No | Notification title |
 | `msg` | `string` | No | Notification body |
 | `duration` | `uint32` or non-negative `int32` | No | Auto-close time in seconds. Default duration is used when missing. Call notifications do not auto-close. |
-| `iconBitmap` | `bin` | No | Raw 32x32 L8 icon data. Length is 1024 bytes. |
-| `iconBytes` | `bin` | No | Compatibility field for `iconBitmap`. Used when `iconBitmap` is missing. |
+| `iconBitmap` | `bin` | No | Raw 32x32 L8 icon data, exactly 1024 bytes. |
+| `iconBytes` | `bin` | No | Compatibility field for `iconBitmap`, used when `iconBitmap` is missing. It follows the same product behavior. |
 | `level` | `uint8` | No | Notification level |
 | `action` | `uint8` | No | Notification action type |
-
-At least one displayable value must be provided among `title`, `msg`, and icon data. If no icon is provided, the default icon is used.
+The glasses use the phone-provided icon when present and fall back to a built-in ROMFS icon.
 
 `removeNotification`:
 
@@ -360,7 +418,22 @@ map(1) {
 
 `showToast.text` is required. `position` is optional: `1` top, `2` center, `3` bottom. The misspelled `postion` key is also accepted for compatibility. `duration` is optional in milliseconds; missing, zero, negative, or invalid values use the default `3000`.
 
-### 5.8 File
+### 5.8 TapMsgbox
+
+| cmd | Request `data` | Success ACK `data` |
+| --- | --- | --- |
+| `showTapMsgbox` | `{ "title": string, "hint": string }` | `{}` |
+| `showDownloadProgress` | `{ "title": string, "progress": 0..100 }` | `{}` |
+| `closeTapMsgbox` | `{}` | `{}` |
+| `closeDownloadProgress` | `{}` | `{}` |
+
+The normal prompt and download progress use separate protocol entry points for both showing and closing, while sharing one prompt component and destruction path on the glasses; only one instance is active at a time. Progress for `showDownloadProgress` is supplied entirely by the phone. The glasses do not start a timer or increment it locally. Whenever progress changes, the phone should send another complete command with the current value, and the glasses update the active prompt in place.
+
+This protocol is supported only when `product.json` selects `"msgbox": "compact"`. Products selecting `classic` return `ErrNotReady` for all four commands above.
+
+While either prompt is visible, it intercepts input intended for the underlying page. Single- and double-clicks are reported through `SystemInd.onTouchEvent` as `event=1` and `event=2`. A normal prompt remains visible until the phone sends `closeTapMsgbox`; download progress remains visible until the phone sends `closeDownloadProgress`. Closing destroys the component and releases its memory. Repeated close commands succeed.
+
+### 5.9 File
 
 File types:
 
@@ -411,6 +484,30 @@ map(6) {
 
 File commands validate paths, existence, and CRC. Common errors are `ErrBadFilePath`, `ErrFileNotExistFailed`, and `ErrBadCRC`.
 
+### 5.10 Draw
+
+`Draw` manages up to 64 drawing items. A nonzero `id` identifies an item; sending another draw command with the same `id` updates or replaces that item. Common draw fields are:
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `id` | `uint32` | Yes | Nonzero drawing item ID |
+| `x` / `y` | `int32` | Yes | Top-left display coordinates |
+| `w` / `h` | `int32` | Yes | Drawing area width and height |
+| `isfloat` | `bool` or `0/1` | No | `false` by default; when true, draw on the floating layer |
+
+| cmd | Request `data` | Success ACK `data` |
+| --- | --- | --- |
+| `drawText` | Common fields plus `{ "text": string, "align"?: 0..3, "font_size"?: uint8, "isbolder"?: bool/0/1 }` | `{}` |
+| `drawImage` | Common fields plus `{ "path": string }` | `{}` |
+| `drawProgress` | Common fields plus `{ "progress": uint32 }` | `{}`; values above `100` are displayed as `100` |
+| `updateProgress` | `{ "id": uint32, "progress": uint32 }` | `{}`; the ID must identify an existing progress bar, and values above `100` are displayed as `100` |
+| `clearDrawId` | `{ "id": uint32 }` | `{}`; clearing an unknown ID also succeeds |
+| `clearDrawAll` | `{}` | `{}` |
+
+For `drawText`, `text` must be non-empty. `align` defaults to `0` and accepts `0=auto`, `1=left`, `2=center`, and `3=right`. `font_size=0` or omission uses the system font; any nonzero value must be a supported device font size. `isbolder` defaults to false and controls the text container border. `drawImage.path` must pass the device image-path validation.
+
+Malformed fields return `ErrDataErr`. An invalid or zero ID, an unavailable drawing slot, or an invalid update target returns `ErrBadParam`.
+
 ## 6. STT / AI Text Protocol
 
 STT, Translate, AI text, and Assistant popup use the same text fields.
@@ -443,16 +540,16 @@ map(10) {
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `id` | `uint32` | Yes | Record ID |
-| `area` | `uint8` | Yes | Text area. In Assistant, `0` is answer, `1` is question, and `2` is guide prompt. |
+| `id` | `uint32` | No | Record ID; defaults to `0` |
+| `area` | `uint8` | No | Text area: `0` for primary content/answer, `1` for question, and `2` for centered guide prompt |
 | `msgId` | `string` | No | Unique message ID. Used to update or remove the same record. |
 | `msgType` | `uint8` | Yes | Text message type. It is written into the text buffer. |
 | `actionType` | `uint8` | Yes | Text update action |
-| `isFinal` | `uint8` | Yes | Whether this is the final result |
+| `isFinal` | `uint8` | No | Whether this is the final result |
 | `user` | `string` | No | Speaker or user |
 | `transcribe` | `string` | No | Source text |
 | `translate` | `string` | No | Translated text |
-| `createdAt` | `uint64` | Yes | Unix timestamp in seconds |
+| `createdAt` | `uint64` | No | Unix timestamp in seconds |
 
 `actionType`:
 
@@ -540,6 +637,13 @@ map(1) {
 }
 ```
 
+| Value | Description |
+| --- | --- |
+| `0` | Hide the audio-track status icon |
+| `1` | Show the audio-track status icon |
+
+Other values return `ErrBadParam`.
+
 #### `setTransMode`
 
 ```msgpack
@@ -561,6 +665,19 @@ map(1) {
   "maxLine": uint32(3)
 }
 ```
+
+#### `setHeaderText`
+
+Displays phone-controlled prompt or result text at the top of the Speech page. It is independent of the body state and remains available on start, loading, and body views:
+
+```msgpack
+map(2) {
+  "visible": uint8(1),
+  "text": str("Prompt or result")
+}
+```
+
+`visible` accepts `uint8` or `bool`. When showing the header, `text` is required and must not be empty. To hide it, send only `visible=0`. The header uses an opaque background over the body and does not participate in body layout, so toggling it does not move the body. The header remains until this command is called again, `clearView` is called, or the current Speech page exits. `setHeaderText` and `setLanguageHint` are mutually exclusive: showing the header hides the language hint, while a later `setLanguageHint` hides the header and shows the new language hint.
 
 #### `setAudioSourceIndicator`
 
@@ -653,8 +770,11 @@ map(1) {
 | cmd | Request `data` | Success ACK `data` |
 | --- | --- | --- |
 | `clearView` | `{}` | `{}` |
+| `setFunctionMenu` | See the 6.4 `setFunctionMenu` fields | `{}` |
 | `setFontConfig` | See [6.2 setFontConfig](#setfontconfig) | `{}` |
 | `updateSttInfo` | See [6.1 Text Record](#61-text-record) | `{}` |
+| `setState` | `{ "state": uint8 }`; only `0`/`1` are valid | `{}` |
+| `setHeaderText` | `{ "visible": uint8/bool, "text"?: string }` | `{}` |
 | `setTextMode` | `{ "textMode": uint8 }` | `{}` |
 | `setAudioTrackState` | `{ "audioTrack": uint8 }` or `{ "data": { "audioTrack": uint8 } }` | `{}` |
 | `setTransMode` | `{ "transMode": uint8 }` | `{}` |
@@ -666,11 +786,16 @@ map(1) {
 
 ### 6.4 Translate
 
+Every Speech entry supports both `mode=0` single-language hints and `mode=1` dual-language hints through `setLanguageHint` and reuses the same Speech page implementation. With `reportdoubleclick=true`, a double-click is reported through `SystemInd.onTouchEvent` with `event=2` and the glasses do not exit. The phone may display the existing `TapMsgbox` through `TapMsgbox.showTapMsgbox` when confirmation is required. With `reportdoubleclick=false`, the glasses handle the double-click locally: `exitdoubleclick=true` displays the local exit confirmation dialog, while `exitdoubleclick=false` exits directly.
+
 | cmd | Request `data` | Success ACK `data` |
 | --- | --- | --- |
 | `clearView` | `{}` | `{}` |
+| `setFunctionMenu` | See the `setFunctionMenu` fields below | `{}` |
 | `setFontConfig` | See [6.2 setFontConfig](#setfontconfig) | `{}` |
 | `updateSttInfo` | See [6.1 Text Record](#61-text-record) | `{}` |
+| `setState` | `{ "state": uint8 }`; only `0`/`1` are valid | `{}` |
+| `setHeaderText` | `{ "visible": uint8/bool, "text"?: string }` | `{}` |
 | `setTextMode` | `{ "textMode": uint8 }` | `{}` |
 | `setAudioTrackState` | `{ "audioTrack": uint8 }` or `{ "data": { "audioTrack": uint8 } }` | `{}` |
 | `setTransMode` | `{ "transMode": uint8 }` | `{}` |
@@ -679,6 +804,31 @@ map(1) {
 | `setMicDirectional` | `{ "micDirectional": uint8 }` | `{}` |
 | `setLanguageHint` | See [6.2 setLanguageHint](#setlanguagehint) | `{}` |
 | `textDirection` | See [6.2 textDirection](#textdirection) | `{}` |
+
+`setFunctionMenu` displays a phone-controlled function-selection overlay on the Speech page:
+
+```msgpack
+map(3) {
+  "menuId": uint32(1),
+  "selectedItemId": uint32(100),
+  "items": array(2) [
+    { "id": uint32(100), "label": str("Mode A") },
+    { "id": uint32(101), "label": str("Mode B") }
+  ]
+}
+```
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `menuId` | `uint32` | Yes | Phone-defined menu instance or version ID |
+| `selectedItemId` | `uint32` | Yes | Currently highlighted item ID; must match an `items[].id` |
+| `items` | `array` | Yes | At least one item with unique IDs; the practical limit depends on packet size and available memory |
+| `items[].id` | `uint32` | Yes | Phone-defined item ID |
+| `items[].label` | `string` | Yes | Non-empty item label displayed verbatim on the glasses, up to 63 UTF-8 bytes |
+
+While the menu is visible, the glasses do not change the highlighted item locally and do not emit a menu-specific selection message. Left swipe, right swipe, and click continue to use the existing `SystemInd.onTouchEvent` report with `event=6`, `event=7`, and `event=1`, respectively. The phone decides whether to select the previous item, select the next item, or confirm, and may send another `setFunctionMenu` command to refresh the highlight.
+
+The roller reuses three display slots for the previous, current, and next items. Any other Speech command hides the menu. `SystemControl.setProgressVisible` with `visible=1` also hides it. The phone then updates the page through the applicable Speech command.
 
 ### 6.5 AI
 
@@ -706,7 +856,7 @@ Assistant popup is routed under `SystemControl`:
 
 ## 7. Prompter
 
-Prompter uses `id=5` and routes by `cmd`.
+Prompter uses `id=5` and routes by `cmd`. With `reportdoubleclick=true`, a double-click is reported through `SystemInd.onTouchEvent` with `event=2`. With `reportdoubleclick=false`, the glasses handle it locally: the compact implementation displays an exit confirmation dialog and exits only after confirmation, while the generic implementation exits the Prompter directly.
 
 | cmd | Request `data` | Success ACK `data` |
 | --- | --- | --- |
@@ -714,9 +864,11 @@ Prompter uses `id=5` and routes by `cmd`.
 | `setFontConfig` | See [6.2 setFontConfig](#setfontconfig) | `{}` |
 | `setFileListMenu` | See `setFileListMenu` fields in this section | `{}` |
 | `setPrompterFile` | `{ "dir": string, "name": string, "size": uint32, "crc32": uint32 }` | `{}` |
-| `seekTo` | `{ "offset": uint32, "length": uint32, "topMaskHeight": uint32, "bottomMaskHeight": uint32 }` | `{}` |
+| `seekTo` | `{ "offset": uint32, "length": uint32, "topMaskHeight": uint32, "bottomMaskHeight": uint32, "duration"?: uint32 }` | `{}` |
 | `setTick` | `{ "tick": uint32 }` | `{}` |
 | `setState` | `{ "state": uint32 }`, `0` pause, `1` running | `{}` |
+
+The standard Prompter implementation supports the optional `seekTo.duration` field in milliseconds. When omitted or set to `0`, the view jumps directly to the target text position without animation. When greater than `0`, adjacent text windows that can be joined scroll for the requested duration; non-contiguous windows still jump directly. The compact implementation does not use this optional field.
 
 `setFileListMenu`:
 
@@ -747,7 +899,18 @@ Prompter reports:
 | --- | --- | --- |
 | `onMenuSelected` | `DATA_RELIABLE` | `{ "menuId": uint, "selectedItemId": uint }` |
 
-## 8. Gallery
+## 8. Recorder
+
+Recorder uses `id=1002`, `biz=recorder`, and routes by `cmd`. Commands are handled only while Recorder is the current view; otherwise the device returns `ErrNotReady`.
+
+| cmd | Request `data` | Success ACK `data` |
+| --- | --- | --- |
+| `setState` | `{ "state": uint32 }`; `0` pauses and shows the triangle, while `1` runs, shows the dot, and resets the time to `00:00:00` | `{}` |
+| `setTick` | `{ "tick": uint32 }` in seconds | `{}` |
+
+`setTick` formats the time as `HH:MM:SS`. While Running, even tick values show the dot and odd values hide it. While Paused, the triangle remains visible.
+
+## 9. Gallery
 
 Gallery uses `id=7` and routes by `cmd`.
 
@@ -756,7 +919,41 @@ Gallery uses `id=7` and routes by `cmd`.
 | `clearView` | `{}` | `{}` |
 | `setGalleryFile` | `{ "dir": string, "name": string }` | `{}` |
 
-## 9. Maintenance Rules
+## 10. Navigation
+
+Navigation uses `id=4` and `biz=navigation`. Enter the `navigation` page through `SystemControl.setView` before sending business commands.
+
+| cmd | Request `data` | Success ACK `data` |
+| --- | --- | --- |
+| `clearView` | `{}` | `{}`; clears navigation data and shows the initial prompt |
+| `updateNav` | Navigation object; see below | `{}` |
+| `updateBpm` | `{ "bpm": string }` | `{}`; an empty string hides the heart-rate area |
+| `updateSpo` | `{ "spo": string }` | `{}`; an empty string hides the blood-oxygen area |
+
+`updateNav` fields:
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `navMode` | `int32` | No | `1=driving`, `2=walking`, `3=cycling`; other values use the driving icon |
+| `nextRoadName` | `string` | No | Next road name |
+| `curStepRetainDistance` | `string` | No | Remaining distance in the current step |
+| `remainDistance` | `string` | No | Total remaining distance |
+| `remainTime` | `string` | No | Total remaining time |
+| `speed` | `string` | No | Current speed; an empty string hides the speed area |
+| `iconBytes` | `bin(2304)` | No | 48×48 L8 direction image; omission preserves the current image, and an invalid length is ignored |
+
+## 11. ImageFusion
+
+ImageFusion uses `id=1001`, `biz=imagefusion`, and `viewName=imagefusion` to read or set binocular display fusion offsets.
+
+| cmd | Request `data` | Success ACK `data` |
+| --- | --- | --- |
+| `getFusionParams` | `{}` | `{ "lX": int8, "lY": int8, "rX": int8, "rY": int8 }` |
+| `setFusionParams` | `{ "lX": int32, "lY": int32, "rX": int32, "rY": int32 }` | `nil` |
+
+All four offset fields are required and must be within `-128..127`. Missing, mistyped, or out-of-range parameters return `ErrBadParam`; a low-level read or write failure returns `ErrDataErr`.
+
+## 12. Maintenance Rules
 
 When adding or changing a protocol, check the following:
 

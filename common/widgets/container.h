@@ -297,26 +297,30 @@ void container_scroll_to_bottom(container_t* container, lv_anim_enable_t anim_en
 /**
  * @brief 将容器内容按给定比例向上滚动。
  *
- * 调用前会先刷新容器布局；滚动步长为容器高度乘以 `step_ratio`，
- * 滚动带动画。
+ * 调用前会先刷新容器布局；滚动步长为容器高度乘以 `step_ratio`。
  *
  * @param container 目标容器句柄。
  * @param step_ratio 步长比例，传小于等于 0 时忽略本次滚动。
+ * @param anim_en 是否启用滚动动画。
  * @return 无返回值。
  */
-void container_scroll_up(container_t* container, float step_ratio);
+void container_scroll_up(container_t* container,
+                         float step_ratio,
+                         lv_anim_enable_t anim_en);
 
 /**
  * @brief 将容器内容按给定比例向下滚动。
  *
- * 调用前会先刷新容器布局；滚动步长为容器高度乘以 `step_ratio`，
- * 滚动带动画。
+ * 调用前会先刷新容器布局；滚动步长为容器高度乘以 `step_ratio`。
  *
  * @param container 目标容器句柄。
  * @param step_ratio 步长比例，传小于等于 0 时忽略本次滚动。
+ * @param anim_en 是否启用滚动动画。
  * @return 无返回值。
  */
-void container_scroll_down(container_t* container, float step_ratio);
+void container_scroll_down(container_t* container,
+                           float step_ratio,
+                           lv_anim_enable_t anim_en);
 
 /**
  * @brief 设置子项的 grow 权重。

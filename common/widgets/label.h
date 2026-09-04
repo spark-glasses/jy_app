@@ -59,6 +59,7 @@ typedef struct {
     label_align_t align;        ///< 文本对齐方式。
     label_overflow_t overflow;  ///< 文本溢出处理方式。
     uint32_t max_lines;         ///< 最大显示行数；传 0 表示不限制。
+    bool auto_fit_width;        ///< 是否以配置字号为上限，按文本和组件可用宽度自动缩小字体。
     app_font_info_t font;       ///< 字体信息，包含字号、字间距、行间距。
     const char* text;           ///< 初始文本；传 `NULL` 时会按空字符串处理。
 } label_cfg_t;
@@ -197,6 +198,18 @@ void label_set_overflow(label_t* label, label_overflow_t overflow);
  * @return 无返回值。
  */
 void label_set_max_lines(label_t* label, uint32_t max_lines);
+
+/**
+ * @brief 设置是否根据组件可用宽度自动缩小字体。
+ *
+ * 开启后以字体配置中的字号为上限，按完整文本中最宽的一行选择可容纳的最大系统字体；
+ * 文本或组件宽度变化时会自动重新计算，内容变短后也会恢复到允许的更大字号。
+ *
+ * @param label 目标组件句柄。
+ * @param enabled `true` 表示开启宽度自适应，`false` 表示恢复配置字号。
+ * @return 无返回值。
+ */
+void label_set_auto_fit_width(label_t* label, bool enabled);
 
 /**
  * @brief 设置字体信息。
