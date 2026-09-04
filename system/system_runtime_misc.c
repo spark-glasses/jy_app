@@ -49,7 +49,6 @@ static bool system_runtime_misc_system_control_allowed(const msg_pack_t* msg,
         "sendTouchEvent",
         "sendHeartbeat",
         "sendKeepAlive",
-        "setAssistantState",
         "setProgressVisible",
         "setUploadProgressVisible",
     };

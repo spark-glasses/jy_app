@@ -193,6 +193,10 @@ static bool system_runtime_input_send_event_to_app(uint32_t raw_event, lv_event_
         return true;
     }
 
+    if (system_ui_scroll_reply(code)) {
+        return true;
+    }
+
     obj = system_runtime_input_get_current_page_root();
     if (obj == NULL) {
         return false;
@@ -230,14 +234,14 @@ static bool system_runtime_input_send_sys_state_to_app(uint8_t state) {
 static void system_runtime_input_toggle_screen(const char* source) {
     uint8_t next_state = (floatair_lcd_get_state() == LCD_OFF) ? 1 : 0;
 
-    floatair_info("%s double-tap: screen state -> %u", source, (unsigned)next_state);
+    floatair_info("%s long-press: screen state -> %u", source, (unsigned)next_state);
     system_set_sys_state(next_state);
     (void)system_runtime_input_send_sys_state_to_app(next_state);
 }
 
-/** Consume double-taps before page input, and ignore other input while off. */
-static bool system_touch_handle_screen(uint8_t event, const char* source, bool double_tap) {
-    if (double_tap) {
+/** Consume long presses before page input, and ignore other input while off. */
+static bool system_touch_handle_screen(uint8_t event, const char* source, bool long_press) {
+    if (long_press) {
         system_runtime_input_toggle_screen(source);
         return true;
     }
@@ -256,7 +260,7 @@ static bool system_touch_handle_screen(uint8_t event, const char* source, bool d
 bool system_touch_event(uint8_t event) {
     lv_event_code_t code = system_runtime_touch_event_to_lvgl(event);
 
-    if (system_touch_handle_screen(event, "remote", event == SYSTEM_TOUCH_EVENT_DCLICKED)) {
+    if (system_touch_handle_screen(event, "remote", event == SYSTEM_TOUCH_EVENT_LONG_PRESSED)) {
         return true;
     }
 
@@ -291,7 +295,7 @@ bool system_touch_event_convert(uint8_t event) {
         return true;
     }
 
-    if (system_touch_handle_screen(event, "force", event == SET_FORCE_DOUBLE_CLICK)) {
+    if (system_touch_handle_screen(event, "force", event == SET_FORCE_LONG_PRESSED)) {
         return true;
     }
 
@@ -334,8 +338,7 @@ bool system_imu_event_convert_to_touch(uint8_t event) {
         case SET_IMU_SINGLE_TAP:
             return true;
         case SET_IMU_DOUBLE_TAP:
-            system_runtime_input_toggle_screen("imu");
-            return true;
+            return system_touch_event(SYSTEM_TOUCH_EVENT_DCLICKED);
         default:
             return true;
     }

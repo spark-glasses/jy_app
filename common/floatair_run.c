@@ -203,6 +203,13 @@ static void floatair_call_minute_cbs(void) {
 /* Cycle cost at or above this is logged; a frame costs ~73 ms today. */
 #define APP_UI_CYCLE_SLOW_US    50000U
 
+/* UI-loop load diagnostics: per-second load summary plus a cycle log for every
+ * host message with a payload. Off by default; the summary and extra logging
+ * cost UI-thread time on every cycle. */
+#ifndef APP_UI_LOAD_DIAG
+#define APP_UI_LOAD_DIAG 0
+#endif
+
 typedef struct {
     bool handle_ret;
     uint8_t msg_type;
@@ -277,6 +284,15 @@ static void app_msg_recv(void) {
     uint32_t lvgl_finished_ms = lv_tick_get();
     uint32_t last_lvgl_start_us = 0;
     bool have_last_lvgl_start = false;
+#if APP_UI_LOAD_DIAG
+    uint32_t diagnostic_start_us = (uint32_t)GetTimeUs();
+    uint32_t diagnostic_cycles = 0;
+    uint32_t diagnostic_render_us = 0;
+    uint32_t diagnostic_renders = 0;
+    uint32_t diagnostic_max_cycle_us = 0;
+    uint32_t diagnostic_max_gap_us = 0;
+    floatair_info("UILoad stage=app_start version=%s", JY_APP_VERSION_STRING);
+#endif
 #endif
     while (1) {
 #if !defined(BUILD_NATIVE)
@@ -360,9 +376,31 @@ static void app_msg_recv(void) {
         }
 
         /* Logging is syslog on the UI thread, so only report cycles worth
-         * looking at: slow ones and handler failures. */
+         * looking at: slow ones and handler failures. APP_UI_LOAD_DIAG adds a
+         * per-second load summary and every host message with a payload. */
         uint32_t cycle_cost_us = (uint32_t)GetTimeUs() - cycle_start_us;
-        if ((msg_count > 0 && !info.handle_ret) || cycle_cost_us >= APP_UI_CYCLE_SLOW_US) {
+        bool log_cycle = (msg_count > 0 && !info.handle_ret) || cycle_cost_us >= APP_UI_CYCLE_SLOW_US;
+#if !defined(BUILD_NATIVE) && APP_UI_LOAD_DIAG
+        log_cycle = log_cycle || (msg_count > 0 && info.payload_len > 0);
+        diagnostic_cycles++;
+        diagnostic_render_us += s_render_timing.total_us;
+        diagnostic_renders += s_render_timing.count;
+        diagnostic_max_cycle_us = LV_MAX(diagnostic_max_cycle_us, cycle_cost_us);
+        diagnostic_max_gap_us = LV_MAX(diagnostic_max_gap_us, lvgl_gap_us);
+        uint32_t diagnostic_now_us = (uint32_t)GetTimeUs();
+        uint32_t diagnostic_elapsed_us = diagnostic_now_us - diagnostic_start_us;
+        if (diagnostic_elapsed_us >= 1000000) {
+            floatair_info("UILoad stage=app_load window_us=%lu screen_on=%d cycles=%lu renders=%lu render_us=%lu max_cycle_us=%lu max_lvgl_gap_us=%lu app_queue=%d",
+                          (unsigned long)diagnostic_elapsed_us, !floatair_lcd_is_off(),
+                          (unsigned long)diagnostic_cycles, (unsigned long)diagnostic_renders,
+                          (unsigned long)diagnostic_render_us, (unsigned long)diagnostic_max_cycle_us,
+                          (unsigned long)diagnostic_max_gap_us, floatair_get_app_msg_queue_pending());
+            diagnostic_start_us = diagnostic_now_us;
+            diagnostic_cycles = diagnostic_render_us = diagnostic_renders = 0;
+            diagnostic_max_cycle_us = diagnostic_max_gap_us = 0;
+        }
+#endif
+        if (log_cycle) {
             floatair_info("app ui cycle source=%s msgs=%lu cost_us=%lu handle_ret=%d refreshed=%d msg_type=%u event_type=%u payload_len=%u"
 #if !defined(BUILD_NATIVE)
                           " wait_ms=%d queue_wait_us=%lu before_lvgl_us=%lu lvgl_gap_us=%lu lvgl_us=%lu next_lvgl_ms=%lu render_us=%lu renders=%lu"

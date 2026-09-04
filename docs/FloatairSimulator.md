@@ -822,6 +822,7 @@ Built-in operations:
 - IMU click and head-up / head-down
 - Time sync
 - Incoming call ring, answer, and hang up
+- Spark reply text preview and clear
 
 Python dependency notes:
 

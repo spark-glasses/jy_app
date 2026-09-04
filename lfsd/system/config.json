@@ -14,7 +14,7 @@
     },
     "touchpadEnabled": true,
     "notificationEnabled": true,
-    "keywordSpottingEnabled": true,
+    "keywordSpottingEnabled": false,
     "kwsHitValue": 5,
     "idleDetectionEnabled": true,
     "displayMode": 0,

@@ -4,8 +4,8 @@
 #include "lvgl/src/draw/sw/blend/lv_draw_sw_blend_private.h"
 
 #define AVATAR_LISTENING_MIN_OPA 180
-#define AVATAR_LISTENING_MAX_SIZE_PERCENT 120
-#define AVATAR_LISTENING_HALF_CYCLE_MS 650
+#define AVATAR_LISTENING_MIN_SIZE_PERCENT 80
+#define AVATAR_LISTENING_PULSE_MS 650
 #define AVATAR_ENTRANCE_DURATION_MS 450
 #define AVATAR_EXIT_DURATION_MS 300
 #define AVATAR_MIN_SIZE 6
@@ -139,8 +139,8 @@ static void avatar_trace_roll_end(avatar_t* avatar, const char* result) {
 static void avatar_animate_listening(void* var, int32_t value) {
     avatar_t* avatar = var;
     if (lv_obj_is_visible(avatar->base.obj)) {
-        int32_t max_size = avatar->size * AVATAR_LISTENING_MAX_SIZE_PERCENT / 100;
-        int32_t size = avatar->size + (max_size - avatar->size) * value / 1000;
+        int32_t min_size = avatar->size * AVATAR_LISTENING_MIN_SIZE_PERCENT / 100;
+        int32_t size = avatar->size - (avatar->size - min_size) * value / 1000;
         lv_opa_t brightness = LV_OPA_COVER - (LV_OPA_COVER - AVATAR_LISTENING_MIN_OPA) * value / 1000;
 
         /* Resize the centered ball; keep its footer slot and roll position fixed. */
@@ -201,11 +201,14 @@ static void avatar_apply_state(avatar_t* avatar) {
     lv_anim_set_var(&animation, avatar);
     lv_anim_set_exec_cb(&animation, avatar_animate_listening);
     lv_anim_set_values(&animation, 0, 1000);
-    lv_anim_set_duration(&animation, AVATAR_LISTENING_HALF_CYCLE_MS);
-    lv_anim_set_playback_duration(&animation, AVATAR_LISTENING_HALF_CYCLE_MS);
+    /* Shrink and dim, then return to normal size and brightness. */
+    lv_anim_set_duration(&animation, AVATAR_LISTENING_PULSE_MS);
+    lv_anim_set_playback_duration(&animation, AVATAR_LISTENING_PULSE_MS);
     lv_anim_set_repeat_count(&animation, LV_ANIM_REPEAT_INFINITE);
     lv_anim_set_path_cb(&animation, lv_anim_path_ease_in_out);
-    lv_anim_start(&animation);
+    if (lv_anim_start(&animation) == NULL) {
+        avatar_animate_listening(avatar, 1000);
+    }
 }
 
 static void avatar_on_delete(lv_event_t* event) {

@@ -23,7 +23,7 @@
 static bool config_wear_detection_enabled = false;
 static bool config_touchpad_enabled       = false;
 static bool config_notification_enabled   = false;
-static bool config_keyword_spotting_enabled = true;
+static bool config_keyword_spotting_enabled = false;
 static uint32_t config_kws_hit_value      = 5; ///< 当前产品需要响应的 KWS 命中值。
 static bool config_idle_detection_enabled = false;
 static system_head_gesture_config_t config_head_gesture = {0};
@@ -218,7 +218,7 @@ static cJSON* system_cfgfile_create_default_root(void) {
 
     cJSON_AddItemToObject(root, "touchpadEnabled", cJSON_CreateBool(true));
     cJSON_AddItemToObject(root, "notificationEnabled", cJSON_CreateBool(true));
-    cJSON_AddItemToObject(root, "keywordSpottingEnabled", cJSON_CreateBool(true));
+    cJSON_AddItemToObject(root, "keywordSpottingEnabled", cJSON_CreateBool(false));
     cJSON_AddItemToObject(
         root, "kwsHitValue", cJSON_CreateNumber((double)config_kws_hit_value));
     cJSON_AddItemToObject(root, "idleDetectionEnabled", cJSON_CreateBool(true));
@@ -527,10 +527,11 @@ bool system_cfgfile_load(void) {
     parse_bool_key(root, "touchpadEnabled", &config_touchpad_enabled);
     parse_bool_key(root, "notificationEnabled", &config_notification_enabled);
     parse_bool_key(root, "keywordSpottingEnabled", &config_keyword_spotting_enabled);
+    config_keyword_spotting_enabled = false;
     parse_u32_key(root, "kwsHitValue", &config_kws_hit_value);
     parse_bool_key(root, "idleDetectionEnabled", &config_idle_detection_enabled);
     cJSON* head_gesture = cJSON_GetObjectItemCaseSensitive(root, "headGestureConfig");
-    /* Screen control uses double-tap, including with older saved settings. */
+    /* Screen control uses long press, including with older saved settings. */
     config_head_gesture.up_enabled = false;
     config_head_gesture.down_enabled = false;
     if (cJSON_IsObject(head_gesture)) {

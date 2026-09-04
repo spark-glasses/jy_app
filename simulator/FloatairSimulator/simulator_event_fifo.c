@@ -13,6 +13,7 @@
 #include <string.h>
 #include <time.h>
 
+#include "common/app_lcd.h"
 #include "elf_common.h"
 #include "floatair_dbg.h"
 #include "sim_socket.h"
@@ -138,6 +139,22 @@ static void simulator_event_fifo_handle_line(char* line) {
         }
     } else {
         arg = NULL;
+    }
+
+    /* Preview a Spark reply without a phone connection. */
+    if (strcmp(line, "SET_SPARK_REPLY") == 0) {
+        if (floatair_lcd_get_state() == LCD_OFF) {
+            floatair_info("fifo Spark reply ignored: screen off");
+            return;
+        }
+        simulator_lvgl_enter_ui_critical();
+        if (system_ui_set_reply(arg != NULL ? arg : "")) {
+            floatair_info("fifo Spark reply: %u bytes", (unsigned)(arg != NULL ? strlen(arg) : 0));
+        } else {
+            floatair_warn("fifo Spark reply: UI not ready");
+        }
+        simulator_lvgl_leave_ui_critical();
+        return;
     }
 
     /* Preview the persistent avatar without a microphone or host connection. */
@@ -348,7 +365,8 @@ static void simulator_event_fifo_handle_line(char* line) {
  */
 static void* simulator_event_fifo_thread_main(void* arg) {
     char read_buf[256];
-    char line_buf[512];
+    /* Reply previews can be screen-length; keep room for a few kilobytes. */
+    char line_buf[4096];
     size_t line_len = 0;
 
     (void)arg;

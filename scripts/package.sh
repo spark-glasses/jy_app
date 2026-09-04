@@ -14,6 +14,8 @@ burn_package_archive=""
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 cd "$SCRIPT_DIR/.." || exit 1
 
+source "$SCRIPT_DIR/firmware_env.sh"
+
 select_product() {
     local products=()
     local dir

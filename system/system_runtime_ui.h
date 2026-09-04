@@ -120,10 +120,21 @@ lv_coord_t system_ui_get_page_content_height(void);
 lv_obj_t* system_ui_get_page_parent(void);
 /** Return the permanent footer container, or NULL before screen initialization. */
 lv_obj_t* system_ui_get_footer(void);
+
+/** Replace the footer reply. Empty text restores the minimum footer height. */
+bool system_ui_set_reply(const char* text);
+/** Consume forward/backward swipes when the reply needs scrolling. */
+bool system_ui_scroll_reply(lv_event_code_t code);
 /** Show the existing avatar with a roll-in, or hide it and stop its animations. */
 void system_ui_set_avatar_visible(bool visible);
 /** Update the permanent avatar's listening state. */
 void system_ui_set_avatar_listening(bool listening);
+/**
+ * Apply the avatar rule from current state: visible while the screen is on,
+ * listening while the screen is on and a host is connected. Call after the
+ * LCD state or the host connection changes; `source` is for the log only.
+ */
+void system_ui_sync_avatar_state(const char* source);
 /**
  * @brief 立即刷新指定状态栏的缓存时间、电量和充电状态。
  * @param[in] status_bar 目标状态栏对象。

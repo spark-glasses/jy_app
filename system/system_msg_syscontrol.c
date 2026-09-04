@@ -236,24 +236,6 @@ static bool system_systemcontrol_sendkeepalive(mpack_node_t node, msg_pack_t* ms
     return app_mpack_send_ack(msg, Dp_ErrNone);
 }
 
-/** Set the permanent avatar state: 0 is normal, 1 is listening. */
-static bool system_systemcontrol_setassistantstate(mpack_node_t node, msg_pack_t* msg) {
-    uint8_t state = 0;
-
-    floatair_assert(msg != NULL, "msg is NULL");
-
-    if (!app_msg_get_u8(node, false, "state", &state) ||
-        mpack_node_error(node) != mpack_ok || state > 1) {
-        return app_mpack_send_ack(msg, ErrBadParam);
-    }
-    if (system_ui_get_footer() == NULL) {
-        return app_mpack_send_ack(msg, ErrNotReady);
-    }
-
-    system_ui_set_avatar_listening(state == 1 && system_get_sys_state() != 0);
-    return app_mpack_send_ack(msg, Dp_ErrNone);
-}
-
 static bool system_systemcontrol_sendhandshake(mpack_node_t node, msg_pack_t* msg) {
     (void) node;
     return app_mpack_send_ack(msg, Dp_ErrNone);
@@ -267,7 +249,6 @@ app_cmd_func_t system_systemcontrol_cmd_funcs[] = {
     {"getView", system_systemcontrol_getview},
     {"setView", system_systemcontrol_setview},
     {"sendTouchEvent", system_systemcontrol_sendtouchevent},
-    {"setAssistantState", system_systemcontrol_setassistantstate},
     {"sendHeartbeat", system_systemcontrol_sendheartbeat},
     {"sendKeepAlive", system_systemcontrol_sendkeepalive},
     {"sendHandshake", system_systemcontrol_sendhandshake},

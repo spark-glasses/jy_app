@@ -218,7 +218,6 @@ static void system_runtime_state_refresh_btconn_state(bool connected) {
                   current_app,
                   (int)!connected);
     if (changed && !connected) {
-        system_ui_set_avatar_listening(false);
         app_router_clear_app_config();
         system_runtime_state_reset_call_flow();
         system_notification_clear();
@@ -237,6 +236,7 @@ static void system_runtime_state_refresh_btconn_state(bool connected) {
     }
 
     g_bt_connected = connected;
+    system_ui_sync_avatar_state("bt_connection");
     system_ui_sync_shell_state();
     floatair_info("refresh btconn state: overlay request finished, connected=%d, app=%s",
                   (int)connected,

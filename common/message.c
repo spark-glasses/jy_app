@@ -227,13 +227,10 @@ app_message_t* app_msg_query(uint32_t msg_id) {
         floatair_err("list is clear");
         return NULL;
     }
-    floatair_info("query id : [%" PRIu32 "]", msg_id);
     list_node* node_iter;
     list_for_every(&list, node_iter) {
         app_message_node_t* entry = list_entry(node_iter, app_message_node_t, node);
-        floatair_info("id : [%" PRIu32 "][%s]",
-                      entry->item.id,
-                      entry->item.name ? entry->item.name : "name null");
+        /* No per-entry logging: this runs on the UI thread for every host message. */
         if (entry->item.id == msg_id) {
             return &entry->item;
         }

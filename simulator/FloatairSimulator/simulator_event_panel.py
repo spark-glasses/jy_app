@@ -3,6 +3,7 @@
 
 import datetime as dt
 import os
+import sys
 import tkinter as tk
 from tkinter import ttk
 
@@ -49,11 +50,14 @@ class EventPanel:
     def __init__(self, fifo_path: str) -> None:
         self.fifo_path = fifo_path
         self.root = tk.Tk()
+        if sys.platform == "darwin":
+            self.root.withdraw()
         self.root.title("Floatair OS Events")
         self.status_var = tk.StringVar(value=f"FIFO: {fifo_path}")
         self.battery_soc_value = tk.StringVar(value="80")
         self.time_text_value = tk.StringVar(value=dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
         self.caller_value = tk.StringVar(value="10086")
+        self.spark_reply_value = tk.StringVar(value="Test reply from simulator")
 
         style = ttk.Style()
         try:
@@ -120,11 +124,43 @@ class EventPanel:
         ttk.Button(phone_frame, text="Connected", command=lambda: self.send_call_event("SET_BT_CALL_CONNECTED")).grid(row=0, column=2, padx=(8, 0))
         ttk.Button(phone_frame, text="Disconnected", command=lambda: self.send_call_event("SET_BT_CALL_DISCONNECTED")).grid(row=0, column=3, padx=(8, 0))
 
+        ttk.Label(tools_frame, text="Spark Reply").grid(row=2, column=0, sticky="w", padx=(0, 8), pady=(10, 0))
+        reply_frame = ttk.Frame(tools_frame)
+        reply_frame.grid(row=2, column=1, sticky="ew", pady=(10, 0))
+        reply_frame.columnconfigure(0, weight=1)
+        ttk.Entry(reply_frame, textvariable=self.spark_reply_value).grid(row=0, column=0, sticky="ew")
+        ttk.Button(reply_frame, text="Send Text", command=self.send_spark_reply).grid(row=0, column=1, padx=(8, 0))
+        ttk.Button(reply_frame, text="Clear", command=self.clear_spark_reply).grid(row=0, column=2, padx=(8, 0))
+
         status = ttk.Label(container, textvariable=self.status_var, foreground="#445")
         status.pack(anchor="w", pady=(10, 0))
 
         self.root.update_idletasks()
-        self.root.minsize(max(760, self.root.winfo_reqwidth()), self.root.winfo_reqheight())
+        if sys.platform == "darwin":
+            self._show_away_from_pointer()
+        else:
+            self.root.minsize(max(760, self.root.winfo_reqwidth()), self.root.winfo_reqheight())
+
+    def _show_away_from_pointer(self) -> None:
+        """Avoid a Tk 8.6 macOS defect that can disable pointer input at startup."""
+        width = max(760, self.root.winfo_reqwidth())
+        height = self.root.winfo_reqheight()
+        screen_width = self.root.winfo_screenwidth()
+        screen_height = self.root.winfo_screenheight()
+        pointer_x = self.root.winfo_pointerx()
+        pointer_y = self.root.winfo_pointery()
+        margin = 24
+
+        safe_x = margin if pointer_x >= screen_width / 2 else screen_width - margin - 1
+        safe_y = margin if pointer_y >= screen_height / 2 else screen_height - margin - 1
+        self.root.geometry(f"1x1+{safe_x}+{safe_y}")
+        self.root.deiconify()
+        self.root.update()
+
+        x = margin if pointer_x >= screen_width / 2 else max(margin, screen_width - width - margin)
+        y = margin if pointer_y >= screen_height / 2 else max(margin, screen_height - height - margin)
+        self.root.geometry(f"{width}x{height}+{x}+{y}")
+        self.root.minsize(width, height)
 
     def _write_line(self, line: str) -> None:
         try:
@@ -188,6 +224,17 @@ class EventPanel:
             self._write_line(f"{event_name} {caller}")
         else:
             self._write_line(event_name)
+
+    def send_spark_reply(self) -> None:
+        text = self.spark_reply_value.get().strip()
+        if not text:
+            self.status_var.set("Spark reply text is required")
+            return
+        self._write_line(f"SET_SPARK_REPLY {text}")
+
+    def clear_spark_reply(self) -> None:
+        self.spark_reply_value.set("")
+        self._write_line("SET_SPARK_REPLY")
 
     def run(self) -> None:
         self.root.mainloop()

@@ -18,6 +18,8 @@ bool floatair_lcd_is_off(void) {
     return current_lcd_state == LCD_OFF;
 }
 void floatair_lcd_set_state(lcd_state_t state) {
+    bool host_connected = system_get_btconn_state();
+
     floatair_info("set lcd state: %d", state);
     if (current_lcd_state == state) {
         return;
@@ -26,12 +28,11 @@ void floatair_lcd_set_state(lcd_state_t state) {
     if (state == LCD_ON) {
         floatair_lcd_set_brightness(system_runtime_state_get_lcd_resume_brightness());
         system_ui_flush_pending_after_screen_on();
-        system_ui_set_avatar_visible(true);
     } else {
-        system_ui_set_avatar_visible(false);
         simulator_update_lcd_visual(current_lcd_brightness, state);
     }
-    if (system_get_btconn_state()) {
+    system_ui_sync_avatar_state("lcd_state");
+    if (host_connected) {
         (void)system_report_sys_state(state == LCD_ON ? 1 : 0);
     }
 }

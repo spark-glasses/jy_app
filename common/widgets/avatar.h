@@ -35,7 +35,7 @@ bool avatar_play_exit(avatar_t* avatar,
                       avatar_animation_complete_cb_t completion,
                       void* user_data);
 
-/** Listening pulses size and brightness. Repeating the current state preserves the animation. */
+/** Listening pulses between normal size and 80%, dimming as it shrinks. Repeating the current state does nothing. */
 void avatar_set_state(avatar_t* avatar, avatar_state_t state);
 
 /** Hide cancels motion and pulsing without a completion callback. State is retained. */

@@ -22,18 +22,39 @@
 #include "system/popups/notify/notify.h"
 #include "common/widgets/toast.h"
 #include "common/widgets/avatar.h"
+#include "common/widgets/label.h"
 #include "system/popups/notify_list/notify_list.h"
 #include "app_lcd.h"
+#include "lvgl/src/font/lv_binfont_loader.h"
 
 #include <inttypes.h>
+#include <string.h>
 #include <time.h>
 
 #define SYSTEM_FOOTER_HEIGHT 72
+#define SYSTEM_AVATAR_LEFT 35
+#define SYSTEM_AVATAR_SIZE 40
+#define SYSTEM_AVATAR_BOTTOM 16
+#define SYSTEM_REPLY_GAP 16
+#define SYSTEM_REPLY_LEFT (SYSTEM_AVATAR_LEFT + SYSTEM_AVATAR_SIZE + SYSTEM_REPLY_GAP)
+#define SYSTEM_REPLY_RIGHT 24
+#define SYSTEM_REPLY_EDGE_PADDING 8
+#define SYSTEM_REPLY_PADDING_HOR 12
+#define SYSTEM_REPLY_PADDING_VER 8
+#define SYSTEM_REPLY_BORDER_WIDTH 1
+#define SYSTEM_REPLY_RADIUS 12
+#define SYSTEM_FRAME_PERIOD_MS 67
+#define SYSTEM_REPLY_FONT_SIZE 12
+#define SYSTEM_REPLY_LINE_SPACE 2
+#define SYSTEM_REPLY_FONT_PATH "A:/romfs/system/font/open_runde_12.bin"
 
 static lv_obj_t* g_status_bar_top = NULL;          ///< app 层顶部状态栏对象
 static lv_obj_t* g_page_content = NULL;           ///< Page area between the header and footer.
 static lv_obj_t* g_footer = NULL;                 ///< System-owned footer outside the page roots.
 static avatar_t* g_footer_avatar = NULL;
+static lv_obj_t* g_reply_viewport = NULL;        ///< Reply bubble; a footer sibling that overlays the page.
+static lv_obj_t* g_reply_label = NULL;
+static lv_font_t* g_reply_bitmap_font = NULL;
 static lv_obj_t* g_bt_disconnect_status_bar = NULL;   ///< 蓝牙断连遮罩层顶部状态栏对象
 static bool g_status_bar_top_visible = true;       ///< 顶部状态栏期望显隐状态
 static lv_obj_t* g_bt_disconnect_overlay = NULL;      ///< 蓝牙断连全屏遮罩
@@ -185,13 +206,123 @@ void system_ui_set_avatar_listening(bool listening) {
     }
 }
 
+void system_ui_sync_avatar_state(const char* source) {
+    bool visible = floatair_lcd_get_state() == LCD_ON;
+    bool listening = visible && system_get_btconn_state();
+
+    system_ui_set_avatar_visible(visible);
+    system_ui_set_avatar_listening(listening);
+    floatair_info("avatar visible=%d listening=%d source=%s",
+                  (int)visible, (int)listening, source != NULL ? source : "unknown");
+}
+
+/**
+ * Size and place the reply bubble from one text measurement.
+ *
+ * The footer keeps its fixed height and the bubble, a sibling of the footer in
+ * the app layer, overlays the page above it. A reply therefore invalidates only
+ * the bubble's old and new areas. Resizing the page host instead made every
+ * reply redraw the whole eye. The bubble is not a footer child because LVGL
+ * clips invalidation to the parent's coords even with OVERFLOW_VISIBLE.
+ */
+static void system_ui_layout_footer(void) {
+    if (g_reply_viewport == NULL || g_reply_label == NULL) return;
+
+    const char* text = lv_label_get_text(g_reply_label);
+    if (text == NULL || text[0] == '\0') {
+        lv_obj_add_flag(g_reply_viewport, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
+
+    const lv_font_t* font = lv_obj_get_style_text_font(g_reply_label, LV_PART_MAIN);
+    lv_coord_t text_inset = SYSTEM_REPLY_PADDING_HOR + SYSTEM_REPLY_BORDER_WIDTH;
+    lv_coord_t max_bubble_width = LV_MAX(1, (lv_coord_t)config_lcd.ui_width -
+                                             SYSTEM_REPLY_LEFT - SYSTEM_REPLY_RIGHT);
+    lv_coord_t max_text_width = LV_MAX(1, max_bubble_width - 2 * text_inset);
+    lv_point_t size = {0, 0};
+
+    /* Same wrapping as the label draw, without any object layout passes. */
+    lv_text_get_size(&size, text, font, 0, SYSTEM_REPLY_LINE_SPACE, max_text_width, LV_TEXT_FLAG_NONE);
+    lv_coord_t text_width = LV_CLAMP(1, (lv_coord_t)size.x, max_text_width);
+    lv_coord_t text_height = LV_MAX(1, (lv_coord_t)size.y);
+
+    lv_coord_t status_bar_bottom = g_status_bar_top_visible ? STATUS_BAR_HEIGHT : 0;
+    lv_coord_t max_bubble_height = LV_MAX(1, (lv_coord_t)config_lcd.ui_height - status_bar_bottom -
+                                              2 * SYSTEM_REPLY_EDGE_PADDING);
+    lv_coord_t bubble_width = text_width + 2 * text_inset;
+    lv_coord_t bubble_height = LV_MIN(text_height + 2 * (SYSTEM_REPLY_PADDING_VER + SYSTEM_REPLY_BORDER_WIDTH),
+                                      max_bubble_height);
+
+    /* Layer-local top: centered on the ball, kept below the status bar and
+     * above the bottom edge padding. Anchored to the bottom like the footer. */
+    lv_coord_t ui_height = (lv_coord_t)config_lcd.ui_height;
+    lv_coord_t avatar_mid_y = ui_height - SYSTEM_AVATAR_BOTTOM - SYSTEM_AVATAR_SIZE / 2;
+    lv_coord_t min_top = status_bar_bottom + SYSTEM_REPLY_EDGE_PADDING;
+    lv_coord_t max_top = LV_MAX(min_top, ui_height - SYSTEM_REPLY_EDGE_PADDING - bubble_height);
+    lv_coord_t top = LV_CLAMP(min_top, avatar_mid_y - bubble_height / 2, max_top);
+
+    lv_obj_set_size(g_reply_label, text_width, text_height);
+    lv_obj_set_size(g_reply_viewport, bubble_width, bubble_height);
+    lv_obj_align(g_reply_viewport, LV_ALIGN_BOTTOM_LEFT, SYSTEM_REPLY_LEFT,
+                 -(ui_height - top - bubble_height));
+    lv_obj_remove_flag(g_reply_viewport, LV_OBJ_FLAG_HIDDEN);
+}
+
 static void system_ui_layout_page_content(void) {
+    system_ui_layout_footer();
     if (g_page_content == NULL) {
         return;
     }
     lv_obj_set_size(g_page_content, config_lcd.ui_width, system_ui_get_page_content_height());
     lv_obj_align(g_page_content, LV_ALIGN_TOP_LEFT, 0,
                  g_status_bar_top_visible ? STATUS_BAR_HEIGHT : 0);
+}
+
+static const lv_font_t* system_ui_reply_font(void) {
+    if (g_reply_bitmap_font == NULL) {
+        g_reply_bitmap_font = lv_binfont_create(SYSTEM_REPLY_FONT_PATH);
+        if (g_reply_bitmap_font != NULL) {
+            g_reply_bitmap_font->fallback = get_font_by_size_near(SYSTEM_REPLY_FONT_SIZE);
+        }
+        floatair_info("reply font load path=%s size=%u loaded=%d",
+                      SYSTEM_REPLY_FONT_PATH, (unsigned int)SYSTEM_REPLY_FONT_SIZE,
+                      g_reply_bitmap_font != NULL);
+    }
+    return g_reply_bitmap_font != NULL
+        ? g_reply_bitmap_font
+        : get_font_by_size_near(SYSTEM_REPLY_FONT_SIZE);
+}
+
+bool system_ui_set_reply(const char* text) {
+    if (text == NULL || g_reply_label == NULL || g_reply_viewport == NULL) return false;
+    if (strcmp(lv_label_get_text(g_reply_label), text) == 0) return true;
+
+    lv_label_set_text(g_reply_label, text);
+    system_ui_layout_footer();
+    lv_obj_scroll_to_y(g_reply_viewport, 0, LV_ANIM_OFF);
+    system_ui_request_frame();
+    return true;
+}
+
+bool system_ui_scroll_reply(lv_event_code_t code) {
+    if ((code != LV_EVENT_GESTURE_LEFT && code != LV_EVENT_GESTURE_RIGHT) ||
+        g_reply_viewport == NULL || g_reply_label == NULL ||
+        lv_obj_has_flag(g_reply_viewport, LV_OBJ_FLAG_HIDDEN)) {
+        return false;
+    }
+    lv_obj_update_layout(g_reply_viewport);
+    lv_coord_t max_scroll = lv_obj_get_scroll_y(g_reply_viewport) +
+                            lv_obj_get_scroll_bottom(g_reply_viewport);
+    if (max_scroll <= 0) return false;
+
+    /* Page by the visible height, keeping one line of context. */
+    const lv_font_t* font = lv_obj_get_style_text_font(g_reply_label, LV_PART_MAIN);
+    lv_coord_t line_advance = (lv_coord_t)lv_font_get_line_height(font) + SYSTEM_REPLY_LINE_SPACE;
+    lv_coord_t step = LV_MAX(1, lv_obj_get_content_height(g_reply_viewport) - line_advance);
+    lv_coord_t next = lv_obj_get_scroll_y(g_reply_viewport) +
+                     (code == LV_EVENT_GESTURE_LEFT ? step : -step);
+    lv_obj_scroll_to_y(g_reply_viewport, LV_CLAMP(0, next, max_scroll), LV_ANIM_OFF);
+    return true;
 }
 
 /**
@@ -362,12 +493,50 @@ static void system_footer_create(lv_obj_t* parent) {
     lv_obj_align(g_footer, LV_ALIGN_BOTTOM_LEFT, 0, 0);
     lv_obj_null_on_delete(&g_footer);
 
-    g_footer_avatar = avatar_create(g_footer, 40);
+    g_footer_avatar = avatar_create(g_footer, SYSTEM_AVATAR_SIZE);
     floatair_assert(g_footer_avatar != NULL, "footer avatar create failed");
     lv_obj_t* avatar_obj = ui_widget_get_obj(UI_WIDGET(g_footer_avatar));
-    lv_obj_align(avatar_obj, LV_ALIGN_BOTTOM_LEFT, 35, -16);
+    lv_obj_align(avatar_obj, LV_ALIGN_BOTTOM_LEFT, SYSTEM_AVATAR_LEFT, -SYSTEM_AVATAR_BOTTOM);
     lv_obj_add_event_cb(avatar_obj, system_footer_avatar_deleted, LV_EVENT_DELETE, NULL);
     avatar_set_visible(g_footer_avatar, false);
+
+    /* Sibling above the footer so it can extend over the page; see system_ui_layout_footer. */
+    g_reply_viewport = lv_obj_create(parent);
+    floatair_assert(g_reply_viewport != NULL, "reply viewport create failed");
+    lv_obj_remove_style_all(g_reply_viewport);
+    lv_obj_remove_flag(g_reply_viewport, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CLICK_FOCUSABLE |
+                                       LV_OBJ_FLAG_SCROLL_ELASTIC | LV_OBJ_FLAG_SCROLL_MOMENTUM |
+                                       LV_OBJ_FLAG_SCROLL_CHAIN);
+    lv_obj_set_scroll_dir(g_reply_viewport, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(g_reply_viewport, LV_SCROLLBAR_MODE_OFF);
+    /* Opaque: the bubble covers page content beneath it. */
+    lv_obj_set_style_bg_color(g_reply_viewport, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(g_reply_viewport, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_pad_hor(g_reply_viewport, SYSTEM_REPLY_PADDING_HOR, LV_PART_MAIN);
+    lv_obj_set_style_pad_ver(g_reply_viewport, SYSTEM_REPLY_PADDING_VER, LV_PART_MAIN);
+    lv_obj_set_style_border_color(g_reply_viewport, lv_color_white(), LV_PART_MAIN);
+    lv_obj_set_style_border_opa(g_reply_viewport, LV_OPA_60, LV_PART_MAIN);
+    lv_obj_set_style_border_width(g_reply_viewport, SYSTEM_REPLY_BORDER_WIDTH, LV_PART_MAIN);
+    lv_obj_set_style_radius(g_reply_viewport, SYSTEM_REPLY_RADIUS, LV_PART_MAIN);
+    lv_obj_set_size(g_reply_viewport, 1, 1);
+    lv_obj_align(g_reply_viewport, LV_ALIGN_BOTTOM_LEFT, SYSTEM_REPLY_LEFT, -SYSTEM_REPLY_EDGE_PADDING);
+    lv_obj_add_flag(g_reply_viewport, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_null_on_delete(&g_reply_viewport);
+
+    /* A plain label: the widget wrapper's font binding and layout passes are
+     * not needed, since system_ui_layout_footer sizes it explicitly. */
+    g_reply_label = lv_label_create(g_reply_viewport);
+    floatair_assert(g_reply_label != NULL, "reply label create failed");
+    lv_obj_remove_flag(g_reply_label, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CLICK_FOCUSABLE);
+    lv_label_set_long_mode(g_reply_label, LV_LABEL_LONG_WRAP);
+    lv_label_set_text(g_reply_label, "");
+    lv_obj_set_style_text_font(g_reply_label, system_ui_reply_font(), LV_PART_MAIN);
+    lv_obj_set_style_text_color(g_reply_label, lv_color_white(), LV_PART_MAIN);
+    lv_obj_set_style_text_align(g_reply_label, LV_TEXT_ALIGN_LEFT, LV_PART_MAIN);
+    lv_obj_set_style_text_line_space(g_reply_label, SYSTEM_REPLY_LINE_SPACE, LV_PART_MAIN);
+    lv_obj_set_size(g_reply_label, 1, 1);
+    lv_obj_set_pos(g_reply_label, 0, 0);
+    lv_obj_null_on_delete(&g_reply_label);
 }
 
 /**
@@ -437,12 +606,11 @@ void system_ui_refresh_status_bar(lv_obj_t* status_bar) {
  * @return 无返回值。
  */
 void system_ui_refresh_display_distance_level(void) {
-    lv_coord_t content_h = system_ui_get_page_content_height();
-
     if (!system_ui_apply_display_distance_level_if_needed()) {
         return;
     }
 
+    lv_coord_t content_h = system_ui_get_page_content_height();
     floatair_info("refresh display distance level: app=%s content_h=%d",
                   app_manager_current_name() != NULL ? app_manager_current_name() : "N/A",
                   (int)content_h);
@@ -661,6 +829,8 @@ void system_ui_set_bt_disconnect_overlay_visible(bool visible) {
     bool overlay_valid = g_bt_disconnect_overlay != NULL && lv_obj_is_valid(g_bt_disconnect_overlay);
     bool hidden_before = false;
 
+    if (visible) (void)system_ui_set_reply("");
+
     if (overlay_valid) {
         hidden_before = lv_obj_has_flag(g_bt_disconnect_overlay, LV_OBJ_FLAG_HIDDEN);
     }
@@ -727,6 +897,18 @@ lv_obj_t* system_init_lvgl_fb(void) {
     int32_t output_width = 0;
     int32_t output_height = 0;
     floatair_assert(p_root != NULL, "lv_screen_active failed");
+
+    /* Pace animation and regular redraws at about 15 FPS in every state.
+     * Input and reply updates can still request an immediate refresh. */
+    lv_timer_t* animation_timer = lv_anim_get_timer();
+    lv_timer_t* refresh_timer = lv_display_get_refr_timer(NULL);
+    if (animation_timer != NULL) {
+        lv_timer_set_period(animation_timer, SYSTEM_FRAME_PERIOD_MS);
+    }
+    if (refresh_timer != NULL) {
+        lv_timer_set_period(refresh_timer, SYSTEM_FRAME_PERIOD_MS);
+    }
+
     config_lcd.ui_x_begin = SYSTEM_LCD_UI_X_BEGIN;
     config_lcd.ui_y_begin = SYSTEM_LCD_UI_Y_BEGIN;
     config_lcd.ui_width = SYSTEM_LCD_UI_WIDTH;
@@ -767,7 +949,7 @@ lv_obj_t* system_init_lvgl_fb(void) {
     floatair_info("init lvgl fb: defer shell sync until first page load");
     (void)system_ui_apply_display_distance_level_if_needed();
     system_ui_sync_app_layer_scene();
-    system_ui_set_avatar_visible(floatair_lcd_get_state() == LCD_ON);
+    system_ui_sync_avatar_state("init");
     return p_root;
 }
 
@@ -804,8 +986,8 @@ void system_status_bar_set_mode(bool show_top) {
         return;
     }
 
-    content_h = system_ui_calc_page_content_height(show_top);
     system_ui_layout_page_content();
+    content_h = system_ui_get_page_content_height();
     app_manager_sync_current_view_layout((int32_t)config_lcd.ui_width, content_h);
     system_bt_disconnect_overlay_sync_status_bar();
     if (system_bt_disconnect_overlay_is_active()) {

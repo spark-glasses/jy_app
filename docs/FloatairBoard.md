@@ -121,6 +121,23 @@ cmake -S . -B build \
 cmake --build build
 ```
 
+On macOS, use the short scripts for normal work:
+
+```bash
+# Incremental build after source changes
+./scripts/compile_firmware.sh
+
+# Configure and build after .config or SDK changes
+./scripts/develop.sh --product jytek
+
+# Configure, build, and create the flash archive
+./scripts/package.sh --product jytek
+```
+
+The scripts find CMake in Homebrew and the ARM toolchain under
+`~/.local/share/halo-firmware-tools`. Set `BUILD_JOBS` to change the default of
+four parallel jobs.
+
 If `PATH` already contains `arm-none-eabi-gcc`, `CMAKE_C_COMPILER` can be omitted. If a valid `.os_sdk_cache/` entry already exists, `JY_APP_OS_SDK_ARCHIVE` can also be omitted.
 
 ## 7. Build Artifacts

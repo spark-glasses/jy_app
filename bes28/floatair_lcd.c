@@ -50,6 +50,8 @@ bool floatair_lcd_is_off(void)
 
 void floatair_lcd_set_state(lcd_state_t state)
 {
+    bool host_connected = system_get_btconn_state();
+
     floatair_info("lcd state: %d -> %d", current_lcd_state, state);
     if (current_lcd_state == state) {
         return;
@@ -61,13 +63,12 @@ void floatair_lcd_set_state(lcd_state_t state)
         system_update_time();
         floatair_lcd_invalidate_full_display();
         system_ui_flush_pending_after_screen_on();
-        /* Start the roll after the blocking display wake and refresh. */
-        system_ui_set_avatar_visible(true);
     } else {
-        system_ui_set_avatar_visible(false);
         floatair_lcd_set_brightness(0);
     }
-    if (system_get_btconn_state()) {
+    /* After the blocking display wake and refresh, so the roll-in is not cut. */
+    system_ui_sync_avatar_state("lcd_state");
+    if (host_connected) {
         (void)system_report_sys_state(state == LCD_ON ? 1 : 0);
     }
     if (state == LCD_OFF) {
