@@ -237,12 +237,18 @@ Unknown `biz` or unknown `cmd` returns `ErrCmdErr`.
 
 | cmd | Request `data` | Success ACK `data` |
 | --- | --- | --- |
-| `getAll` | `{}` | `{ "sysState": uint8, "chargeState": uint8, "battery": uint8 }` |
+| `getAll` | `{}` | `{ "sysState": uint8, "chargeState": uint8, "battery": uint8, "listenState": uint8 }` |
 | `getSysState` | `{}` | `{ "sysState": uint8 }` |
 | `setSysState` | `{ "sysState": uint8 }` | `{}` |
+| `setListenState` | `{ "listenState": uint8 }` | `{}` |
 | `getChargeState` | `{}` | `{ "chargeState": uint8 }` |
 | `getBattery` | `{}` | `{ "battery": uint8 }` |
 | `getRomUsage` | `{}` | `{ "total": uint32, "used": uint32, "remaining": uint32 }` |
+
+`listenState` is the phone's capture session: `1` once glasses audio is flowing,
+`0` when capture stops. Values above `1` return `ErrBadParam`. The glasses reset
+it to `0` when the phone link drops. The footer avatar shows a static audio-wave
+mark only while the screen is on, the link is up, and `listenState` is `1`.
 
 ### 5.4 SystemControl
 
@@ -302,7 +308,7 @@ Device report direction:
 | `onAssistantClose` | `DATA_UNRELIABLE` | `{}` |
 | `onGuideOpen` | `DATA_UNRELIABLE` | `{}` |
 | `onGuideClose` | `DATA_UNRELIABLE` | `{}` |
-| `onSysStateChanged` | `DATA_UNRELIABLE` | `{ "sysState": uint8 }` |
+| `onSysStateChanged` | `DATA_RELIABLE` | `{ "sysState": uint8 }` |
 | `onChargeStateChanged` | `DATA_UNRELIABLE` | `{ "chargeState": uint8 }` |
 | `onBatteryChanged` | `DATA_UNRELIABLE` | `{ "battery": uint32 }` |
 | `onBrightnessChanged` | `DATA_UNRELIABLE` | `{ "brightness": uint8 }` |

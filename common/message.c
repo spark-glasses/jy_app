@@ -316,14 +316,7 @@ bool app_mpack_msg_handle(char* msg, size_t msg_size) {
             goto out;
         }
     }
-    if (!system_get_btconn_state()) {
-        floatair_warn("block host mpack while bt disconnect overlay active, id=%" PRIu32 " biz=%s cmd=%s",
-                      mpackmsg.id,
-                      mpackmsg.biz,
-                      mpackmsg.cmd);
-        ret = app_mpack_send_ack(&mpackmsg, ErrNotReady);
-        goto out;
-    }
+    // A received command is usable even if the host-state event is still queued.
     if (!system_host_message_allowed_when_popup_active(&mpackmsg)) {
         floatair_warn("block host mpack while popup active, id=%" PRIu32 " biz=%s cmd=%s",
                       mpackmsg.id,

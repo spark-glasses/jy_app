@@ -132,6 +132,43 @@ class EventPanel:
         ttk.Button(reply_frame, text="Send Text", command=self.send_spark_reply).grid(row=0, column=1, padx=(8, 0))
         ttk.Button(reply_frame, text="Clear", command=self.clear_spark_reply).grid(row=0, column=2, padx=(8, 0))
 
+        ttk.Label(tools_frame, text="Spark Display").grid(row=3, column=0, sticky="nw", padx=(0, 8), pady=(10, 0))
+        display_frame = ttk.Frame(tools_frame)
+        display_frame.grid(row=3, column=1, sticky="ew", pady=(10, 0))
+        display_frame.columnconfigure(tuple(range(7)), weight=1)
+
+        ttk.Label(display_frame, text="List").grid(row=0, column=0, sticky="w", padx=(0, 8))
+        list_samples = (
+            ("Mixed", "mixed_list"),
+            ("Notes", "note_list"),
+            ("To-dos", "todo_list"),
+            ("Email", "email_list"),
+            ("Drafts", "draft_list"),
+            ("Calendar", "calendar_list"),
+        )
+        for col, (label, sample) in enumerate(list_samples, start=1):
+            ttk.Button(
+                display_frame,
+                text=label,
+                command=lambda name=sample: self.send_spark_display(name),
+            ).grid(row=0, column=col, sticky="ew", padx=(0 if col == 1 else 6, 0))
+
+        ttk.Label(display_frame, text="Full").grid(row=1, column=0, sticky="w", padx=(0, 8), pady=(8, 0))
+        full_samples = (
+            ("Note", "note_full"),
+            ("To-do", "todo_full"),
+            ("Email", "email_full"),
+            ("Draft", "draft_full"),
+            ("Calendar", "calendar_full"),
+            ("Clear", "clear"),
+        )
+        for col, (label, sample) in enumerate(full_samples, start=1):
+            ttk.Button(
+                display_frame,
+                text=label,
+                command=lambda name=sample: self.send_spark_display(name),
+            ).grid(row=1, column=col, sticky="ew", padx=(0 if col == 1 else 6, 0), pady=(8, 0))
+
         status = ttk.Label(container, textvariable=self.status_var, foreground="#445")
         status.pack(anchor="w", pady=(10, 0))
 
@@ -235,6 +272,9 @@ class EventPanel:
     def clear_spark_reply(self) -> None:
         self.spark_reply_value.set("")
         self._write_line("SET_SPARK_REPLY")
+
+    def send_spark_display(self, sample: str) -> None:
+        self._write_line(f"SET_SPARK_DISPLAY {sample}")
 
     def run(self) -> None:
         self.root.mainloop()

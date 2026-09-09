@@ -3,9 +3,6 @@
 #include "lvgl/src/draw/lv_draw_private.h"
 #include "lvgl/src/draw/sw/blend/lv_draw_sw_blend_private.h"
 
-#define AVATAR_LISTENING_MIN_OPA 180
-#define AVATAR_LISTENING_MIN_SIZE_PERCENT 80
-#define AVATAR_LISTENING_PULSE_MS 650
 #define AVATAR_ENTRANCE_DURATION_MS 450
 #define AVATAR_EXIT_DURATION_MS 300
 #define AVATAR_MIN_SIZE 6
@@ -40,8 +37,34 @@ typedef struct {
     int32_t size;
     int32_t angle;
     lv_opa_t brightness;
+    avatar_state_t state;
     bool log_draw;
 } avatar_draw_dsc_t;
+
+static bool avatar_point_in_ellipse(int32_t x, int32_t y, int32_t radius_x, int32_t radius_y) {
+    int64_t x_squared = (int64_t)x * x;
+    int64_t y_squared = (int64_t)y * y;
+    int64_t radius_x_squared = (int64_t)radius_x * radius_x;
+    int64_t radius_y_squared = (int64_t)radius_y * radius_y;
+
+    return x_squared * radius_y_squared + y_squared * radius_x_squared <=
+           radius_x_squared * radius_y_squared;
+}
+
+static bool avatar_listening_pixel(int32_t x, int32_t y, int32_t size) {
+    int32_t absolute_x = LV_ABS(x);
+    int32_t absolute_y = LV_ABS(y);
+
+    bool center_bar = absolute_x <= size / 10 && absolute_y <= size * 3 / 10;
+    bool inner_arc = absolute_x >= size / 10 &&
+                     avatar_point_in_ellipse(x, y, size * 11 / 20, size / 2) &&
+                     !avatar_point_in_ellipse(x, y, size * 7 / 20, size * 3 / 10);
+    bool outer_arc = absolute_x >= size / 4 &&
+                     avatar_point_in_ellipse(x, y, size * 9 / 10, size * 4 / 5) &&
+                     !avatar_point_in_ellipse(x, y, size * 7 / 10, size * 3 / 5);
+
+    return center_bar || inner_arc || outer_arc;
+}
 
 static void avatar_draw_rows(lv_draw_unit_t* unit, const void* descriptor, const lv_area_t* bounds) {
     const avatar_draw_dsc_t* avatar = descriptor;
@@ -65,15 +88,19 @@ static void avatar_draw_rows(lv_draw_unit_t* unit, const void* descriptor, const
                 int32_t x = first_x + i;
                 int32_t dx = 2 * x + 1 - size;
                 int32_t dy = 2 * y + 1 - size;
-                int32_t depth = radius_squared - dx * dx - dy * dy;
                 bool lit = false;
-                if (depth > 0) {
-                    int32_t rx = (dx * cosine + dy * sine) >> LV_TRIGO_SHIFT;
-                    int32_t ry = (dy * cosine - dx * sine) >> LV_TRIGO_SHIFT;
-                    int32_t light = LV_CLAMP(32, 148 - (rx + ry) * 50 / size + depth * 44 / radius_squared, 224);
-                    int32_t coverage = LV_MIN(255, depth * 255 / (4 * size));
-                    /* Keep dots fixed while the shading rotates. */
-                    lit = light * coverage / 255 > avatar_bayer[y & 3][x & 3] * 16 + 8;
+                if (avatar->state == AVATAR_STATE_LISTENING) {
+                    lit = avatar_listening_pixel(dx, dy, size);
+                } else {
+                    int32_t depth = radius_squared - dx * dx - dy * dy;
+                    if (depth > 0) {
+                        int32_t rx = (dx * cosine + dy * sine) >> LV_TRIGO_SHIFT;
+                        int32_t ry = (dy * cosine - dx * sine) >> LV_TRIGO_SHIFT;
+                        int32_t light = LV_CLAMP(32, 148 - (rx + ry) * 50 / size + depth * 44 / radius_squared, 224);
+                        int32_t coverage = LV_MIN(255, depth * 255 / (4 * size));
+                        /* Keep dots fixed while the shading rotates. */
+                        lit = light * coverage / 255 > avatar_bayer[y & 3][x & 3] * 16 + 8;
+                    }
                 }
                 /* Put brightness in the mask to avoid multiplying opacity twice. */
                 row[i] = lit ? avatar->brightness : 0;
@@ -109,6 +136,7 @@ static void avatar_on_draw(lv_event_t* event) {
     dsc->size = lv_area_get_width(&bounds);
     dsc->angle = avatar->angle;
     dsc->brightness = avatar->brightness;
+    dsc->state = avatar->state;
     dsc->log_draw = !avatar->draw_logged;
     lv_draw_task_t* task = lv_draw_add_task(layer, &bounds);
     task->type = LV_DRAW_TASK_TYPE_CUSTOM;
@@ -134,22 +162,6 @@ static void avatar_trace_roll_end(avatar_t* avatar, const char* result) {
                   (unsigned long)avatar->motion_update_count,
                   (unsigned long)avatar->motion_max_gap_ms,
                   (long)avatar->motion_progress);
-}
-
-static void avatar_animate_listening(void* var, int32_t value) {
-    avatar_t* avatar = var;
-    if (lv_obj_is_visible(avatar->base.obj)) {
-        int32_t min_size = avatar->size * AVATAR_LISTENING_MIN_SIZE_PERCENT / 100;
-        int32_t size = avatar->size - (avatar->size - min_size) * value / 1000;
-        lv_opa_t brightness = LV_OPA_COVER - (LV_OPA_COVER - AVATAR_LISTENING_MIN_OPA) * value / 1000;
-
-        /* Resize the centered ball; keep its footer slot and roll position fixed. */
-        lv_obj_set_size(avatar->ball, size, size);
-        if (avatar->brightness != brightness) {
-            avatar->brightness = brightness;
-            lv_obj_invalidate(avatar->ball);
-        }
-    }
 }
 
 static void avatar_animate_roll(void* var, int32_t value) {
@@ -186,29 +198,9 @@ static void avatar_roll_complete(lv_anim_t* animation) {
 }
 
 static void avatar_apply_state(avatar_t* avatar) {
-    lv_anim_delete(avatar, avatar_animate_listening);
     avatar->brightness = LV_OPA_COVER;
     lv_obj_set_size(avatar->ball, avatar->size, avatar->size);
     lv_obj_invalidate(avatar->ball);
-
-    if (avatar->exiting || avatar->state != AVATAR_STATE_LISTENING ||
-        ui_widget_is_hidden(UI_WIDGET(avatar))) {
-        return;
-    }
-
-    lv_anim_t animation;
-    lv_anim_init(&animation);
-    lv_anim_set_var(&animation, avatar);
-    lv_anim_set_exec_cb(&animation, avatar_animate_listening);
-    lv_anim_set_values(&animation, 0, 1000);
-    /* Shrink and dim, then return to normal size and brightness. */
-    lv_anim_set_duration(&animation, AVATAR_LISTENING_PULSE_MS);
-    lv_anim_set_playback_duration(&animation, AVATAR_LISTENING_PULSE_MS);
-    lv_anim_set_repeat_count(&animation, LV_ANIM_REPEAT_INFINITE);
-    lv_anim_set_path_cb(&animation, lv_anim_path_ease_in_out);
-    if (lv_anim_start(&animation) == NULL) {
-        avatar_animate_listening(avatar, 1000);
-    }
 }
 
 static void avatar_on_delete(lv_event_t* event) {
@@ -217,7 +209,6 @@ static void avatar_on_delete(lv_event_t* event) {
     if (lv_anim_get(avatar, avatar_animate_roll) != NULL) {
         avatar_trace_roll_end(avatar, "cancelled");
     }
-    lv_anim_delete(avatar, avatar_animate_listening);
     lv_anim_delete(avatar, avatar_animate_roll);
     lv_obj_set_user_data(avatar->base.obj, NULL);
     lv_free(avatar);

@@ -270,27 +270,20 @@ void system_dump_jyt_section(void) {
  * @return `1` 表示亮屏，`0` 表示灭屏。
  */
 uint8_t system_get_sys_state(void) {
-    uint8_t state = (floatair_lcd_get_state() == LCD_ON) ? 1 : 0;
-
-    floatair_info("get state: %d", state);
-    return state;
+    return system_runtime_state_get_display_on() ? 1 : 0;
 }
 
 /**
  * @brief 设置当前系统亮屏状态。
+ *
+ * The phone owns microphone capture and stops it on the screen-off report, so
+ * no local mic control happens here.
  * @param[in] state 目标系统状态，`0` 表示灭屏，其余值表示亮屏。
  * @return 无返回值。
  */
 void system_set_sys_state(uint8_t state) {
-    floatair_info("set state: %d", state);
-    if (state == 0) {
-        floatair_lcd_set_state(LCD_OFF);
-    } else {
-        floatair_lcd_set_state(LCD_ON);
-        app_sleep_timer_reset();
-        system_ui_flush_pending_after_screen_on();
-    }
- }
+    system_runtime_state_set_display_on(state != 0, "sys_state");
+}
 
 /**
  * @brief 获取设备总存储容量。

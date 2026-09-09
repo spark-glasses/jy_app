@@ -814,7 +814,7 @@ Built-in operations:
 
 - Host connect / disconnect
 - Avatar: Normal / Listening. Either button turns the screen on and sets the
-  permanent footer avatar state. Listening previews its size and brightness pulse without
+  permanent footer avatar state. Listening previews its static audio-wave mark without
   requiring microphone input or a host connection.
 - Low battery, charging, and SOC adjustment
 - Wear / remove
@@ -823,6 +823,9 @@ Built-in operations:
 - Time sync
 - Incoming call ring, answer, and hang up
 - Spark reply text preview and clear
+- Spark 20-item list and detail previews for notes, reminders, received email,
+  draft email, calendar events, and a mixed list. List swipes select and change
+  pages locally; samples use the normal display request path.
 
 Python dependency notes:
 

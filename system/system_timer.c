@@ -5,6 +5,7 @@
 #include "elf_common.h"
 #include "floatair_dbg.h"
 #include "system.h"
+#include "system_runtime_state.h"
 
 #include <inttypes.h>
 #include <string.h>
@@ -152,7 +153,7 @@ bool system_timer_handle_trigger(uint32_t timer_id) {
             system_timer_sleep_deinit();
             return true;
         }
-        floatair_lcd_set_state(LCD_OFF);
+        system_runtime_state_set_display_on(false, "sleep_timer");
         return true;
     }
 

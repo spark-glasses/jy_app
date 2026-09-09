@@ -207,12 +207,7 @@ static bool system_runtime_input_send_event_to_app(uint32_t raw_event, lv_event_
     return true;
 }
 
-/**
- * @brief 向当前 App 页面发送系统亮灭屏状态变化事件。
- * @param[in] state 当前系统亮灭屏状态，`0` 表示灭屏，`1` 表示亮屏。
- * @return `true` 表示发送成功，`false` 表示当前页面不可用。
- */
-static bool system_runtime_input_send_sys_state_to_app(uint8_t state) {
+bool system_runtime_input_notify_sys_state(uint8_t state) {
     app_t* current_app = app_manager_current();
     lv_obj_t* obj = NULL;
 
@@ -230,13 +225,12 @@ static bool system_runtime_input_send_sys_state_to_app(uint8_t state) {
     return true;
 }
 
-/** Toggle the screen and use the normal avatar and audio state path. */
+/** Toggle the screen through the runtime state reducer. */
 static void system_runtime_input_toggle_screen(const char* source) {
-    uint8_t next_state = (floatair_lcd_get_state() == LCD_OFF) ? 1 : 0;
+    uint8_t next_state = system_get_sys_state() ? 0 : 1;
 
     floatair_info("%s long-press: screen state -> %u", source, (unsigned)next_state);
     system_set_sys_state(next_state);
-    (void)system_runtime_input_send_sys_state_to_app(next_state);
 }
 
 /** Consume long presses before page input, and ignore other input while off. */
@@ -245,7 +239,7 @@ static bool system_touch_handle_screen(uint8_t event, const char* source, bool l
         system_runtime_input_toggle_screen(source);
         return true;
     }
-    if (floatair_lcd_get_state() == LCD_OFF) {
+    if (system_get_sys_state() == 0) {
         floatair_info("lcd off, ignore %s touch event %u", source, (unsigned)event);
         return true;
     }

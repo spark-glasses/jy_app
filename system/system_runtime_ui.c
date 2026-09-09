@@ -103,7 +103,9 @@ bool system_ui_send_progress_hint(const system_progress_hint_param_t* param) {
  * @return `true` 表示允许显示断连遮罩，`false` 表示当前应让前置流程独占页面。
  */
 static bool system_bt_disconnect_overlay_should_show(void) {
-    return !system_get_btconn_state() || !app_router_has_app_config();
+    // The setup screen is needed only before the phone supplies app configuration.
+    // A configured pair remains usable when its phone transport is disconnected.
+    return !app_router_has_app_config();
 }
 
 /**
@@ -207,8 +209,9 @@ void system_ui_set_avatar_listening(bool listening) {
 }
 
 void system_ui_sync_avatar_state(const char* source) {
-    bool visible = floatair_lcd_get_state() == LCD_ON;
-    bool listening = visible && system_get_btconn_state();
+    bool visible = system_runtime_state_get_display_on();
+    bool listening = visible && system_get_btconn_state() &&
+                     system_runtime_state_get_listen_state() == SYSTEM_LISTEN_STATE_LISTENING;
 
     system_ui_set_avatar_visible(visible);
     system_ui_set_avatar_listening(listening);

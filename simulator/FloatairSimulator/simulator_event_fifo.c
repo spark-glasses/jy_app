@@ -13,6 +13,7 @@
 #include <string.h>
 #include <time.h>
 
+#include "apps/spark/spark.h"
 #include "common/app_lcd.h"
 #include "elf_common.h"
 #include "floatair_dbg.h"
@@ -88,6 +89,166 @@ static int g_simulator_event_fifo_running = 0;
 static int g_simulator_event_fifo_fd = -1;
 static uint8_t g_simulator_battery_soc = 80;
 static uint8_t g_simulator_charge_state = 0;
+static uint64_t g_simulator_spark_revision = 1;
+
+typedef enum { SPARK_DISPLAY_NOTE, SPARK_DISPLAY_TODO, SPARK_DISPLAY_EMAIL,
+               SPARK_DISPLAY_EMAIL_DRAFT, SPARK_DISPLAY_CALENDAR_EVENT,
+               SPARK_DISPLAY_TYPE_COUNT } simulator_spark_type_t;
+
+typedef struct {
+    const char* name;
+    bool is_list;
+    bool is_mixed;
+    bool is_clear;
+    simulator_spark_type_t type;
+} simulator_spark_sample_t;
+
+static const simulator_spark_sample_t g_simulator_spark_samples[] = {
+    {"mixed_list", true, true, false, SPARK_DISPLAY_NOTE},
+    {"note_list", true, false, false, SPARK_DISPLAY_NOTE},
+    {"todo_list", true, false, false, SPARK_DISPLAY_TODO},
+    {"email_list", true, false, false, SPARK_DISPLAY_EMAIL},
+    {"draft_list", true, false, false, SPARK_DISPLAY_EMAIL_DRAFT},
+    {"calendar_list", true, false, false, SPARK_DISPLAY_CALENDAR_EVENT},
+    {"note_full", false, false, false, SPARK_DISPLAY_NOTE},
+    {"todo_full", false, false, false, SPARK_DISPLAY_TODO},
+    {"email_full", false, false, false, SPARK_DISPLAY_EMAIL},
+    {"draft_full", false, false, false, SPARK_DISPLAY_EMAIL_DRAFT},
+    {"calendar_full", false, false, false, SPARK_DISPLAY_CALENDAR_EVENT},
+    {"clear", true, false, true, SPARK_DISPLAY_NOTE},
+};
+
+static void simulator_spark_write_row(mpack_writer_t* writer,
+                                      simulator_spark_type_t type, size_t index, bool detail) {
+    char id[32];
+    snprintf(id, sizeof(id), "sim-%u-%u", (unsigned)type, (unsigned)index);
+    const char* keys[] = {"id", "mark", "primary", "secondary", "meta"};
+    const char* values[] = {id, "", "", "", ""};
+    switch (type) {
+        case SPARK_DISPLAY_NOTE:
+            values[1] = detail ? "NOTE" : "";
+            values[2] = detail ? "" : "Weekend plans";
+            values[3] = "Meet at the station at 10:00. Bring lunch and water.";
+            break;
+        case SPARK_DISPLAY_TODO:
+            values[1] = "[ ]";
+            values[2] = "Call Kim";
+            values[3] = detail ? "Sep 5, 2026 at 9:30 AM" : "";
+            values[4] = detail ? "Open" : "Tomorrow";
+            break;
+        case SPARK_DISPLAY_EMAIL:
+            values[1] = detail ? "MAIL" : "";
+            values[2] = "Dr Okafor";
+            values[3] = detail ? "The results are attached. Please review them before our call."
+                               : "Scan results - The results are attached.";
+            values[4] = detail ? "Sep 5, 2026 at 10:43 AM" : "10:43";
+            break;
+        case SPARK_DISPLAY_EMAIL_DRAFT:
+            values[1] = detail ? "DRAFT" : "";
+            values[2] = detail ? "me@example.com" : "kim@example.com";
+            values[3] = detail ? "Here is the project update for this week."
+                               : "Project update - Here is the project update.";
+            values[4] = "Draft";
+            break;
+        case SPARK_DISPLAY_CALENDAR_EVENT:
+            values[1] = detail ? "Sep 5, 2026 at 1:45 PM" : "";
+            values[2] = detail ? "Sep 5, 2026, 1:45 PM - 2:30 PM" : "Studio crit";
+            values[3] = detail ? "Room 2" : "Sep 5, 2026, 1:45 PM - 2:30 PM";
+            values[4] = detail ? "Accepted" : "Room 2";
+            break;
+        case SPARK_DISPLAY_TYPE_COUNT:
+            break;
+    }
+    bool email_list = !detail &&
+        (type == SPARK_DISPLAY_EMAIL || type == SPARK_DISPLAY_EMAIL_DRAFT);
+    mpack_start_map(writer, email_list ? 9 : detail ? 5 : 7);
+    for (size_t i = 0; i < 5; ++i) {
+        mpack_write_cstr(writer, keys[i]);
+        mpack_write_cstr(writer, values[i]);
+    }
+    if (!detail) {
+        const char* layouts[] = {"note", "reminder", "email", "email", "event"};
+        mpack_write_cstr(writer, "layout"); mpack_write_cstr(writer, layouts[type]);
+        mpack_write_cstr(writer, "height");
+        mpack_write_u32(writer, type == SPARK_DISPLAY_TODO ? 40 : type == SPARK_DISPLAY_CALENDAR_EVENT ? 88 : 64);
+        if (email_list) {
+            mpack_write_cstr(writer, "address");
+            mpack_write_cstr(writer, type == SPARK_DISPLAY_EMAIL ? "dr@example.com" : "");
+            mpack_write_cstr(writer, "subject");
+            mpack_write_cstr(writer, type == SPARK_DISPLAY_EMAIL ? "Scan results" : "Project update");
+        }
+    }
+    mpack_finish_map(writer);
+}
+
+static bool simulator_spark_show_sample(const simulator_spark_sample_t* sample) {
+    static const char* list_titles[] = {"Notes", "Reminders", "Inbox", "Drafts", "Calendar"};
+    static const char* detail_titles[] = {
+        "Weekend plans", "Reminder", "Scan results", "Project update", "Studio crit"
+    };
+    char revision[21];
+    char* bytes = NULL;
+    size_t size = 0;
+    mpack_writer_t writer;
+    size_t count = sample->is_clear ? 0 : sample->is_list ? 20 : 1;
+
+    snprintf(revision, sizeof(revision), "%llu",
+             (unsigned long long)g_simulator_spark_revision++);
+    mpack_writer_init_growable(&writer, &bytes, &size);
+    mpack_start_map(&writer, 5);
+    mpack_write_cstr(&writer, "displayID"); mpack_write_cstr(&writer, revision);
+    mpack_write_cstr(&writer, "navigationSequence"); mpack_write_cstr(&writer, "0");
+    mpack_write_cstr(&writer, "revision");
+    mpack_write_cstr(&writer, revision);
+    mpack_write_cstr(&writer, "reply");
+    mpack_write_cstr(&writer, "");
+    mpack_write_cstr(&writer, "page");
+    mpack_start_map(&writer, sample->is_list && !sample->is_clear ? 6 : 5);
+    mpack_write_cstr(&writer, "kind");
+    mpack_write_cstr(&writer, sample->is_list ? "list" : "item");
+    mpack_write_cstr(&writer, "title");
+    mpack_write_cstr(&writer, sample->is_mixed ? "Items" :
+                     sample->is_list ? list_titles[sample->type] : detail_titles[sample->type]);
+    mpack_write_cstr(&writer, "hint");
+    mpack_write_cstr(&writer, sample->is_list && !sample->is_clear ? "20 items" : "");
+    mpack_write_cstr(&writer, "selected");
+    mpack_write_u32(&writer, 0);
+    if (sample->is_list && !sample->is_clear) {
+        mpack_write_cstr(&writer, "rowGap"); mpack_write_u32(&writer, SPARK_DISPLAY_ROW_GAP);
+    }
+    mpack_write_cstr(&writer, "rows");
+    mpack_start_array(&writer, (uint32_t)count);
+    for (size_t i = 0; i < count; ++i) {
+        simulator_spark_type_t type = sample->is_mixed ?
+            (simulator_spark_type_t)(i % SPARK_DISPLAY_TYPE_COUNT) : sample->type;
+        simulator_spark_write_row(&writer, type, i, !sample->is_list);
+    }
+    mpack_finish_array(&writer);
+    mpack_finish_map(&writer);
+    mpack_finish_map(&writer);
+
+    if (mpack_writer_destroy(&writer) != mpack_ok) {
+        free(bytes);
+        return false;
+    }
+
+    mpack_tree_t tree;
+    mpack_tree_init_data(&tree, bytes, size);
+    mpack_tree_parse(&tree);
+    if (mpack_tree_error(&tree) != mpack_ok) {
+        mpack_tree_destroy(&tree);
+        free(bytes);
+        return false;
+    }
+
+    simulator_lvgl_enter_ui_critical();
+    bool shown = spark_display_preview(mpack_tree_root(&tree));
+    simulator_lvgl_leave_ui_critical();
+
+    mpack_tree_destroy(&tree);
+    free(bytes);
+    return shown;
+}
 
 /**
  * @brief 按当前缓存电池状态向系统上报一次电池消息。
@@ -154,6 +315,29 @@ static void simulator_event_fifo_handle_line(char* line) {
             floatair_warn("fifo Spark reply: UI not ready");
         }
         simulator_lvgl_leave_ui_critical();
+        return;
+    }
+
+    if (strcmp(line, "SET_SPARK_DISPLAY") == 0) {
+        if (floatair_lcd_get_state() == LCD_OFF) {
+            floatair_info("fifo Spark display ignored: screen off");
+            return;
+        }
+        if (arg == NULL) {
+            floatair_warn("fifo Spark display missing sample");
+            return;
+        }
+        for (i = 0; i < sizeof(g_simulator_spark_samples) / sizeof(g_simulator_spark_samples[0]); ++i) {
+            if (strcmp(arg, g_simulator_spark_samples[i].name) == 0) {
+                if (simulator_spark_show_sample(&g_simulator_spark_samples[i])) {
+                    floatair_info("fifo Spark display: %s", arg);
+                } else {
+                    floatair_warn("fifo Spark display failed: %s", arg);
+                }
+                return;
+            }
+        }
+        floatair_warn("fifo Spark display unknown sample: %s", arg);
         return;
     }
 

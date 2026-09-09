@@ -34,6 +34,15 @@ void system_runtime_input_set_wearing_state(bool worn);
  */
 uint32_t system_runtime_input_get_sys_state_event(void);
 /**
+ * @brief 向当前 App 页面发送系统亮灭屏状态变化事件。
+ *
+ * Called by the runtime state reducer for every screen transition, whatever
+ * its source. Pages on the top layer receive nothing.
+ * @param[in] state 当前系统亮灭屏状态，`0` 表示灭屏，`1` 表示亮屏。
+ * @return `true` 表示发送成功，`false` 表示当前页面不可用。
+ */
+bool system_runtime_input_notify_sys_state(uint8_t state);
+/**
  * @brief 处理 force 触控事件并分发到当前页面。
  * @param[in] event force 触控事件值。
  * @return `true` 表示事件已处理，`false` 表示处理失败。

@@ -293,16 +293,17 @@ bool system_report_guide_close(void) {
 bool system_report_sys_state(uint8_t state) {
     floatair_info("report sys state %d", state);
     
+    /* The phone's capture policy follows this report, so it is reliable. */
     msg_pack_t msgpack = {0};
     msgpack.sequence = system_report_next_sequence();
     msgpack.id = APP_MSG_ID_SYSTEM;
-    msgpack.type = MSG_TYPE_DATA_UNRELIABLE;
+    msgpack.type = MSG_TYPE_DATA_RELIABLE;
     strncpy(msgpack.biz, "SystemInd", sizeof(msgpack.biz));
     msgpack.biz[sizeof(msgpack.biz) - 1] = '\0';
     strncpy(msgpack.cmd, "onSysStateChanged", sizeof(msgpack.cmd));
     msgpack.cmd[sizeof(msgpack.cmd) - 1] = '\0';
     
-    msg_pack_writer_t* writer = app_mpack_create_writer(&msgpack, MSG_TYPE_DATA_UNRELIABLE);
+    msg_pack_writer_t* writer = app_mpack_create_writer(&msgpack, MSG_TYPE_DATA_RELIABLE);
     floatair_assert(writer != NULL, "create writer failed");
     mpack_start_map(&writer->writer, 1);
     mpack_write_cstr(&writer->writer, "sysState");

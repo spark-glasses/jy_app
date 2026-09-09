@@ -4,8 +4,7 @@
 #include <nuttx/lcd/lcd_dev.h>
 #include <lvgl.h>
 #include "lvgl/src/core/lv_refr_private.h"
-#include "system/system.h"
-#include "system/system_runtime_ui.h"
+#include "system/system_runtime_state.h"
 
 static lcd_state_t current_lcd_state = LCD_ON;
 static uint8_t current_lcd_brightness = UINT8_MAX; ///< 最近一次设置到 LCD 硬件的亮度。
@@ -48,31 +47,22 @@ bool floatair_lcd_is_off(void)
     return current_lcd_state == LCD_OFF;
 }
 
+/*
+ * Panel control only. OS sleep, UI flushes, the avatar, and phone reports are
+ * owned by the runtime state reducer, which is the only caller.
+ */
 void floatair_lcd_set_state(lcd_state_t state)
 {
-    bool host_connected = system_get_btconn_state();
-
     floatair_info("lcd state: %d -> %d", current_lcd_state, state);
     if (current_lcd_state == state) {
         return;
     }
     current_lcd_state = state;
     if (state == LCD_ON) {
-        system_request_os_sleep(false);
         floatair_lcd_set_brightness(system_runtime_state_get_lcd_resume_brightness());
-        system_update_time();
         floatair_lcd_invalidate_full_display();
-        system_ui_flush_pending_after_screen_on();
     } else {
         floatair_lcd_set_brightness(0);
-    }
-    /* After the blocking display wake and refresh, so the roll-in is not cut. */
-    system_ui_sync_avatar_state("lcd_state");
-    if (host_connected) {
-        (void)system_report_sys_state(state == LCD_ON ? 1 : 0);
-    }
-    if (state == LCD_OFF) {
-        system_request_os_sleep(true);
     }
 }
 

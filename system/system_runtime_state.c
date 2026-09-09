@@ -13,10 +13,9 @@
 #include "app_def.h"
 #include "common/app_framework/app_router.h"
 #include "system/popups/notify/notify.h"
-#include "common/widgets/toast.h"
 #include "system/system_notification.h"
-#include "system/popups/notify_list/notify_list.h"
 #include "system/system.h"
+#include "system/system_runtime_input.h"
 #include "system/system_runtime_ui.h"
 
 #include <inttypes.h>
@@ -45,7 +44,26 @@ static const system_als_brightness_level_t s_als_brightness_levels[] = {
 static uint8_t s_battery_percent = 0;   ///< 当前缓存电量百分比
 static uint8_t s_charge_state_sys = 0;  ///< 当前缓存充电状态
 static uint16_t s_voltage_mv_sys = 0;   ///< 当前缓存电池电压
-static bool g_bt_connected = false;     ///< 当前缓存蓝牙连接状态
+/**
+ * @brief The three independent inputs every visible state derives from.
+ *
+ * `link` and `display` are firmware-owned. `listen` is phone-owned and is
+ * cleared when the link drops. Setters mutate a copy and hand the previous and
+ * next snapshots to `system_runtime_state_apply()`, which performs every side
+ * effect exactly once per transition.
+ */
+typedef struct {
+    bool link_connected;          ///< 手机主机链路是否已连接
+    bool display_on;              ///< LCD 是否亮屏
+    system_listen_state_t listen; ///< 手机声明的采集会话状态
+} system_runtime_snapshot_t;
+
+/* The LCD driver starts lit, so the reducer starts lit as well. */
+static system_runtime_snapshot_t s_state = {
+    .link_connected = false,
+    .display_on = true,
+    .listen = SYSTEM_LISTEN_STATE_IDLE,
+};
 static bool s_device_state_btconn_synced = false; ///< 启动后是否已用设备快照初始化蓝牙连接态
 static bool s_call_seen_ringing = false;       ///< 当前通话流程是否出现过振铃态
 static bool s_call_seen_connected = false;     ///< 当前通话流程是否出现过接通态
@@ -202,50 +220,120 @@ static void system_runtime_state_apply_bat_status(union bat_state_t bat_status, 
 }
 
 /**
+ * @brief Apply every side effect of one snapshot transition.
+ * @param[in] prev 变更前快照。
+ * @param[in] next 变更后快照。
+ * @param[in] source 触发来源，仅用于日志。
+ * @return 无返回值。
+ */
+static void system_runtime_state_apply(const system_runtime_snapshot_t* prev,
+                                       const system_runtime_snapshot_t* next,
+                                       const char* source) {
+    bool link_changed = prev->link_connected != next->link_connected;
+    bool display_changed = prev->display_on != next->display_on;
+    bool listen_changed = prev->listen != next->listen;
+
+    floatair_info("runtime state: link=%d->%d display=%d->%d listen=%d->%d source=%s",
+                  (int)prev->link_connected, (int)next->link_connected,
+                  (int)prev->display_on, (int)next->display_on,
+                  (int)prev->listen, (int)next->listen,
+                  source != NULL ? source : "unknown");
+
+    if (link_changed && !next->link_connected) {
+        // A transport loss ends phone call state, but keeps local content and setup.
+        system_runtime_state_reset_call_flow();
+    }
+
+    if (display_changed) {
+        if (next->display_on) {
+            system_request_os_sleep(false);
+            floatair_lcd_set_state(LCD_ON);
+            /* Resync the clock after the OS wake, before the first refresh. */
+            system_update_time();
+            system_ui_flush_pending_after_screen_on();
+            app_sleep_timer_reset();
+        } else {
+            floatair_lcd_set_state(LCD_OFF);
+        }
+    }
+
+    /* After the blocking display wake and refresh, so the roll-in is not cut. */
+    if (link_changed || display_changed || listen_changed) {
+        system_ui_sync_avatar_state(source);
+    }
+    if (link_changed) {
+        system_ui_sync_shell_state();
+    }
+
+    if (display_changed) {
+        uint8_t sys_state = next->display_on ? 1 : 0;
+
+        (void)system_runtime_input_notify_sys_state(sys_state);
+        if (next->link_connected) {
+            (void)system_report_sys_state(sys_state);
+        }
+        if (!next->display_on) {
+            system_request_os_sleep(true);
+        }
+    }
+}
+
+/**
  * @brief 刷新蓝牙连接状态并同步相关 UI。
  * @param[in] connected `true` 表示已连接，`false` 表示未连接。
  * @return 无返回值。
  */
 static void system_runtime_state_refresh_btconn_state(bool connected) {
-    bool prev_connected = g_bt_connected;
-    bool changed = prev_connected != connected;
-    const char* current_app = app_router_get_app();
+    system_runtime_snapshot_t prev = s_state;
 
-    floatair_info("refresh btconn state: prev=%d, next=%d, changed=%d, app=%s, overlay_target=%d",
-                  (int)prev_connected,
+    floatair_info("refresh btconn state: prev=%d, next=%d, app=%s",
+                  (int)prev.link_connected,
                   (int)connected,
-                  (int)changed,
-                  current_app,
-                  (int)!connected);
-    if (changed && !connected) {
-        app_router_clear_app_config();
-        system_runtime_state_reset_call_flow();
-        system_notification_clear();
-        toast_dismiss_active();
-        (void)notify_list_close();
-
-        if (current_app[0] != '\0' && strcmp(current_app, APP_NAME_HOME) != 0) {
-            floatair_info("bt disconnect: try switch app to home before showing overlay, current=%s", current_app);
-            if (!app_router_set_app(APP_NAME_HOME, APP_ROUTER_ENTRY_LOCAL)) {
-                floatair_warn("bt disconnect: switch to home failed, current=%s", current_app);
-            } else {
-                floatair_info("bt disconnect: switched to home before showing overlay");
-            }
-        }
-        current_app = app_router_get_app();
+                  app_router_get_app());
+    s_state.link_connected = connected;
+    if (!connected) {
+        /* The phone's capture dies with the link; do not wait for its stop. */
+        s_state.listen = SYSTEM_LISTEN_STATE_IDLE;
     }
+    system_runtime_state_apply(&prev, &s_state, "bt_connection");
+    if (prev.link_connected == connected) {
+        /* The boot snapshot can repeat the default; the overlay still needs its first sync. */
+        system_ui_sync_shell_state();
+    }
+}
 
-    g_bt_connected = connected;
-    system_ui_sync_avatar_state("bt_connection");
-    system_ui_sync_shell_state();
-    floatair_info("refresh btconn state: overlay request finished, connected=%d, app=%s",
-                  (int)connected,
-                  current_app);
-    if (!changed) {
+bool system_runtime_state_get_display_on(void) {
+    return s_state.display_on;
+}
+
+void system_runtime_state_set_display_on(bool on, const char* source) {
+    system_runtime_snapshot_t prev = s_state;
+
+    if (prev.display_on == on) {
+        if (on) {
+            /* A repeated wake request keeps the screen awake. */
+            app_sleep_timer_reset();
+        }
+        floatair_info("display already %s source=%s", on ? "on" : "off",
+                      source != NULL ? source : "unknown");
         return;
     }
+    s_state.display_on = on;
+    system_runtime_state_apply(&prev, &s_state, source);
+}
 
-    floatair_info("bt connection state changed: %d -> %d", (int)prev_connected, (int)connected);
+system_listen_state_t system_runtime_state_get_listen_state(void) {
+    return s_state.listen;
+}
+
+void system_runtime_state_set_listen_state(system_listen_state_t state, const char* source) {
+    system_runtime_snapshot_t prev = s_state;
+
+    if (prev.listen == state) {
+        return;
+    }
+    s_state.listen = state;
+    system_runtime_state_apply(&prev, &s_state, source);
 }
 
 /**
@@ -375,20 +463,16 @@ bool system_update_kws_state(JYT_ELF_MQ_MSG* msg) {
         return true;
     }
     /* Spark home does not run the vendor home tutorial. */
-    floatair_info("kws state update: hit=%" PRIu32 " lcd_state=%d current_app=%s",
+    floatair_info("kws state update: hit=%" PRIu32 " display_on=%d current_app=%s",
                   kws_hit,
-                  (int)floatair_lcd_get_state(),
+                  (int)s_state.display_on,
                   current_app);
     if (!system_get_btconn_state()) {
         floatair_info("ignore kws wake while bt disconnect overlay active");
         return true;
     }
 
-    if (floatair_lcd_get_state() == LCD_OFF) {
-        floatair_lcd_set_state(LCD_ON);
-        app_sleep_timer_reset();
-    }
-
+    system_runtime_state_set_display_on(true, "kws");
     return true;
 }
 
@@ -509,7 +593,7 @@ uint8_t system_get_battery(void) {
  * @return `true` 表示蓝牙已连接，`false` 表示蓝牙未连接。
  */
 bool system_get_btconn_state(void) {
-    return g_bt_connected;
+    return s_state.link_connected;
 }
 
 /**

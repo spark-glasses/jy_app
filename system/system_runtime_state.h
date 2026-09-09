@@ -66,6 +66,45 @@ uint8_t system_get_charge_state(void);
  */
 uint8_t system_get_battery(void);
 /**
+ * @brief Phone-declared capture session state.
+ *
+ * The phone owns audio capture. It reports `LISTENING` once glasses audio is
+ * flowing and `IDLE` when capture stops. A lost link resets it to `IDLE`.
+ */
+typedef enum {
+    SYSTEM_LISTEN_STATE_IDLE = 0,
+    SYSTEM_LISTEN_STATE_LISTENING = 1,
+} system_listen_state_t;
+
+/**
+ * @brief 获取当前显示状态。
+ * @return `true` 表示亮屏，`false` 表示灭屏。
+ */
+bool system_runtime_state_get_display_on(void);
+/**
+ * @brief Set the display state. Every screen transition goes through here.
+ *
+ * Turning an already lit screen on only restarts the sleep timer. A change
+ * drives the LCD driver, OS sleep permission, pending UI flushes, the avatar,
+ * the page screen event, and the phone report from one place.
+ * @param[in] on `true` 表示亮屏，`false` 表示灭屏。
+ * @param[in] source 触发来源，仅用于日志。
+ * @return 无返回值。
+ */
+void system_runtime_state_set_display_on(bool on, const char* source);
+/**
+ * @brief 获取手机声明的采集会话状态。
+ * @return 当前采集会话状态。
+ */
+system_listen_state_t system_runtime_state_get_listen_state(void);
+/**
+ * @brief Record the phone's capture session state and resync the avatar.
+ * @param[in] state 手机声明的采集会话状态。
+ * @param[in] source 触发来源，仅用于日志。
+ * @return 无返回值。
+ */
+void system_runtime_state_set_listen_state(system_listen_state_t state, const char* source);
+/**
  * @brief 获取当前蓝牙连接状态。
  * @return `true` 表示蓝牙已连接，`false` 表示蓝牙未连接。
  */

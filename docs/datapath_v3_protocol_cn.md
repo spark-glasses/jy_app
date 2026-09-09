@@ -237,12 +237,17 @@ System 使用 `id=0`，并按 `payload.biz` 二级路由。
 
 | cmd | 请求 `data` | 成功 ACK `data` |
 | --- | --- | --- |
-| `getAll` | `{}` | `{ "sysState": uint8, "chargeState": uint8, "battery": uint8 }` |
+| `getAll` | `{}` | `{ "sysState": uint8, "chargeState": uint8, "battery": uint8, "listenState": uint8 }` |
 | `getSysState` | `{}` | `{ "sysState": uint8 }` |
 | `setSysState` | `{ "sysState": uint8 }` | `{}` |
+| `setListenState` | `{ "listenState": uint8 }` | `{}` |
 | `getChargeState` | `{}` | `{ "chargeState": uint8 }` |
 | `getBattery` | `{}` | `{ "battery": uint8 }` |
 | `getRomUsage` | `{}` | `{ "total": uint32, "used": uint32, "remaining": uint32 }` |
+
+`listenState` 表示手机侧采集会话：眼镜音频开始上传后为 `1`，采集停止后为 `0`。
+大于 `1` 的取值返回 `ErrBadParam`。手机链路断开时眼镜将其重置为 `0`。
+底部 avatar 仅在亮屏、链路已连接且 `listenState` 为 `1` 时显示静态音频波形标记。
 
 ### 5.4 SystemControl
 
@@ -302,7 +307,7 @@ Assistant 的文本字段见 [6.6 Assistant Popup](#66-assistant-popup)。
 | `onAssistantClose` | `DATA_UNRELIABLE` | `{}` |
 | `onGuideOpen` | `DATA_UNRELIABLE` | `{}` |
 | `onGuideClose` | `DATA_UNRELIABLE` | `{}` |
-| `onSysStateChanged` | `DATA_UNRELIABLE` | `{ "sysState": uint8 }` |
+| `onSysStateChanged` | `DATA_RELIABLE` | `{ "sysState": uint8 }` |
 | `onChargeStateChanged` | `DATA_UNRELIABLE` | `{ "chargeState": uint8 }` |
 | `onBatteryChanged` | `DATA_UNRELIABLE` | `{ "battery": uint32 }` |
 | `onBrightnessChanged` | `DATA_UNRELIABLE` | `{ "brightness": uint8 }` |
