@@ -73,6 +73,20 @@ bool app_router_call_home(void);
 const char* app_router_get_home_viewname(void);
 
 /**
+ * @brief 将协议视图名称解析为当前产品实际注册的 App 名称。
+ * @param[in] view_name 协议层视图名称；`home` 会解析为当前首页角色。
+ * @return 实际 App 名称；参数为空或首页角色缺失时返回 `NULL`。
+ */
+const char* app_router_protocol_to_app_name(const char* view_name);
+
+/**
+ * @brief 将内部 App 名称转换为协议视图名称。
+ * @param[in] app_name 内部实际 App 名称。
+ * @return 协议视图名称；产品首页角色固定返回 `home`。
+ */
+const char* app_router_app_to_protocol_name(const char* app_name);
+
+/**
  * @brief 应用上位机平台配置并按平台进入初始应用。
  * @param[in] app_platform 上位机平台类型，取值见 `app_router_app_platform_t`。
  * @return `true` 表示配置生效并完成路由决策，`false` 表示平台非法或路由失败。
@@ -109,6 +123,12 @@ bool app_router_exit_current_app(void);
  * @return 返回当前应用名称字符串。
  */
 const char* app_router_get_app(void);
+
+/**
+ * @brief 按当前语言刷新状态栏中的当前 App 展示名称。
+ * @return 无返回值。
+ */
+void app_router_refresh_status_bar_app_name(void);
 
 /**
  * @brief 切换到目标应用。

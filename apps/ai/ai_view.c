@@ -9,7 +9,7 @@
  */
 #include "ai.h"
 #include "home/home.h"
-#include "stt_view_common.h"
+#include "common/stt/stt_view_common.h"
 
 #include "common/app_framework/app_manager.h"
 #include "common/widgets/container.h"
@@ -240,7 +240,7 @@ static bool ai_status_bar_widgets_valid(void) {
 }
 
 static bool ai_status_bar_ensure_widgets(void) {
-    lv_obj_t* status_bar = system_get_status_bar(STATUS_BAR_POS_TOP);
+    lv_obj_t* status_bar = system_get_status_bar(STATUS_BAR_POS_BOTTOM);
 
     if (status_bar == NULL || !lv_obj_is_valid(status_bar)) {
         s_audio_source = NULL;
@@ -658,12 +658,12 @@ static void touch_event_handle(lv_event_t* event) {
     switch (code) {
     case LV_EVENT_GESTURE_LEFT:
         if (can_scroll) {
-            container_scroll_up(s_scroll, 3.0f / 4.0f);
+            container_scroll_up(s_scroll, 1.0f / 2.0f, LV_ANIM_ON);
         }
         break;
     case LV_EVENT_GESTURE_RIGHT:
         if (can_scroll) {
-            container_scroll_down(s_scroll, 3.0f / 4.0f);
+            container_scroll_down(s_scroll, 1.0f / 2.0f, LV_ANIM_ON);
         }
         break;
     case LV_EVENT_DCLICKED:
@@ -694,7 +694,7 @@ static void ai_page_create(lv_obj_t* root, const app_page_data_t* data) {
     lv_obj_set_style_bg_color(root, lv_color_black(), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(root, LV_OPA_COVER, LV_PART_MAIN);
 
-    status_bar = system_get_status_bar(STATUS_BAR_POS_TOP);
+    status_bar = system_get_status_bar(STATUS_BAR_POS_BOTTOM);
     if (status_bar != NULL && lv_obj_is_valid(status_bar)) {
         status_bar_clear_custom_widgets(status_bar);
     }
@@ -761,7 +761,7 @@ static void ai_page_appear(lv_obj_t* root) {
 }
 
 static void ai_page_destroy(void) {
-    lv_obj_t* status_bar = system_get_status_bar(STATUS_BAR_POS_TOP);
+    lv_obj_t* status_bar = system_get_status_bar(STATUS_BAR_POS_BOTTOM);
 
     if (status_bar != NULL && lv_obj_is_valid(status_bar)) {
         status_bar_clear_custom_widgets(status_bar);

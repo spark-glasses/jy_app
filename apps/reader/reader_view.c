@@ -31,66 +31,6 @@ typedef enum {
 
 static reader_view_mode_t s_view_mode = READER_VIEW_MODE_INIT;
 
-static bool reader_config_is_valid_root(cJSON* root) {
-    if (!root || !cJSON_IsObject(root)) {
-        return false;
-    }
-    cJSON* fontinfo = cJSON_GetObjectItemCaseSensitive(root, "fontinfo");
-    if (!cJSON_IsObject(fontinfo)) {
-        return false;
-    }
-    cJSON* weight = cJSON_GetObjectItemCaseSensitive(fontinfo, "weight");
-    cJSON* word_space = cJSON_GetObjectItemCaseSensitive(fontinfo, "wordSpace");
-    cJSON* row_space = cJSON_GetObjectItemCaseSensitive(fontinfo, "rowSpace");
-    return cJSON_IsNumber(weight) && cJSON_IsNumber(word_space) && cJSON_IsNumber(row_space);
-}
-
-static cJSON* reader_config_create_default_root(void) {
-    cJSON* root = cJSON_CreateObject();
-    if (!root) {
-        return NULL;
-    }
-    cJSON* fontinfo = cJSON_AddObjectToObject(root, "fontinfo");
-    if (!fontinfo) {
-        cJSON_Delete(root);
-        return NULL;
-    }
-    cJSON_AddItemToObject(fontinfo, "weight", cJSON_CreateNumber(26));
-    cJSON_AddItemToObject(fontinfo, "wordSpace", cJSON_CreateNumber(0));
-    cJSON_AddItemToObject(fontinfo, "rowSpace", cJSON_CreateNumber(0));
-    return root;
-}
-
-bool reader_config_reset_to_default(void) {
-    char config_path[SYSTEM_MAX_PATH_LEN] = {0};
-    if (!floatair_fs_get_app_config_file(APP_NAME_READER, config_path, sizeof(config_path))) {
-        return false;
-    }
-    cJSON* root = reader_config_create_default_root();
-    if (!root) {
-        return false;
-    }
-    int ret = save_json(config_path, root);
-    cJSON_Delete(root);
-    return ret == 0;
-}
-
-bool reader_config_ensure(void) {
-    char config_path[SYSTEM_MAX_PATH_LEN] = {0};
-    if (!floatair_fs_get_app_config_file(APP_NAME_READER, config_path, sizeof(config_path))) {
-        return false;
-    }
-    cJSON* root = load_json(config_path);
-    if (root) {
-        bool ok = reader_config_is_valid_root(root);
-        cJSON_Delete(root);
-        if (ok) {
-            return true;
-        }
-    }
-    return reader_config_reset_to_default();
-}
-
 static lv_obj_t* s_root = NULL;
 
 static roller_t* s_roller = NULL;
@@ -119,7 +59,7 @@ static bool reader_status_bar_widgets_valid(void) {
 }
 
 static bool reader_status_bar_ensure_widgets(void) {
-    lv_obj_t* status_bar = system_get_status_bar(STATUS_BAR_POS_TOP);
+    lv_obj_t* status_bar = system_get_status_bar(STATUS_BAR_POS_BOTTOM);
 
     if (status_bar == NULL || !lv_obj_is_valid(status_bar)) {
         s_text_page_label = NULL;
@@ -379,9 +319,6 @@ static void read_docs(void) {
 }
 
 bool reader_font_init_from_config(void) {
-    if (!reader_config_ensure()) {
-        return false;
-    }
     char config_path[SYSTEM_MAX_PATH_LEN] = {0};
     if (!floatair_fs_get_app_config_file(APP_NAME_READER, config_path, sizeof(config_path))) {
         return false;
@@ -397,9 +334,6 @@ bool reader_font_init_from_config(void) {
 
 bool reader_font_update_and_save(app_font_info_t* font_info) {
     if (!font_info) {
-        return false;
-    }
-    if (!reader_config_ensure()) {
         return false;
     }
     if (reader_font_info.weight == font_info->weight && reader_font_info.wordSpace == font_info->wordSpace &&
@@ -709,7 +643,7 @@ static void text_build_ui(lv_obj_t* root) {
 
 static void reader_view_apply_visibility(void) {
     bool init_mode = (s_view_mode == READER_VIEW_MODE_INIT);
-    lv_obj_t* status_bar = system_get_status_bar(STATUS_BAR_POS_TOP);
+    lv_obj_t* status_bar = system_get_status_bar(STATUS_BAR_POS_BOTTOM);
 
     if (s_init_label) {
         if (init_mode && (s_doc_cnt <= 0 || s_docs == NULL)) {
@@ -793,7 +727,7 @@ void reader_view_reset(void) {
 }
 
 static void reader_page_destroy(void) {
-    lv_obj_t* status_bar = system_get_status_bar(STATUS_BAR_POS_TOP);
+    lv_obj_t* status_bar = system_get_status_bar(STATUS_BAR_POS_BOTTOM);
 
     free_file();
     if (status_bar != NULL && lv_obj_is_valid(status_bar)) {

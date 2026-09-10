@@ -66,7 +66,7 @@ void navigation_map_update_info(int navMode,
                                 const char* remainDistance,
                                 const char* remainTime,
                                 const char* speed);
-void navigation_map_update_bpm(const char* bmp);
+void navigation_map_update_bpm(const char* bpm);
 void navigation_map_update_spo(const char* spo);
 void navigation_map_update_dir_icon_bin(const uint8_t* data, size_t size);
 

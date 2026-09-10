@@ -29,6 +29,15 @@ extern "C" {
 #define TEXTMODE_HISTORY                            1 ///< history text mode
 #define TEXTMODE_MEETING                            2 ///< meeting text mode
 
+#define USERMODE_HIDE                               0 ///< 隐藏说话人名称。
+#define USERMODE_SHOW                               1 ///< 显示协议下发的说话人名称。
+
+#define AUDIOTRACK_HIDE                             0 ///< 隐藏音轨状态图标。
+#define AUDIOTRACK_SHOW                             1 ///< 显示音轨状态图标。
+
+#define HEARINGICON_HIDE                            0 ///< 隐藏助听耳朵图标。
+#define HEARINGICON_SHOW                            1 ///< 显示助听耳朵图标。
+
 #define AUDIOSOURCE_GLASSES                         0     ///< 眼镜端收音。
 #define AUDIOSOURCE_PHONE                           1     ///< 手机端收音。
 #define AUDIOSOURCE_WATCH                           2     ///< 手表端收音。
@@ -76,6 +85,9 @@ typedef struct {
     char language_target[STT_CONFIG_MAX_LANGUAGE_LEN]; ///< 目标语言名称。
     uint8_t transMode; ///< 原文/译文显示模式。
     uint8_t textMode; ///< 文本展示模式。
+    uint8_t userMode; ///< 说话人名称显隐模式。
+    uint8_t audioTrack; ///< 音轨状态图标显隐模式。
+    uint8_t hearingIcon; ///< 助听耳朵图标显隐状态。
     uint8_t micDirectional; ///< 麦克风指向模式。
     uint8_t language_hint; ///< 语言提示开关。
     uint8_t audioSourceIndicator; ///< 音频来源指示，未下发时为 AUDIOSOURCE_INVALID。
@@ -151,12 +163,26 @@ bool stt_set_textmode(mpack_node_t node, msg_pack_t* msg);
  */
 bool stt_set_audiotrackstate(mpack_node_t node, msg_pack_t* msg);
 /**
+ * @brief 设置助听耳朵图标显隐状态。
+ * @param[in] node mpack 数据节点。
+ * @param[in,out] msg 消息上下文。
+ * @return 处理成功返回 true。
+ */
+bool stt_set_hearingiconstate(mpack_node_t node, msg_pack_t* msg);
+/**
  * @brief Set translation mode
  * @param[in] node mpack node
  * @param[in,out] msg message pack
  * @return true on success
  */
 bool stt_set_transmode(mpack_node_t node, msg_pack_t* msg);
+/**
+ * @brief 设置说话人名称显隐模式。
+ * @param[in] node mpack node。
+ * @param[in,out] msg 消息上下文。
+ * @return 处理成功返回 true。
+ */
+bool stt_set_usermode(mpack_node_t node, msg_pack_t* msg);
 /**
  * @brief Set maximum lines
  * @param[in] node mpack node
@@ -260,6 +286,13 @@ void stt_buffer_dump(void);
  * @return true on success
  */
 bool stt_buffer_push(stt_info_t* info);
+
+/**
+ * @brief 按下标获取说话人名称。
+ * @param[in] index STT 缓冲下标。
+ * @return 说话人名称；字段为空或下标无效时返回 `NULL`。
+ */
+const char* stt_buffer_get_user_by_index(size_t index);
 
 /**
  * @brief Get translate by index

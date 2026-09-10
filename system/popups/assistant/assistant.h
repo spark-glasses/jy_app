@@ -13,17 +13,18 @@ extern "C" {
 
 /**
  * @brief 打开 assistant 弹窗层。
+ * @param[in] report_open 是否主动上报 assistant 已打开。
  * @return `true` 表示打开成功，`false` 表示打开失败。
  */
-bool assistant_open(void);
+bool assistant_open(bool report_open);
 /**
- * @brief Close the text popup and release its resources. The footer avatar remains.
+ * @brief 关闭 assistant 弹窗层。
  * @param[in] report_close 是否主动上报 assistant 已关闭。
- * @return `true` when close is accepted, `false` on failure.
+ * @return `true` 表示关闭成功，`false` 表示关闭失败。
  */
 bool assistant_close(bool report_close);
 /**
- * @brief Check whether the text popup exists.
+ * @brief 查询 assistant 弹窗层是否正在显示。
  * @return `true` 表示正在显示，`false` 表示未显示。
  */
 bool assistant_is_open(void);
@@ -68,9 +69,9 @@ bool assistant_close_cmd(mpack_node_t node, msg_pack_t* msg);
  */
 bool assistant_popup_open(void);
 /**
- * @brief Delete the text popup while retaining the permanent avatar.
+ * @brief 销毁 assistant popup 视图。
  * @param[in] report_close 是否主动上报 assistant 已关闭。
- * @return `true` when close is accepted or the popup is already absent.
+ * @return `true` 表示销毁成功，`false` 表示销毁失败。
  */
 bool assistant_popup_close(bool report_close);
 /**

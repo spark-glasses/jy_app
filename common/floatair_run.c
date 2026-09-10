@@ -11,10 +11,12 @@
 #include <fcntl.h>
 #include <stdint.h>
 #include <inttypes.h>
-#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#if defined(CONFIG_RPMSG_TTF_CLIENT)
+#include <malloc.h>
+#endif
 
 /* 导入 LVGL 头文件和自定义配置 */
 #include "floatair_dbg.h"
@@ -31,6 +33,7 @@
 #include "system/system_config_json.h"
 #include "system/stt_common.h"
 #include "system/system.h"
+#include "system/system_runtime_ui.h"
 
 #include <lvgl/lvgl.h>
 
@@ -43,29 +46,6 @@ typedef struct floatair_minute_cb_node {
 } floatair_minute_cb_node_t;
 
 static floatair_minute_cb_node_t* g_minute_cb_head = NULL;
-
-#if !defined(BUILD_NATIVE)
-/* Hardware-only: the simulator runs LVGL on a separate thread. Collect display
- * timings without printing inside rendering. This includes flush work and
- * explicit refreshes inside message handlers, not just lv_timer_handler(). */
-static struct {
-    uint32_t start_us;
-    uint32_t total_us;
-    uint32_t count;
-    bool active;
-} s_render_timing;
-
-static void floatair_render_timing_event(lv_event_t* event) {
-    if (lv_event_get_code(event) == LV_EVENT_RENDER_START) {
-        s_render_timing.start_us = (uint32_t)GetTimeUs();
-        s_render_timing.active = true;
-    } else if (s_render_timing.active) {
-        s_render_timing.total_us += (uint32_t)GetTimeUs() - s_render_timing.start_us;
-        s_render_timing.count++;
-        s_render_timing.active = false;
-    }
-}
-#endif
 
 /**
  * @brief 查询当前 Q-8 中仍待消费的消息数量。
@@ -192,66 +172,54 @@ static void floatair_call_minute_cbs(void) {
     }
 }
 
-#if !defined(BUILD_NATIVE)
-/* Drain limits. After the first message arrives, keep pulling messages that
- * are already queued before the single LVGL pass, so a burst produces one
- * frame instead of one frame per message. Bounded so a continuous stream
- * from the phone cannot starve rendering. */
-#define APP_MSG_DRAIN_BUDGET_US 10000U
-#define APP_MSG_DRAIN_MAX_MSGS  16U
-#endif
-/* Cycle cost at or above this is logged; a frame costs ~73 ms today. */
-#define APP_UI_CYCLE_SLOW_US    50000U
-
-/* UI-loop load diagnostics: per-second load summary plus a cycle log for every
- * host message with a payload. Off by default; the summary and extra logging
- * cost UI-thread time on every cycle. */
-#ifndef APP_UI_LOAD_DIAG
-#define APP_UI_LOAD_DIAG 0
-#endif
-
-typedef struct {
-    bool handle_ret;
-    uint8_t msg_type;
-    uint16_t event_type;
-    uint16_t payload_len;
-} app_msg_handle_info_t;
-
-/**
- * @brief 分发并释放一条应用队列消息。
- * @param[in] msg 队列消息，函数返回前释放。
- * @param[out] info 本条消息的类型与处理结果，用于周期日志。
- * @return 无返回值。
- */
-static void app_msg_handle_one(OSAL_MQ_MSG* msg, app_msg_handle_info_t* info) {
+static void app_msg_handle(OSAL_MQ_MSG* msg) {
+    uint32_t msg_start_time_us = (uint32_t)GetTimeUs();
     JYT_ELF_MQ_MSG* p_que_data = NULL;
     bool handle_ret = false;
+    uint8_t msg_type = 0;
+    uint16_t event_type = 0;
+    uint16_t payload_len = 0;
 
-    memset(info, 0, sizeof(*info));
+    if (msg == NULL) {
+        return;
+    }
     if (msg->header.id == LMID_ELFMSG_WRAP) {
         p_que_data = (JYT_ELF_MQ_MSG*)(msg->pdu.ptr[0]);
-        if (p_que_data != NULL) {
-            info->msg_type = p_que_data->Header.msg_type;
-            info->event_type = p_que_data->Header.event_type;
-            info->payload_len = p_que_data->payload_len;
+        if (p_que_data) {
+            msg_type = p_que_data->Header.msg_type;
+            event_type = p_que_data->Header.event_type;
+            payload_len = p_que_data->payload_len;
+            floatair_log_elf_queue_msg_preview("recv elf wrap", p_que_data);
             switch (p_que_data->Header.msg_type) {
                 case EMT_HOST_MPACK_MSG: {
                     int q_pending = floatair_get_app_msg_queue_pending();
                     stt_set_flow_queue_pending(q_pending);
-                    handle_ret = app_mpack_msg_handle((char*)p_que_data->payload, p_que_data->payload_len);
+                    app_msg_dump_summary((char*)p_que_data->payload,
+                                         p_que_data->payload_len,
+                                         "mpack recv");
+                    app_msg_dump((char*)p_que_data->payload,
+                                 p_que_data->payload_len,
+                                 "phone msg");
+                    handle_ret = app_mpack_msg_handle((char*)p_que_data->payload,
+                                                      p_que_data->payload_len);
                     break;
                 }
-                case EMT_SYSTEM_EVENT:
+                case EMT_SYSTEM_EVENT: {
                     handle_ret = app_system_msg_handle(p_que_data);
                     break;
-                case EMT_SYSTEM_EMERG_MSG:
-                    handle_ret = app_emerg_msg_handle((char*)p_que_data->payload, p_que_data->payload_len);
+                }
+                case EMT_SYSTEM_EMERG_MSG: {
+                    handle_ret = app_emerg_msg_handle((char*)p_que_data->payload,
+                                                      p_que_data->payload_len);
                     break;
-                case EMT_SYSTEM_EVENT_WITH_PAYLOAD:
+                }
+                case EMT_SYSTEM_EVENT_WITH_PAYLOAD: {
                     handle_ret = app_system_msg_handle_payload(p_que_data);
                     break;
+                }
                 default:
-                    floatair_err("----, msg type not support %d", p_que_data->Header.msg_type);
+                    floatair_err("----, msg type not support %d",
+                                 p_que_data->Header.msg_type);
                     break;
             }
         } else {
@@ -268,162 +236,122 @@ static void app_msg_handle_one(OSAL_MQ_MSG* msg, app_msg_handle_info_t* info) {
         }
         floatair_err("handle ret false");
     }
-
     /* The wrapped ELF message is heap-allocated by system_manager and
-     * passed through the MQ as a raw pointer. Handlers copy what they keep. */
+     * passed through the MQ as a raw pointer, so the consumer must
+     * release it after handling. */
     if (p_que_data != NULL) {
         free(p_que_data);
     }
     OSAL_DELETE_MQ_MSG(msg);
-    info->handle_ret = handle_ret;
+    {
+        uint32_t msg_cost_us = (uint32_t)GetTimeUs() - msg_start_time_us;
+        floatair_info("app msg recv cost %lu us/%lu ms, handle_ret=%d msg_type=%u event_type=%u payload_len=%u",
+                      (unsigned long)msg_cost_us,
+                      (unsigned long)(msg_cost_us / 1000U),
+                      handle_ret ? 1 : 0,
+                      (unsigned)msg_type,
+                      (unsigned)event_type,
+                      (unsigned)payload_len);
+#if defined(CONFIG_RPMSG_TTF_CLIENT)
+        struct mallinfo info = mallinfo();
+        floatair_info("app msg heap total=%d used=%d free=%d largest=%d ordblks=%d",
+                      info.arena,
+                      info.uordblks,
+                      info.fordblks,
+                      info.mxordblk,
+                      info.ordblks);
+#endif
+    }
+}
+
+/**
+ * @brief 非阻塞消费当前 Q-8 中的全部消息。
+ * @return 本轮消费的消息数量。
+ */
+static uint32_t app_msg_drain_pending(void) {
+    uint32_t drained = 0;
+
+    while (1) {
+        int pending = floatair_get_app_msg_queue_pending();
+        int batch_count = pending;
+
+        if (pending == 0) {
+            break;
+        }
+        if (batch_count < 0) {
+            batch_count = 1;
+        }
+        for (int i = 0; i < batch_count; ++i) {
+#if defined(BUILD_NATIVE)
+            OSAL_MQ_MSG* msg = OSAL_TIMEOUT_WAITING_MQ_MSG(
+                MQ_JYT_ELFAPP_DATA_IN, CPU_SPEED_REQ_FULL, 0);
+#else
+            OSAL_MQ_MSG* msg = OSAL_WAITING_MQ_MSG(
+                MQ_JYT_ELFAPP_DATA_IN, CPU_SPEED_REQ_FULL);
+#endif
+
+            if (msg == NULL) {
+                return drained;
+            }
+            app_msg_handle(msg);
+            drained++;
+        }
+    }
+
+    return drained;
 }
 
 static void app_msg_recv(void) {
-#if !defined(BUILD_NATIVE)
-    uint32_t next_lvgl_ms = 0;
-    uint32_t lvgl_finished_ms = lv_tick_get();
-    uint32_t last_lvgl_start_us = 0;
-    bool have_last_lvgl_start = false;
-#if APP_UI_LOAD_DIAG
-    uint32_t diagnostic_start_us = (uint32_t)GetTimeUs();
-    uint32_t diagnostic_cycles = 0;
-    uint32_t diagnostic_render_us = 0;
-    uint32_t diagnostic_renders = 0;
-    uint32_t diagnostic_max_cycle_us = 0;
-    uint32_t diagnostic_max_gap_us = 0;
-    floatair_info("UILoad stage=app_start version=%s", JY_APP_VERSION_STRING);
-#endif
-#endif
+    uint32_t refresh_start_tick = lv_tick_get();
+    uint32_t handled_since_refresh = 0;
+
     while (1) {
+        uint32_t refresh_elapsed = lv_tick_elaps(refresh_start_tick);
+
+        if (refresh_elapsed >= LV_DEF_REFR_PERIOD) {
+            uint32_t cycle_start_tick = lv_tick_get();
+            uint32_t drained_at_deadline = 0;
+            bool forced_refresh = false;
+
+            refresh_start_tick = cycle_start_tick;
+            drained_at_deadline = app_msg_drain_pending();
+            handled_since_refresh += drained_at_deadline;
+            if (!floatair_lcd_is_off()) {
+                forced_refresh = system_ui_apply_pending_screen_refresh();
+                lv_timer_handler();
+                /*
+                 * LVGL 9 会在无效区域刷新后暂停 display refresh timer。
+                 * 周期调度需要显式提交本轮 timer/动画产生的无效区域，否则
+                 * 空闲一段时间后新建的滚动动画可能只有坐标变化而没有显示帧。
+                 *
+                 * PC 模拟器的 lv_timer_handler 已替换为向 SDL 主线程提交刷新
+                 * 请求；不能在 app 线程再次直接刷新，否则会提前消费无效区域，
+                 * 导致 SDL 主线程拿不到需要显示的画面。
+                 */
 #if !defined(BUILD_NATIVE)
-        int timeout_ms = -1;
-        if (!floatair_lcd_is_off() && next_lvgl_ms != LV_NO_TIMER_READY) {
-            /* Account for cleanup/logging since LVGL returned its delay.
-             * A minimum 1 ms wait yields even when drawing missed a deadline. */
-            uint32_t elapsed_ms = lv_tick_elaps(lvgl_finished_ms);
-            uint32_t remaining_ms = next_lvgl_ms > elapsed_ms ? next_lvgl_ms - elapsed_ms : 1;
-            timeout_ms = (int)LV_MIN(remaining_ms, (uint32_t)INT_MAX);
-        }
-        uint32_t wait_start_us = (uint32_t)GetTimeUs();
-        OSAL_MQ_MSG* msg = OSAL_TIMEOUT_WAITING_MQ_MSG(
-            MQ_JYT_ELFAPP_DATA_IN, CPU_SPEED_REQ_FULL, timeout_ms);
-#else
-        /* The simulator's main thread already services LVGL timers. */
-        OSAL_MQ_MSG* msg = OSAL_WAITING_MQ_MSG(MQ_JYT_ELFAPP_DATA_IN, CPU_SPEED_REQ_FULL);
-        if (msg == NULL) {
+                lv_refr_now(lv_display_get_default());
+#endif
+            }
+            if (handled_since_refresh > 0 || forced_refresh) {
+                floatair_info("app refresh cycle cost=%lu ms handled=%lu drained_at_deadline=%lu forced_refresh=%d",
+                              (unsigned long)lv_tick_elaps(cycle_start_tick),
+                              (unsigned long)handled_since_refresh,
+                              (unsigned long)drained_at_deadline,
+                              forced_refresh ? 1 : 0);
+            }
+            handled_since_refresh = 0;
             continue;
         }
-#endif
-        uint32_t cycle_start_us = (uint32_t)GetTimeUs();
-        uint32_t msg_count = 0;
-        bool refreshed = false;
-        /* Type and result of the last message handled this cycle. */
-        app_msg_handle_info_t info = {0};
-#if !defined(BUILD_NATIVE)
-        /* Queue wait is time spent receiving, not the age of the message.
-         * next_lvgl_ms is meaningful only when refreshed=1; UINT32_MAX
-         * means LVGL has no pending timer. The first handler gap is zero. */
-        uint32_t queue_wait_us = cycle_start_us - wait_start_us;
-        uint32_t lvgl_gap_us = 0;
-        uint32_t lvgl_cost_us = 0;
-        uint32_t before_lvgl_us = 0;
-        s_render_timing.total_us = 0;
-        s_render_timing.count = 0;
-#endif
-        if (msg != NULL) {
-            app_msg_handle_one(msg, &info);
-            msg_count = 1;
-#if !defined(BUILD_NATIVE)
-            /* Input and phone messages are cheap next to a frame, so handle
-             * everything already queued first and draw once afterwards. The
-             * pending check keeps the zero-timeout receive from blocking
-             * regardless of how the OSAL treats a zero timeout. */
-            while (msg_count < APP_MSG_DRAIN_MAX_MSGS &&
-                   (uint32_t)GetTimeUs() - cycle_start_us < APP_MSG_DRAIN_BUDGET_US &&
-                   floatair_get_app_msg_queue_pending() > 0) {
-                msg = OSAL_TIMEOUT_WAITING_MQ_MSG(MQ_JYT_ELFAPP_DATA_IN, CPU_SPEED_REQ_FULL, 0);
-                if (msg == NULL) {
-                    break;
-                }
-                app_msg_handle_one(msg, &info);
-                msg_count++;
-            }
-#endif
-        }
 
-        /* Timer work must run after timeouts and unhandled messages too. */
-        if (!floatair_lcd_is_off()) {
-#if !defined(BUILD_NATIVE)
-            uint32_t lvgl_start_us = (uint32_t)GetTimeUs();
-            before_lvgl_us = lvgl_start_us - cycle_start_us;
-            if (have_last_lvgl_start) {
-                lvgl_gap_us = lvgl_start_us - last_lvgl_start_us;
-            }
-            last_lvgl_start_us = lvgl_start_us;
-            have_last_lvgl_start = true;
-            next_lvgl_ms = lv_timer_handler();
-            lvgl_finished_ms = lv_tick_get();
-            lvgl_cost_us = (uint32_t)GetTimeUs() - lvgl_start_us;
-#else
-            lv_timer_handler();
-#endif
-            refreshed = true;
-        } else {
-#if !defined(BUILD_NATIVE)
-            next_lvgl_ms = LV_NO_TIMER_READY;
-            have_last_lvgl_start = false;
-#endif
-        }
+        {
+            uint32_t wait_ms = LV_DEF_REFR_PERIOD - refresh_elapsed;
+            OSAL_MQ_MSG* msg = OSAL_TIMEOUT_WAITING_MQ_MSG(
+                MQ_JYT_ELFAPP_DATA_IN, CPU_SPEED_REQ_FULL, (int)wait_ms);
 
-        /* Logging is syslog on the UI thread, so only report cycles worth
-         * looking at: slow ones and handler failures. APP_UI_LOAD_DIAG adds a
-         * per-second load summary and every host message with a payload. */
-        uint32_t cycle_cost_us = (uint32_t)GetTimeUs() - cycle_start_us;
-        bool log_cycle = (msg_count > 0 && !info.handle_ret) || cycle_cost_us >= APP_UI_CYCLE_SLOW_US;
-#if !defined(BUILD_NATIVE) && APP_UI_LOAD_DIAG
-        log_cycle = log_cycle || (msg_count > 0 && info.payload_len > 0);
-        diagnostic_cycles++;
-        diagnostic_render_us += s_render_timing.total_us;
-        diagnostic_renders += s_render_timing.count;
-        diagnostic_max_cycle_us = LV_MAX(diagnostic_max_cycle_us, cycle_cost_us);
-        diagnostic_max_gap_us = LV_MAX(diagnostic_max_gap_us, lvgl_gap_us);
-        uint32_t diagnostic_now_us = (uint32_t)GetTimeUs();
-        uint32_t diagnostic_elapsed_us = diagnostic_now_us - diagnostic_start_us;
-        if (diagnostic_elapsed_us >= 1000000) {
-            floatair_info("UILoad stage=app_load window_us=%lu screen_on=%d cycles=%lu renders=%lu render_us=%lu max_cycle_us=%lu max_lvgl_gap_us=%lu app_queue=%d",
-                          (unsigned long)diagnostic_elapsed_us, !floatair_lcd_is_off(),
-                          (unsigned long)diagnostic_cycles, (unsigned long)diagnostic_renders,
-                          (unsigned long)diagnostic_render_us, (unsigned long)diagnostic_max_cycle_us,
-                          (unsigned long)diagnostic_max_gap_us, floatair_get_app_msg_queue_pending());
-            diagnostic_start_us = diagnostic_now_us;
-            diagnostic_cycles = diagnostic_render_us = diagnostic_renders = 0;
-            diagnostic_max_cycle_us = diagnostic_max_gap_us = 0;
-        }
-#endif
-        if (log_cycle) {
-            floatair_info("app ui cycle source=%s msgs=%lu cost_us=%lu handle_ret=%d refreshed=%d msg_type=%u event_type=%u payload_len=%u"
-#if !defined(BUILD_NATIVE)
-                          " wait_ms=%d queue_wait_us=%lu before_lvgl_us=%lu lvgl_gap_us=%lu lvgl_us=%lu next_lvgl_ms=%lu render_us=%lu renders=%lu"
-#endif
-                          , msg_count > 0 ? "message" : "timeout",
-                          (unsigned long)msg_count,
-                          (unsigned long)cycle_cost_us,
-                          info.handle_ret ? 1 : 0,
-                          refreshed ? 1 : 0,
-                          (unsigned)info.msg_type,
-                          (unsigned)info.event_type,
-                          (unsigned)info.payload_len
-#if !defined(BUILD_NATIVE)
-                          , timeout_ms,
-                          (unsigned long)queue_wait_us,
-                          (unsigned long)before_lvgl_us,
-                          (unsigned long)lvgl_gap_us,
-                          (unsigned long)lvgl_cost_us,
-                          (unsigned long)next_lvgl_ms,
-                          (unsigned long)s_render_timing.total_us,
-                          (unsigned long)s_render_timing.count
-#endif
-                          );
+            if (msg != NULL) {
+                app_msg_handle(msg);
+                handled_since_refresh++;
+            }
         }
     }
 }
@@ -447,13 +375,6 @@ void floatair_load(void) {
         floatair_assert(false, "system_font_init failed");
     }
     // ---------- black full screen at begining -----------
-#if !defined(BUILD_NATIVE)
-    lv_display_t* display = lv_display_get_default();
-    if (display != NULL) {
-        lv_display_add_event_cb(display, floatair_render_timing_event, LV_EVENT_RENDER_START, NULL);
-        lv_display_add_event_cb(display, floatair_render_timing_event, LV_EVENT_RENDER_READY, NULL);
-    }
-#endif
     lv_obj_t* p_root = system_init_lvgl_fb();
     floatair_assert(p_root != NULL, "system_init_lvgl_fb failed");
     floatair_lcd_set_brightness(system_config_get_brightness());

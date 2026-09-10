@@ -108,6 +108,18 @@ If the UI name is `ai_home`, this becomes:
 AI_HOME_RES_IMAGE_ROBOT
 ```
 
+Resource JSON can also declare file-backed audio resources:
+
+```json
+"audio": {
+  "click_single": {
+    "path": "/romfs/system/audio/click_single.wav"
+  }
+}
+```
+
+For a resource named `ui`, this generates `UI_RES_AUDIO_CLICK_SINGLE`.
+
 ## Build Integration
 
 CMake discovers `apps/**/*.ui.json` and `apps/**/*.res.json`.

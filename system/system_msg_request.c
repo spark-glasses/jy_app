@@ -64,17 +64,13 @@ bool system_request_device_control(const dev_ctl_cmd_t* cmd) {
  * @return `true` 表示请求已发送，`false` 表示请求失败。
  */
 bool system_request_os_sleep(bool enable) {
-    uint8_t sleep_cmd = enable ? SLEEP_SUB_ENABLE : SLEEP_SUB_DISABLE;
+    dev_ctl_cmd_t sleep_cmd = {
+        .dev_type = DEV_SLEEP_CTRL,
+        .control_code = enable ? SLEEP_SUB_ENABLE : SLEEP_SUB_DISABLE,
+        .data = 0,
+    };
 
-    floatair_info("request os sleep: %u", (unsigned)sleep_cmd);
-    OSAL_INST_SEND_REMOTE_MQ_MSG(MQ_JYT_RPMSG,
-                                 RPMSG_ROUTE_CHIP_LOCAL,
-                                 RPMSG_ROUTE_CORE_BTH,
-                                 MQ_JYT_RPMSG,
-                                 LMID_RPMSG_SLEEP,
-                                 &sleep_cmd,
-                                 sizeof(sleep_cmd));
-    return true;
+    return system_request_device_control(&sleep_cmd);
 }
 
 /**
@@ -113,14 +109,7 @@ bool system_request_imu_threshold(float heads_up_threshold, float heads_down_thr
     floatair_info("request imu threshold: up=%.2f down=%.2f",
                   (double)heads_up_threshold,
                   (double)heads_down_threshold);
-    OSAL_INST_SEND_REMOTE_MQ_MSG(MQ_JYT_RPMSG,
-                                 RPMSG_ROUTE_CHIP_LOCAL,
-                                 RPMSG_ROUTE_CORE_M55C0,
-                                 MQ_JYT_SYSTEM_MANAGER_DATA_IN,
-                                 LMID_SMMAN_JDB_OP,
-                                 &req,
-                                 sizeof(req));
-    return true;
+    return system_request_msg(LMID_SMMAN_JDB_OP, (const uint8_t*)&req, sizeof(req));
 }
 
 /**
@@ -134,9 +123,6 @@ void system_sync_config_to_device(void) {
         float heads_down_threshold = (float)(head_gesture.base_deg - head_gesture.down_deg);
         (void)system_request_imu_threshold(heads_up_threshold, heads_down_threshold);
     }
-
-    bool keyword_spotting_enabled = system_config_get_keyword_spotting_enabled();
-    (void)system_request_keyword_spotting_enabled(keyword_spotting_enabled);
 
     dev_ctl_cmd_t wearing_cmd = {
         .dev_type = DEV_WEARING_CTRL,
@@ -152,31 +138,29 @@ void system_sync_config_to_device(void) {
  * @return `true` 表示请求已发出，`false` 表示请求失败。
  */
 bool system_request_bt_visibility(uint8_t visibility) {
+    dev_ctl_cmd_t cmd = {
+        .dev_type = DEV_BT_VISIBLE_CTRL,
+        .control_code = visibility,
+        .data = 0,
+    };
+
     floatair_info("request bt visibility %u", visibility);
-    OSAL_INST_SEND_REMOTE_MQ_MSG(MQ_JYT_RPMSG,
-                                 RPMSG_ROUTE_CHIP_LOCAL,
-                                 RPMSG_ROUTE_CORE_BTH,
-                                 MQ_JYT_AP_HELPER_DATA_IN,
-                                 LMID_SMMAN_BT_VISIBLE_OP,
-                                 &visibility,
-                                 sizeof(visibility));
-    return true;
+    return system_request_device_control(&cmd);
 }
 
 /**
- * @brief 请求底层复位蓝牙配对信息。
+ * @brief 请求 OS 持久化恢复出厂标记、清除配对信息并协调重启。
  * @return `true` 表示请求已发出，`false` 表示请求失败。
  */
-bool system_request_bt_reset_pair(void) {
-    floatair_info("request bt reset pair");
-    OSAL_INST_SEND_REMOTE_MQ_MSG(MQ_JYT_RPMSG,
-                                 RPMSG_ROUTE_CHIP_LOCAL,
-                                 RPMSG_ROUTE_CORE_BTH,
-                                 MQ_JYT_AP_HELPER_DATA_IN,
-                                 LMID_RPMSG_BT_RESETPAIR,
-                                 NULL,
-                                 0);
-    return true;
+bool system_request_factory_reset(void) {
+    dev_ctl_cmd_t cmd = {
+        .dev_type = DEV_FACTORY_RESET,
+        .control_code = 0,
+        .data = 0,
+    };
+
+    floatair_info("request factory reset");
+    return system_request_device_control(&cmd);
 }
 
 /**

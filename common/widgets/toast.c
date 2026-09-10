@@ -8,12 +8,14 @@
 #include "common/app_framework/app_layers.h"
 #include "common/widgets/status_bar.h"
 #include "system/system_timer.h"
+#include "system/system_res.h"
 
 #include <stdlib.h>
 #include <string.h>
 
 #define TOAST_POSITION_OFFSET 24 ///< Toast 距顶部的默认偏移。
 #define TOAST_BOTTOM_POSITION_OFFSET (STATUS_BAR_HEIGHT + 4) ///< 底部 Toast 避让状态栏的偏移。
+#define TOAST_SIDE_MARGIN 16 ///< Toast 自动折行时与屏幕左右两侧保留的安全边距。
 
 /**
  * @brief Toast 组件内部数据结构。
@@ -25,6 +27,8 @@ struct toast_t {
     uint32_t id;          ///< 当前 Toast 业务标识。
     uint32_t duration_ms; ///< 当前自动关闭时间。
     uint8_t level;        ///< 当前 Toast 显示等级；数值越小优先级越高。
+    toast_cfg_t cfg;      ///< 保存创建 Toast 时的完整配置。
+    const char* localization_key;    ///< 语言切换后重新获取当前语言对应的文本。
 };
 
 static toast_t* s_active_toast = NULL;
@@ -141,6 +145,58 @@ static lv_align_t toast_position_to_align(toast_position_t position, lv_coord_t*
 }
 
 /**
+ * @brief 计算 Toast 在当前父弹层中的最大宽度。
+ *
+ * 默认不超过父弹层内容宽度，并在左右各保留安全边距；调用方通过
+ * `box.max_w` 配置了更小宽度时继续遵循该限制。
+ *
+ * @param box_obj Toast 外层容器对象。
+ * @param configured_max_width 调用方配置的最大宽度。
+ * @return 返回当前布局下可使用的最大宽度。
+ */
+static lv_coord_t toast_resolve_max_width(lv_obj_t* box_obj, int32_t configured_max_width) {
+    lv_obj_t* parent = NULL;
+    lv_coord_t parent_width = 0;
+    lv_coord_t max_width = 0;
+    lv_coord_t configured_width = (lv_coord_t)configured_max_width;
+
+    if (box_obj == NULL || !lv_obj_is_valid(box_obj)) {
+        return (lv_coord_t)configured_max_width;
+    }
+
+    parent = lv_obj_get_parent(box_obj);
+    if (parent == NULL || !lv_obj_is_valid(parent)) {
+        return (lv_coord_t)configured_max_width;
+    }
+
+    lv_obj_update_layout(parent);
+    parent_width = lv_obj_get_content_width(parent);
+    if (parent_width <= 0) {
+        parent_width = lv_obj_get_width(parent);
+    }
+    if (parent_width <= 0) {
+        return (lv_coord_t)configured_max_width;
+    }
+
+    max_width = parent_width - (TOAST_SIDE_MARGIN * 2);
+    if (max_width <= 0) {
+        max_width = parent_width;
+    }
+
+    if (LV_COORD_IS_PCT(configured_width)) {
+        configured_width =
+            (lv_coord_t)(parent_width * LV_COORD_GET_PCT(configured_width) / 100);
+    }
+    if (configured_width > 0 &&
+        configured_width != LV_COORD_MAX &&
+        configured_width < max_width) {
+        max_width = configured_width;
+    }
+
+    return max_width;
+}
+
+/**
  * @brief 刷新 Toast 的容器与文本布局。
  *
  * @param toast 目标 Toast 句柄。
@@ -149,15 +205,25 @@ static lv_align_t toast_position_to_align(toast_position_t position, lv_coord_t*
 static void toast_sync_layout(toast_t* toast, const char* text, const toast_cfg_t* cfg) {
     container_cfg_t box_cfg;
     label_cfg_t label_cfg;
+    lv_obj_t* box_obj = NULL;
+    lv_obj_t* label_obj = NULL;
+    lv_coord_t label_max_width = 0;
     lv_coord_t y_offset = 0;
 
     if (!toast_is_valid(toast) || !toast->label || !cfg || !text) {
         return;
     }
 
+    box_obj = container_get_obj(toast->box);
+    label_obj = label_get_obj(toast->label);
+    if (box_obj == NULL || label_obj == NULL) {
+        return;
+    }
+
     box_cfg = cfg->box;
     box_cfg.w = LV_SIZE_CONTENT;
     box_cfg.h = LV_SIZE_CONTENT;
+    box_cfg.max_w = toast_resolve_max_width(box_obj, box_cfg.max_w);
     label_cfg = cfg->label;
     label_cfg.text = text;
 
@@ -168,8 +234,15 @@ static void toast_sync_layout(toast_t* toast, const char* text, const toast_cfg_
                         CONTAINER_ALIGN_CENTER,
                         CONTAINER_ALIGN_CENTER);
 
+    lv_obj_set_style_max_width(label_obj, LV_COORD_MAX, 0);
     label_apply_cfg(toast->label, &label_cfg);
-    lv_obj_align(container_get_obj(toast->box), toast_position_to_align(cfg->position, &y_offset), 0, y_offset);
+    lv_obj_update_layout(box_obj);
+    label_max_width = lv_obj_get_content_width(box_obj);
+    if (label_max_width > 0) {
+        lv_obj_set_style_max_width(label_obj, label_max_width, 0);
+    }
+    lv_obj_update_layout(box_obj);
+    lv_obj_align(box_obj, toast_position_to_align(cfg->position, &y_offset), 0, y_offset);
 }
 
 /**
@@ -232,6 +305,7 @@ static void toast_apply_cfg(toast_t* toast, const char* text, const toast_cfg_t*
     toast->id = cfg->id;
     toast->duration_ms = cfg->duration_ms;
     toast->level = cfg->level;
+    toast->cfg = *cfg;
     toast_sync_layout(toast, text, cfg);
 }
 
@@ -389,6 +463,7 @@ toast_t* toast_show_with_cfg(const char* text, const toast_cfg_t* cfg) {
         }
 
         if (toast_parent_matches(s_active_toast)) {
+            s_active_toast->localization_key = NULL;
             toast_apply_cfg(s_active_toast, text, cfg);
             ui_widget_move_foreground(UI_WIDGET(s_active_toast->box));
             toast_start_timer(s_active_toast);
@@ -411,6 +486,30 @@ toast_t* toast_show_with_cfg(const char* text, const toast_cfg_t* cfg) {
 
     s_active_toast = toast;
     return toast;
+}
+
+/**
+ * @brief 根据字符串 key 获取当前系统语言对应的文本，然后显示 Toast。
+ * @param key 字符串 key，用于获取当前系统语言对应的文本。
+ * @param cfg Toast 配置。
+ * @return 成功返回 Toast 句柄，失败返回 `NULL`。
+ */
+toast_t* toast_show_localized(const char* key, const toast_cfg_t* cfg) {
+    toast_t* toast;
+    if (!key || !*key) return NULL;
+    toast = toast_show_with_cfg(app_get_str(key), cfg);
+    if (toast) toast->localization_key = key;
+    return toast;
+}
+
+/**
+ * @brief 刷新当前正在显示的本地化 Toast。
+ * @return 无返回值。
+ */
+void toast_refresh_localized(void) {
+    toast_t* toast = s_active_toast;
+    if (!toast_is_valid(toast) || !toast->localization_key) return;
+    toast_apply_cfg(toast, app_get_str(toast->localization_key), &toast->cfg);
 }
 
 /**

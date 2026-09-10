@@ -11,6 +11,7 @@ const spark_display_t* spark_display_current(void);
 bool spark_display_apply(spark_display_t* display, bool new_display);
 bool spark_display_is_selected(const char* id);
 void spark_display_clear(void);
+bool spark_reply_set(const char* text);
 
 bool spark_display_ready(void);
 void spark_display_reset_revision(void);

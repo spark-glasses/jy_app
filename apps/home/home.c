@@ -16,8 +16,6 @@
 #include "system/system_config_json.h"
 #include "sys_adapter.h"
 
-#include <string.h>
-
 static bool s_home_msg_registered = false;    ///< Home 消息是否已注册
 
 static bool home_msg_cb(mpack_node_t node, msg_pack_t* msg) {
@@ -33,18 +31,6 @@ static app_message_t home_msg = {
     .name = APP_NAME_HOME,
     .cb   = home_msg_cb,
 };
-
-bool home_is_supported_app(const char* app_name) {
-    if (app_name == NULL || app_name[0] == '\0') {
-        return false;
-    }
-    for (size_t i = 0; i < g_home_units_count; ++i) {
-        if (g_home_units_arr[i].name != NULL && strcmp(g_home_units_arr[i].name, app_name) == 0) {
-            return true;
-        }
-    }
-    return false;
-}
 
 /**
  * @brief 注册 Home 消息处理器。
@@ -106,5 +92,8 @@ static app_t s_home_app = {
 };
 
 bool home_app_register(void) {
-    return app_manager_register(&s_home_app);
+    /* Spark owns the product's "home" app. Keep this module compiled because
+     * system settings still use the vendor Home support functions. */
+    (void)s_home_app;
+    return true;
 }

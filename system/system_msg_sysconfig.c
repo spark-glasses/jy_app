@@ -12,13 +12,17 @@
 #include "elf_common.h"
 #include "floatair_dbg.h"
 #include "message.h"
+#include "common/widgets/toast.h"
 #include "system/system.h"
+#include "system/system_runtime_input.h"
 #include "system/system_runtime_state.h"
 #include "system/system_timer.h"
 #include "app_lcd.h"
 #include "common/app_framework/app_manager.h"
 #include "common/app_framework/app_router.h"
+#if defined(APP_NAME_HOME)
 #include "home/home.h"
+#endif
 
 #include <assert.h>
 #include <inttypes.h>
@@ -27,6 +31,7 @@
 #include <string.h>
 #include "sys_adapter.h"
 
+#if defined(APP_NAME_HOME)
 static bool system_home_menu_name_to_id(const char* name, uint32_t* id) {
     if (name == NULL || id == NULL) {
         return false;
@@ -210,6 +215,7 @@ static void system_home_menu_free_names(char** names, size_t count) {
     }
     free(names);
 }
+#endif
 
 static bool system_systemconfig_getall(mpack_node_t node, msg_pack_t* msg) {
     (void) node;
@@ -248,11 +254,12 @@ static bool system_systemconfig_getall(mpack_node_t node, msg_pack_t* msg) {
     uint8_t auto_bl_en  = system_config_get_bl_auto() ? 1 : 0;
     uint8_t font_size   = get_system_font_size();
     uint32_t display_level = system_config_get_displaylevel();
+    system_display_position_t display_position = system_ui_get_display_position();
     size_t homeunits_count = system_config_get_homeunits_count();
     system_head_gesture_config_t head_gesture = {0};
     (void)system_config_get_head_gesture_config(&head_gesture);
 
-    mpack_start_map(&writer->writer, 17);
+    mpack_start_map(&writer->writer, 18);
     mpack_write_cstr(&writer->writer, "time");
     mpack_write_u64(&writer->writer, ts);
 
@@ -326,6 +333,9 @@ static bool system_systemconfig_getall(mpack_node_t node, msg_pack_t* msg) {
     mpack_write_cstr(&writer->writer, "displayDistanceLevel");
     mpack_write_u8(&writer->writer, display_level);
 
+    mpack_write_cstr(&writer->writer, "displayPosition");
+    mpack_write_u32(&writer->writer, (uint32_t)display_position);
+
     mpack_write_cstr(&writer->writer, "keywordSpottingEnabled");
     mpack_write_u8(&writer->writer, kws_en);
 
@@ -389,7 +399,7 @@ static bool system_systemconfig_settimeconfig(mpack_node_t node, msg_pack_t* msg
         return app_mpack_send_ack(msg, ErrBizErr);
     }
 
-    time_t  time_now = time(NULL);
+    time_t time_now = system_ui_time_now(NULL);
     struct tm* ptm = localtime(&time_now);
     if (ptm) {
         floatair_info("time_now %llu %02d:%02d:%02d", (unsigned long long)time_now, ptm->tm_hour, ptm->tm_min, ptm->tm_sec);
@@ -431,10 +441,14 @@ static bool system_systemconfig_setbrightness(mpack_node_t node, msg_pack_t* msg
         return app_mpack_send_ack(msg, ErrBadParam);
     }
     floatair_info("setBrightness %u", (unsigned)brightness);
-    floatair_lcd_set_brightness(brightness);
     if (!system_config_set_brightness(brightness)) {
         floatair_err("save brightness config failed");
         return app_mpack_send_ack(msg, ErrBizErr);
+    }
+    if (!floatair_lcd_is_off()) {
+        floatair_lcd_set_brightness(brightness);
+    } else {
+        floatair_info("manual brightness deferred while lcd off: %u", (unsigned)brightness);
     }
     return app_mpack_send_ack(msg, Dp_ErrNone);
 }
@@ -488,15 +502,18 @@ static bool system_systemconfig_setlanguage(mpack_node_t node, msg_pack_t* msg) 
         floatair_err("set language failed");
         return app_mpack_send_ack(msg, ErrDataErr);
     }
+    toast_refresh_localized();
     if (app_manager_current() != NULL && !app_manager_refresh_current()) {
         floatair_warn("refresh current app failed after language change");
         if (app_manager_current() == NULL) {
             app_router_reset_state();
         }
     }
+    app_router_refresh_status_bar_app_name();
     return app_mpack_send_ack(msg, Dp_ErrNone);
 }
 
+#if defined(APP_NAME_HOME)
 static bool system_systemconfig_gethomeunits(mpack_node_t node, msg_pack_t* msg) {
     (void) node;
     floatair_assert(msg != NULL, "msg is NULL");
@@ -620,6 +637,8 @@ static bool system_systemconfig_sethomemenuconfig(mpack_node_t node, msg_pack_t*
     }
     return app_mpack_send_ack(msg, Dp_ErrNone);
 }
+#endif
+
 
 static bool system_systemconfig_getdisplayconfig(mpack_node_t node, msg_pack_t* msg) {
     (void) node;
@@ -667,6 +686,54 @@ static bool system_systemconfig_setdisplaydistancelevel(mpack_node_t node, msg_p
         return app_mpack_send_ack(msg, ErrDataErr);
     }
     system_ui_refresh_display_distance_level();
+    return app_mpack_send_ack(msg, Dp_ErrNone);
+}
+
+/**
+ * @brief 获取持久化的应用垂直显示位置。
+ * @param[in] node SystemConfig 消息数据节点。
+ * @param[in] msg 原始协议消息。
+ * @return 返回包含 `displayPosition` 的 ACK。
+ */
+static bool system_systemconfig_getdisplayposition(mpack_node_t node, msg_pack_t* msg) {
+    msg_pack_writer_t* writer = NULL;
+
+    (void)node;
+    floatair_assert(msg != NULL, "msg is NULL");
+    writer = app_mpack_create_writer(msg, MSG_TYPE_ACK);
+    floatair_assert(writer != NULL, "writer err");
+    mpack_start_map(&writer->writer, 1);
+    mpack_write_cstr(&writer->writer, "displayPosition");
+    mpack_write_u32(&writer->writer, (uint32_t)system_ui_get_display_position());
+    mpack_finish_map(&writer->writer);
+    return app_mpack_send_writer(writer);
+}
+
+/**
+ * @brief 设置支持搬屏应用的垂直显示位置。
+ * @param[in] node SystemConfig 消息数据节点。
+ * @param[in] msg 原始协议消息。
+ * @return 返回 ACK 发送结果。
+ */
+static bool system_systemconfig_setdisplayposition(mpack_node_t node, msg_pack_t* msg) {
+    uint32_t position = 0;
+
+    floatair_assert(msg != NULL, "msg is NULL");
+    if (!app_msg_get_u32(node, false, "displayPosition", &position)) {
+        floatair_err("displayPosition is NULL");
+        return app_mpack_send_ack(msg, ErrBadParam);
+    }
+
+    if (position < (uint32_t)SYSTEM_DISPLAY_POSITION_TOP ||
+        position > (uint32_t)SYSTEM_DISPLAY_POSITION_BOTTOM) {
+        floatair_err("displayPosition invalid: %" PRIu32, position);
+        return app_mpack_send_ack(msg, ErrBadParam);
+    }
+
+    if (!system_ui_set_display_position((system_display_position_t)position)) {
+        return app_mpack_send_ack(msg, ErrDataErr);
+    }
+
     return app_mpack_send_ack(msg, Dp_ErrNone);
 }
 
@@ -923,6 +990,8 @@ static bool system_systemconfig_setwaredetectionenabled(mpack_node_t node, msg_p
         floatair_err("set wearDetectionEnabled failed");
         return app_mpack_send_ack(msg, ErrDataErr);
     }
+    system_runtime_input_reset_wearing_state();
+    app_sleep_timer_set_wear_removed(false);
     dev_ctl_cmd_t cmd = {
         .dev_type = DEV_WEARING_CTRL,
         .control_code = tmp != 0 ? 1 : 0,
@@ -1094,14 +1163,18 @@ app_cmd_func_t system_systemconfig_cmd_funcs[] = {
     {"setRowSpace", system_systemconfig_setrowspace},
     {"getLanguage", system_systemconfig_getlanguage},
     {"setLanguage", system_systemconfig_setlanguage},
+#if defined(APP_NAME_HOME)
     {"getHomeUnits", system_systemconfig_gethomeunits},
     {"setHomeUnits", system_systemconfig_sethomeunits},
     {"getHomeMenuConfig", system_systemconfig_gethomemenuconfig},
     {"setHomeMenuConfig", system_systemconfig_sethomemenuconfig},
+#endif
     {"getDisplayConfig", system_systemconfig_getdisplayconfig},
     {"setDisplayConfig", system_systemconfig_setdisplayconfig},
     {"getDisplayDistanceLevel", system_systemconfig_getdisplaydistancelevel},
     {"setDisplayDistanceLevel", system_systemconfig_setdisplaydistancelevel},
+    {"getDisplayPosition", system_systemconfig_getdisplayposition},
+    {"setDisplayPosition", system_systemconfig_setdisplayposition},
     {"getDisplayDistance", system_systemconfig_getdisplaydistance},
     {"setDisplayDistance", system_systemconfig_setdisplaydistance},
     {"getDisplayPopupDepth", system_systemconfig_getdisplaypopupdepth},

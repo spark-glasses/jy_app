@@ -10,9 +10,10 @@
 #include <time.h>
 #include "elf_common.h"
 #include "floatair_dbg.h"
+#include "floatair_fs.h"
 #include "message.h"
+#include "app_lcd.h"
 #include "system/system.h"
-#include "system/system_runtime_state.h"
 #include "sys_adapter.h"
 
 #include <assert.h>
@@ -24,15 +25,13 @@ static bool system_systemstatus_getall(mpack_node_t node, msg_pack_t* msg) {
     floatair_assert(msg != NULL, "msg is NULL");
     msg_pack_writer_t* writer = app_mpack_create_writer(msg, MSG_TYPE_ACK);
     floatair_assert(writer, "writer err");
-    mpack_start_map(&writer->writer, 4);
+    mpack_start_map(&writer->writer, 3);
     mpack_write_cstr(&writer->writer, "sysState");
     mpack_write_u8(&writer->writer, system_get_sys_state());
     mpack_write_cstr(&writer->writer, "chargeState");
     mpack_write_u8(&writer->writer, system_get_charge_state());
     mpack_write_cstr(&writer->writer, "battery");
     mpack_write_u8(&writer->writer, system_get_battery());
-    mpack_write_cstr(&writer->writer, "listenState");
-    mpack_write_u8(&writer->writer, (uint8_t)system_runtime_state_get_listen_state());
     mpack_finish_map(&writer->writer);
     return app_mpack_send_writer(writer);
 }
@@ -52,36 +51,20 @@ static bool system_systemstatus_getsysstate(mpack_node_t node, msg_pack_t* msg) 
 static bool system_systemstatus_setsysstate(mpack_node_t node, msg_pack_t* msg) {
     (void) node;
     floatair_assert(msg != NULL, "msg is NULL");
-    uint8_t sys_state = 0;
+    uint8_t sys_state = (uint8_t)LCD_OFF;
     if (!app_msg_get_u8(node, false, "sysState", &sys_state)) {
         floatair_err("sysState is NULL");
         return app_mpack_send_ack(msg, ErrBadParam);
     }
-    floatair_info("sysState %d", sys_state);
+    if (!floatair_lcd_state_is_valid((lcd_state_t)sys_state)) {
+        floatair_err("invalid sysState: %u, expected 0(OFF) or 1(ON)",
+                     (unsigned)sys_state);
+        return app_mpack_send_ack(msg, ErrBadParam);
+    }
+    floatair_info("sysState %u(%s)",
+                  (unsigned)sys_state,
+                  floatair_lcd_state_name((lcd_state_t)sys_state));
     system_set_sys_state(sys_state);
-    return app_mpack_send_ack(msg, Dp_ErrNone);
-}
-
-/**
- * @brief Record the phone's capture session state.
- *
- * The phone sends 1 once glasses audio is flowing and 0 when capture stops.
- * The avatar shows its listening mark only while this is 1, the screen is on,
- * and the link is up.
- */
-static bool system_systemstatus_setlistenstate(mpack_node_t node, msg_pack_t* msg) {
-    floatair_assert(msg != NULL, "msg is NULL");
-    uint8_t listen_state = 0;
-    if (!app_msg_get_u8(node, false, "listenState", &listen_state)) {
-        floatair_err("listenState is NULL");
-        return app_mpack_send_ack(msg, ErrBadParam);
-    }
-    if (listen_state > SYSTEM_LISTEN_STATE_LISTENING) {
-        floatair_err("listenState %u out of range", (unsigned)listen_state);
-        return app_mpack_send_ack(msg, ErrBadParam);
-    }
-    floatair_info("listenState %u", (unsigned)listen_state);
-    system_runtime_state_set_listen_state((system_listen_state_t)listen_state, "phone");
     return app_mpack_send_ack(msg, Dp_ErrNone);
 }
 
@@ -110,17 +93,23 @@ static bool system_systemstatus_getbattery(mpack_node_t node, msg_pack_t* msg) {
 }
 
 static bool system_systemstatus_getromusage(mpack_node_t node, msg_pack_t* msg) {
+    floatair_fs_usage_t usage = {0};
+
     (void) node;
     floatair_assert(msg != NULL, "msg is NULL");
+    if (floatair_fs_get_usage(floatair_fs_get_root_path(), &usage) != FLOATAIR_FS_OK) {
+        floatair_err("get lfsd usage failed");
+        return app_mpack_send_ack(msg, ErrBizErr);
+    }
     msg_pack_writer_t* writer = app_mpack_create_writer(msg, MSG_TYPE_ACK);
     floatair_assert(writer, "writer err");
     mpack_start_map(&writer->writer, 3);
     mpack_write_cstr(&writer->writer, "total");
-    mpack_write_u32(&writer->writer, system_get_rom_total());
+    mpack_write_u32(&writer->writer, usage.total);
     mpack_write_cstr(&writer->writer, "used");
-    mpack_write_u32(&writer->writer, system_get_rom_used());
+    mpack_write_u32(&writer->writer, usage.used);
     mpack_write_cstr(&writer->writer, "remaining");
-    mpack_write_u32(&writer->writer, system_get_rom_remaining());
+    mpack_write_u32(&writer->writer, usage.remaining);
     mpack_finish_map(&writer->writer);
     return app_mpack_send_writer(writer);
 }
@@ -129,7 +118,6 @@ app_cmd_func_t system_systemstatus_cmd_funcs[] = {
     {"getAll", system_systemstatus_getall},
     {"getSysState", system_systemstatus_getsysstate},
     {"setSysState", system_systemstatus_setsysstate},
-    {"setListenState", system_systemstatus_setlistenstate},
     {"getChargeState", system_systemstatus_getchargestate},
     {"getBattery", system_systemstatus_getbattery},
     {"getRomUsage", system_systemstatus_getromusage}};

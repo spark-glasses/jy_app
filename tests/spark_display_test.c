@@ -10,13 +10,12 @@
 static app_t* app;
 static app_message_t* receiver;
 static lv_obj_t* parent;
-static unsigned frames, replies, flushed_pixels;
+static unsigned frames, flushed_pixels;
 static MsgDpErr last_error;
-static char last_revision[21], last_reply[128], last_command[32];
+static char last_revision[21], last_command[32];
 static uint8_t outgoing_type;
 static const char* active_app = "home";
 static uint16_t screen_pixels[540 * 440];
-static bool reply_ready = true;
 static unsigned test_selected;
 static spark_row_layout_t test_layout = SPARK_LAYOUT_REMINDER;
 static bool test_mixed;
@@ -27,18 +26,19 @@ static bool drop_report;
 
 bool app_manager_register(app_t* value) { app = value; return true; }
 const char* app_manager_current_name(void) { return active_app; }
+const char* app_router_get_app(void) { return active_app; }
 int app_msg_register(app_message_t* value) { receiver = value; return 0; }
 int app_msg_delete(uint32_t id) { (void)id; receiver = NULL; return 0; }
 bool app_nav_replace(app_page_t* page, const void* data, size_t size) {
     (void)data; (void)size; page->on_create(parent, NULL); return true;
 }
-void system_ui_request_frame(void) { ++frames; }
-void system_status_bar_set_mode(bool top) { (void)top; }
-bool system_ui_set_reply(const char* text) {
-    if (!reply_ready) return false;
-    ++replies;
-    snprintf(last_reply, sizeof(last_reply), "%s", text);
+bool system_ui_request_screen_refresh(void) {
+    ++frames;
     return true;
+}
+void system_status_bar_set_mode_at(bool visible, status_bar_widget_pos_t pos) {
+    (void)visible;
+    (void)pos;
 }
 const lv_font_t* get_font_by_size_near(uint32_t size) { return size >= 24 ? &lv_font_montserrat_24 : &lv_font_montserrat_18; }
 bool app_mpack_send_ack(msg_pack_t* msg, MsgDpErr error) {
@@ -172,6 +172,8 @@ int main(int argc, char** argv) {
     lv_obj_remove_style_all(parent); lv_obj_set_size(parent, 540, 320); lv_obj_set_pos(parent, 0, 32);
     assert(spark_app_register()); app->on_start();
     lv_obj_t* frame = lv_obj_get_child(parent, 0);
+    lv_obj_t* reply_panel = lv_obj_get_child(parent, 1);
+    lv_obj_t* reply_label = lv_obj_get_child(reply_panel, 0);
     lv_obj_t* content = lv_obj_get_child(frame, 1);
     assert(lv_obj_has_flag(frame, LV_OBJ_FLAG_HIDDEN));
 
@@ -186,17 +188,17 @@ int main(int argc, char** argv) {
     assert(lv_obj_get_child_count(content) == 8);
     assert(lv_obj_get_width(lv_obj_get_child(last_row, 1)) > 200);
     const spark_display_t* previous = spark_display_current();
-    unsigned before = frames, before_replies = replies;
+    unsigned before = frames;
     flushed_pixels = 0;
     send_request("1", 5, true, "Done", 0);
     lv_refr_now(display);
-    assert(frames == before && replies == before_replies && flushed_pixels == 0);
+    assert(frames == before && flushed_pixels == 0);
     assert(spark_display_current() == previous);
 
     send_request("2", -1, true, "New reply", 0);
     lv_refr_now(display);
-    assert(spark_display_current() == previous && frames == before && flushed_pixels == 0);
-    assert(strcmp(last_reply, "New reply") == 0);
+    assert(spark_display_current() == previous && frames == before + 1 && flushed_pixels > 0);
+    assert(strcmp(lv_label_get_text(reply_label), "New reply") == 0);
     lv_obj_send_event(parent, LV_EVENT_GESTURE_LEFT, NULL);
     assert(strcmp(last_command, "selected") == 0 && strcmp(last_revision, "2") == 0);
     assert(spark_display_current()->selected == 1);
@@ -204,7 +206,7 @@ int main(int argc, char** argv) {
         if (invalid == 8) continue;
         send_request("3", 2, true, "Must not apply", invalid);
         assert(last_error == ErrBadParam && spark_display_current() == previous);
-        assert(strcmp(last_reply, "New reply") == 0);
+        assert(strcmp(lv_label_get_text(reply_label), "New reply") == 0);
     }
     test_layout = SPARK_LAYOUT_NOTE;
     send_request("3", 21, true, NULL, 0); assert(last_error == ErrBadParam);
@@ -219,12 +221,8 @@ int main(int argc, char** argv) {
     for (size_t i = 0; i < 4; ++i) {
         send_request(invalid_revisions[i], -1, true, "bad", 0); assert(last_error == ErrBadParam);
     }
-    reply_ready = false;
-    send_request("3", 1, false, "Unavailable", 0);
-    assert(last_error == ErrNotReady && spark_display_current() == previous);
-    reply_ready = true;
     send_request("3", 1, false, NULL, 0);
-    assert(last_error == Dp_ErrNone && strcmp(last_reply, "New reply") == 0);
+    assert(last_error == Dp_ErrNone && strcmp(lv_label_get_text(reply_label), "New reply") == 0);
     lv_refr_now(display);
     save_frame(argc > 1 ? argv[1] : NULL, "item");
     lv_obj_t* lead = lv_obj_get_child(content, 0);

@@ -72,6 +72,7 @@ img_cfg_t img_default_cfg(void) {
     cfg.h = LV_SIZE_CONTENT;
     cfg.offset_x = 0;
     cfg.offset_y = 0;
+    cfg.align = LV_IMAGE_ALIGN_DEFAULT;
     cfg.zoom = LV_SCALE_NONE;
     cfg.rotation = 0;
     cfg.opa = LV_OPA_COVER;
@@ -155,12 +156,23 @@ void img_set_src(img_t* img, const void* src) {
     lv_image_set_src(img->base.obj, src);
 }
 
+/**
+ * @brief 设置组件持有的 L8 图片数据，同尺寸时复用缓冲区。
+ * @param[in] img 图片组件。
+ * @param[in] data L8 像素数据。
+ * @param[in] data_size 像素数据长度。
+ * @param[in] width 图片宽度。
+ * @param[in] height 图片高度。
+ * @return 设置成功返回 `true`；失败时保留当前图片并返回 `false`。
+ */
 bool img_set_l8_data(img_t* img,
                      const void* data,
                      size_t data_size,
                      int32_t width,
                      int32_t height) {
+    uint8_t* new_buf = NULL;
     size_t required_size = 0;
+    bool reuse_owned_buf = false;
 
     if (!img_is_valid(img) || !data || width <= 0 || height <= 0) {
         return false;
@@ -171,15 +183,22 @@ bool img_set_l8_data(img_t* img,
         return false;
     }
 
-    img_release_owned_src(img);
-
-    img->owned_buf = (uint8_t*)lv_malloc(required_size);
-    if (!img->owned_buf) {
-        img_release_owned_src(img);
-        return false;
+    reuse_owned_buf = img->owned_buf != NULL &&
+                      img->owned_dsc.data_size == required_size;
+    if (reuse_owned_buf) {
+        new_buf = img->owned_buf;
+    } else {
+        new_buf = (uint8_t*)lv_malloc(required_size);
+        if (!new_buf) {
+            return false;
+        }
     }
 
-    memcpy(img->owned_buf, data, required_size);
+    memcpy(new_buf, data, required_size);
+    if (!reuse_owned_buf) {
+        img_release_owned_src(img);
+        img->owned_buf = new_buf;
+    }
     memset(&img->owned_dsc, 0, sizeof(img->owned_dsc));
     img->owned_dsc.header.magic = LV_IMAGE_HEADER_MAGIC;
     img->owned_dsc.header.cf = LV_COLOR_FORMAT_L8;
@@ -292,6 +311,7 @@ void img_apply_cfg(img_t* img, const img_cfg_t* cfg) {
     img_set_src(img, cfg->src);
     ui_widget_set_bounds(UI_WIDGET(img), cfg->x, cfg->y, cfg->w, cfg->h);
     img_set_offset(img, cfg->offset_x, cfg->offset_y);
+    lv_image_set_inner_align(img->base.obj, cfg->align);
     img_set_zoom(img, cfg->zoom);
     img_set_rotation(img, cfg->rotation);
     img_set_opacity(img, cfg->opa);

@@ -27,6 +27,7 @@ typedef struct {
     int32_t h;             ///< 组件高度；可传 `LV_SIZE_CONTENT`。
     int32_t offset_x;      ///< 图片内容在组件内的 X 偏移。
     int32_t offset_y;      ///< 图片内容在组件内的 Y 偏移。
+    lv_image_align_t align; ///< 图片内容在组件内的对齐方式。
     uint16_t zoom;         ///< 缩放倍率；`LV_SCALE_NONE` 表示 1 倍。
     int16_t rotation;      ///< 旋转角度，单位 0.1 度。
     uint8_t opa;           ///< 图片透明度，范围 0~255。

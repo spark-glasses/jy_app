@@ -2,6 +2,7 @@
 
 #include "floatair_dbg.h"
 #include "lvgl/lvgl.h"
+#include "lvgl/src/font/lv_binfont_loader.h"
 #include "system/system_res.h"
 #include "system/system_runtime_ui.h"
 
@@ -17,6 +18,10 @@
 #define SPARK_LIST_HEADER_HEIGHT 44
 #define SPARK_LINE_HEIGHT 24
 #define SPARK_CARD_PADDING 8
+#define SPARK_REPLY_MARGIN 8
+#define SPARK_REPLY_MIN_HEIGHT 56
+#define SPARK_REPLY_LINE_SPACE 2
+#define SPARK_REPLY_FONT_PATH "A:/romfs/system/font/open_runde_14.bin"
 
 typedef struct {
     lv_obj_t* root;
@@ -39,6 +44,9 @@ static lv_obj_t* s_content;
 static lv_obj_t* s_lead;
 static lv_obj_t* s_body;
 static lv_obj_t* s_meta;
+static lv_obj_t* s_reply_panel;
+static lv_obj_t* s_reply_label;
+static lv_font_t* s_reply_font;
 static spark_row_t s_rows[SPARK_DISPLAY_VISIBLE_ROWS];
 static bool s_ready;
 static void set_header_height(int32_t height) {
@@ -229,7 +237,7 @@ static void spark_select(size_t next) {
         select_row(&s_rows[next - start], true,
             s_display->rows[next].layout == SPARK_LAYOUT_REMINDER && strcmp(s_display->rows[next].mark, "[x]") == 0);
     }
-    system_ui_request_frame();
+    system_ui_request_screen_refresh();
 }
 
 bool spark_display_is_selected(const char* id) {
@@ -255,7 +263,7 @@ bool spark_display_apply(spark_display_t* display, bool new_display) {
     spark_render(display);
     s_display = display;
     spark_display_free(old);
-    system_ui_request_frame();
+    system_ui_request_screen_refresh();
     return true;
 }
 
@@ -263,13 +271,13 @@ bool spark_display_ready(void) { return s_ready; }
 
 void spark_display_clear(void) {
     spark_display_reset_revision();
-    (void)system_ui_set_reply("");
+    (void)spark_reply_set("");
     spark_render(NULL);
     spark_display_free(s_display);
     s_display = NULL;
     spark_display_free(s_return_list);
     s_return_list = NULL;
-    system_ui_request_frame();
+    system_ui_request_screen_refresh();
 }
 
 static char* copy_text(const char* text) {
@@ -309,9 +317,45 @@ static void spark_prepare_static_obj(lv_obj_t* obj) {
     lv_obj_set_style_bg_opa(obj, LV_OPA_TRANSP, LV_PART_MAIN);
 }
 
+static const lv_font_t* spark_reply_font(void) {
+    if (s_reply_font == NULL) {
+        s_reply_font = lv_binfont_create(SPARK_REPLY_FONT_PATH);
+        if (s_reply_font != NULL) {
+            s_reply_font->fallback = get_font_by_size_near(14);
+        }
+    }
+    return s_reply_font != NULL ? s_reply_font : get_font_by_size_near(14);
+}
+
+static bool spark_reply_scroll(lv_event_code_t code) {
+    if ((code != LV_EVENT_GESTURE_LEFT && code != LV_EVENT_GESTURE_RIGHT) ||
+        s_reply_panel == NULL || s_reply_label == NULL ||
+        lv_obj_has_flag(s_reply_panel, LV_OBJ_FLAG_HIDDEN)) {
+        return false;
+    }
+
+    lv_obj_update_layout(s_reply_panel);
+    lv_coord_t max_scroll = lv_obj_get_scroll_y(s_reply_panel) +
+                            lv_obj_get_scroll_bottom(s_reply_panel);
+    if (max_scroll <= 0) {
+        return false;
+    }
+
+    const lv_font_t* font = lv_obj_get_style_text_font(s_reply_label, LV_PART_MAIN);
+    lv_coord_t line_advance = (lv_coord_t)lv_font_get_line_height(font) +
+                              SPARK_REPLY_LINE_SPACE;
+    lv_coord_t step = LV_MAX(1, lv_obj_get_content_height(s_reply_panel) - line_advance);
+    lv_coord_t next = lv_obj_get_scroll_y(s_reply_panel) +
+                      (code == LV_EVENT_GESTURE_LEFT ? step : -step);
+    lv_obj_scroll_to_y(s_reply_panel, LV_CLAMP(0, next, max_scroll), LV_ANIM_OFF);
+    system_ui_request_screen_refresh();
+    return true;
+}
+
 static void spark_input(lv_event_t* event) {
     if (s_display == NULL || s_display->count == 0) return;
     lv_event_code_t code = lv_event_get_code(event);
+    if (spark_reply_scroll(code)) return;
     if (code == LV_EVENT_GESTURE_LEFT || code == LV_EVENT_GESTURE_RIGHT) {
         if (s_display->is_list) {
             size_t next = s_display->selected;
@@ -322,7 +366,7 @@ static void spark_input(lv_event_t* event) {
         } else {
             int32_t step = lv_obj_get_content_height(s_content) / 2;
             lv_obj_scroll_by(s_content, 0, code == LV_EVENT_GESTURE_LEFT ? -step : step, LV_ANIM_OFF);
-            system_ui_request_frame();
+            system_ui_request_screen_refresh();
         }
     } else if (code == LV_EVENT_CLICKED && s_display->is_list) {
         const char* id = s_display->rows[s_display->selected].id;
@@ -336,7 +380,7 @@ static void spark_input(lv_event_t* event) {
         s_return_list = NULL;
         spark_render(s_display);
         spark_display_free(old);
-        system_ui_request_frame();
+        system_ui_request_screen_refresh();
         spark_display_report("selected", s_display->rows[s_display->selected].id);
     }
 }
@@ -449,6 +493,30 @@ static void spark_page_create(lv_obj_t* parent, const app_page_data_t* data) {
             lv_obj_set_style_text_font(labels[j], get_font_by_size_near(sizes[j]), LV_PART_MAIN);
         }
     }
+
+    s_reply_panel = lv_obj_create(parent);
+    s_reply_label = s_reply_panel != NULL ? lv_label_create(s_reply_panel) : NULL;
+    if (s_reply_panel == NULL || s_reply_label == NULL) return;
+    lv_obj_set_width(s_reply_panel, LV_MAX(1, lv_obj_get_content_width(parent) - SPARK_REPLY_MARGIN * 2));
+    lv_obj_set_height(s_reply_panel, SPARK_REPLY_MIN_HEIGHT);
+    lv_obj_align(s_reply_panel, LV_ALIGN_BOTTOM_MID, 0, -SPARK_REPLY_MARGIN);
+    lv_obj_set_style_bg_color(s_reply_panel, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(s_reply_panel, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_border_color(s_reply_panel, lv_color_white(), LV_PART_MAIN);
+    lv_obj_set_style_border_opa(s_reply_panel, LV_OPA_60, LV_PART_MAIN);
+    lv_obj_set_style_border_width(s_reply_panel, 1, LV_PART_MAIN);
+    lv_obj_set_style_radius(s_reply_panel, 12, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(s_reply_panel, 12, LV_PART_MAIN);
+    lv_obj_set_scroll_dir(s_reply_panel, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(s_reply_panel, LV_SCROLLBAR_MODE_OFF);
+    lv_obj_set_style_text_line_space(s_reply_label, SPARK_REPLY_LINE_SPACE, LV_PART_MAIN);
+    lv_obj_set_width(s_reply_label, LV_PCT(100));
+    lv_obj_set_height(s_reply_label, LV_SIZE_CONTENT);
+    lv_label_set_long_mode(s_reply_label, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_font(s_reply_label, spark_reply_font(), LV_PART_MAIN);
+    lv_label_set_text(s_reply_label, "");
+    lv_obj_add_flag(s_reply_panel, LV_OBJ_FLAG_HIDDEN);
+
     s_ready = true;
     spark_render(s_display);
 }
@@ -456,6 +524,7 @@ static void spark_page_create(lv_obj_t* parent, const app_page_data_t* data) {
 static void spark_page_destroy(void) {
     s_ready = false;
     s_frame = s_header = s_title = s_hint = s_pages = s_content = s_lead = s_body = s_meta = NULL;
+    s_reply_panel = s_reply_label = NULL;
     memset(s_rows, 0, sizeof(s_rows));
 }
 
@@ -468,4 +537,32 @@ static app_page_t s_spark_page = {
 
 app_page_t* spark_page_get(void) {
     return &s_spark_page;
+}
+
+bool spark_reply_set(const char* text) {
+    if (!s_ready || s_reply_panel == NULL || s_reply_label == NULL ||
+        !lv_obj_is_valid(s_reply_panel) || !lv_obj_is_valid(s_reply_label)) {
+        return false;
+    }
+
+    if (text == NULL || text[0] == '\0') {
+        lv_label_set_text(s_reply_label, "");
+        lv_obj_add_flag(s_reply_panel, LV_OBJ_FLAG_HIDDEN);
+        system_ui_request_screen_refresh();
+        return true;
+    }
+
+    lv_label_set_text(s_reply_label, text);
+    lv_obj_remove_flag(s_reply_panel, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_update_layout(s_reply_label);
+    lv_coord_t max_height = LV_MAX(SPARK_REPLY_MIN_HEIGHT,
+                                   lv_obj_get_content_height(lv_obj_get_parent(s_reply_panel)) -
+                                       SPARK_REPLY_MARGIN * 2);
+    lv_coord_t content_height = lv_obj_get_height(s_reply_label) + 24;
+    lv_obj_set_height(s_reply_panel,
+                      LV_CLAMP(SPARK_REPLY_MIN_HEIGHT, content_height, max_height));
+    lv_obj_scroll_to_y(s_reply_panel, 0, LV_ANIM_OFF);
+    lv_obj_move_foreground(s_reply_panel);
+    system_ui_request_screen_refresh();
+    return true;
 }

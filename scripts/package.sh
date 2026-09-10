@@ -80,6 +80,7 @@ pack_burn_files() {
         "build/nuttx_lfsc.bin"
         "build/nuttx_lfsd.bin"
         "build/nuttx_romfs.bin"
+        "build/nuttx_lromfs.bin"
         "burn_plan.ini"
     )
     local file
@@ -98,7 +99,7 @@ pack_burn_files() {
     (
         cd build
         "$seven_zip_exe" a -t7z "$archive_name" \
-            nuttx_lfsc.bin nuttx_lfsd.bin nuttx_romfs.bin
+            nuttx_lfsc.bin nuttx_lfsd.bin nuttx_romfs.bin nuttx_lromfs.bin
     )
     "$seven_zip_exe" a -t7z "$burn_package_archive" burn_plan.ini
 }
@@ -160,6 +161,19 @@ if [[ -z "$product_name" ]]; then
 fi
 
 echo "product_name: $product_name"
+
+left_romfs_source="left_romfs"
+if [[ -d "products/$product_name/left_romfs" ]]; then
+    left_romfs_source="products/$product_name/left_romfs"
+fi
+echo "left_romfs_source: $left_romfs_source"
+
+for kws_file in kws_firmware.bin kws_model.bin; do
+    if [[ ! -f "$left_romfs_source/kws/$kws_file" ]]; then
+        echo "缺少左耳 KWS 文件: $left_romfs_source/kws/$kws_file"
+        exit 1
+    fi
+done
 
 if [[ -z "$os_sdk_archive" && $prompted_product -eq 1 ]]; then
     select_os_sdk_archive

@@ -108,6 +108,16 @@ if errorlevel 1 (
 
 echo [INFO] Using Python: "%PYTHON_EXE%"
 echo [INFO] Selected product: "%PRODUCT_NAME%"
+set "LEFT_ROMFS_SOURCE=left_romfs"
+if exist "products\%PRODUCT_NAME%\left_romfs\" set "LEFT_ROMFS_SOURCE=products\%PRODUCT_NAME%\left_romfs"
+echo [INFO] Selected left ROMFS: "!LEFT_ROMFS_SOURCE!"
+for %%F in (kws_firmware.bin kws_model.bin) do (
+    if not exist "!LEFT_ROMFS_SOURCE!\kws\%%F" (
+        echo [ERROR] Missing left KWS file: !LEFT_ROMFS_SOURCE!\kws\%%F
+        pause
+        exit /b 1
+    )
+)
 if defined OS_SDK_ARCHIVE echo [INFO] Using OS SDK archive: "!OS_SDK_ARCHIVE!"
 if not defined OS_SDK_ARCHIVE echo [INFO] Using newest OS SDK cache.
 
@@ -183,6 +193,7 @@ for %%F in (
     "%BUILD_DIR%\nuttx_lfsc.bin"
     "%BUILD_DIR%\nuttx_lfsd.bin"
     "%BUILD_DIR%\nuttx_romfs.bin"
+    "%BUILD_DIR%\nuttx_lromfs.bin"
     "burn_plan.ini"
 ) do (
     if not exist "%%~F" (
@@ -194,7 +205,7 @@ for %%F in (
 if exist "%BURN_PACKAGE_ARCHIVE%" del /q "%BURN_PACKAGE_ARCHIVE%"
 echo [INFO] Packing burn files to "%BURN_PACKAGE_ARCHIVE%"...
 pushd "%BUILD_DIR%"
-"%SEVEN_ZIP_EXE%" a -t7z "%CD%\H6_APP_%VERSION_INFO%.7z" "nuttx_lfsc.bin" "nuttx_lfsd.bin" "nuttx_romfs.bin"
+"%SEVEN_ZIP_EXE%" a -t7z "%CD%\H6_APP_%VERSION_INFO%.7z" "nuttx_lfsc.bin" "nuttx_lfsd.bin" "nuttx_romfs.bin" "nuttx_lromfs.bin"
 if errorlevel 1 (
     popd
     exit /b 1

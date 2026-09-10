@@ -430,6 +430,10 @@ static bool system_file_write_file(mpack_node_t node, msg_pack_t* msg) {
     }
 
     if (cur == 1) {
+        if (floatair_fs_mkdirs(dir) != FLOATAIR_FS_OK) {
+            floatair_err("create parent dir %s failed", dir);
+            return app_mpack_send_ack(msg, ErrBadFilePath);
+        }
         if (floatair_fs_is_exist(full_path)) {
             floatair_dbg("remove %s", full_path);
             floatair_fs_remove(full_path);

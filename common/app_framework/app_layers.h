@@ -35,6 +35,14 @@ bool app_layers_init(lv_obj_t* screen_root, int32_t width, int32_t height);
 void app_layers_resize(int32_t width, int32_t height);
 
 /**
+ * @brief 分别设置应用页面层与应用内容浮层的纵向偏移。
+ * @param[in] app_offset_y 应用页面层相对默认位置的纵向偏移，负值表示上移。
+ * @param[in] app_float_offset_y 应用内容浮层相对默认位置的纵向偏移，负值表示上移。
+ * @return `true` 表示任一偏移发生变化，`false` 表示均保持不变。
+ */
+bool app_layers_set_vertical_offsets(int32_t app_offset_y, int32_t app_float_offset_y);
+
+/**
  * @brief 获取背景层。
  * @return 返回背景层对象；未初始化时返回 `NULL`。
  */

@@ -11,17 +11,17 @@
 #include "system/system.h"
 
 #include "common/app_framework/app_manager.h"
-#include "app_def.h"
+#include "system/popups/assistant/assistant.h"
 #include "app_lcd.h"
 #include "system/popups/notify_list/notify_list.h"
 #include "system/system_runtime_ui.h"
 #include "system/popups/notify/notify.h"
 #include "common/widgets/msgbox.h"
+#include "ui_res.h"
 
 #include <string.h>
 
-static bool s_wearing_state_known = false; ///< 是否已收到过佩戴状态事件
-static bool s_wearing_state_worn = true;   ///< 最近一次佩戴状态，默认不屏蔽触控
+static bool s_wearing_state_known = false; ///< 是否已通过戴上事件建立可信佩戴状态。
 
 /**
  * @brief 获取系统亮灭屏状态变化事件 ID。
@@ -37,7 +37,7 @@ uint32_t system_runtime_input_get_sys_state_event(void) {
 }
 
 /**
- * @brief 判断当前触控板输入是否应被配置或佩戴状态屏蔽。
+ * @brief 判断当前触控板输入是否应被配置屏蔽。
  * @param[in] event 当前触控事件值。
  * @param[in] source 事件来源描述。
  * @return `true` 表示应忽略该事件，`false` 表示可继续处理。
@@ -48,25 +48,72 @@ static bool system_touch_input_blocked(uint8_t event, const char* source) {
         return true;
     }
 
-    if (system_config_get_wear_detection_enabled() && s_wearing_state_known && !s_wearing_state_worn) {
-        floatair_info("not worn, ignore %s event %u", source, (unsigned)event);
-        return true;
-    }
-
     return false;
 }
 
 /**
- * @brief 更新当前佩戴状态，用于在未佩戴时屏蔽触控板输入。
+ * @brief 判断灭屏状态下是否应拦截触控输入。
+ * @param[in] event 当前触控事件值。
+ * @param[in] source 事件来源描述。
+ * @param[in] double_click_wakes `true` 表示当前事件是可亮屏的双击事件。
+ * @param[in] trigger 双击亮屏时使用的状态变化来源。
+ * @return `true` 表示已拦截，`false` 表示可继续分发。
+ */
+static bool system_touch_lcd_off_blocked(uint8_t event,
+                                         const char* source,
+                                         bool double_click_wakes,
+                                         const char* trigger) {
+    if (floatair_lcd_get_state() != LCD_OFF) {
+        return false;
+    }
+
+    if (double_click_wakes) {
+        floatair_info("lcd off, wake by %s double-click event %u", source, (unsigned)event);
+        system_set_sys_state(LCD_ON);
+        system_report_sys_state(LCD_ON, trigger);
+        return true;
+    }
+
+    floatair_info("lcd off, ignore %s touch event %u", source, (unsigned)event);
+    return true;
+}
+
+static void system_touch_toggle_screen(const char* source, const char* trigger) {
+    lcd_state_t next_state = floatair_lcd_get_state() == LCD_OFF ? LCD_ON : LCD_OFF;
+
+    floatair_info("%s long press: screen state -> %u(%s)",
+                  source,
+                  (unsigned)next_state,
+                  floatair_lcd_state_name(next_state));
+    system_set_sys_state(next_state);
+    (void)system_report_sys_state(next_state, trigger);
+}
+
+/**
+ * @brief 按可信状态规则更新当前佩戴状态。
  * @param[in] worn `true` 表示已佩戴，`false` 表示未佩戴。
+ * @return `true` 表示本次状态可信并已生效，`false` 表示未确认前的摘下事件已忽略。
+ */
+bool system_runtime_input_update_wearing_state(bool worn) {
+    if (!worn && !s_wearing_state_known) {
+        floatair_warn("ignore unconfirmed initial wear removed event");
+        return false;
+    }
+
+    s_wearing_state_known = true;
+    floatair_info("wearing state accepted: known=%d worn=%d",
+                  (int)s_wearing_state_known,
+                  (int)worn);
+    return true;
+}
+
+/**
+ * @brief 重置佩戴可信状态，恢复为默认已佩戴但未确认。
  * @return 无返回值。
  */
-void system_runtime_input_set_wearing_state(bool worn) {
-    s_wearing_state_known = true;
-    s_wearing_state_worn = worn;
-    floatair_info("wearing state for touch input: known=%d worn=%d",
-                  (int)s_wearing_state_known,
-                  (int)s_wearing_state_worn);
+void system_runtime_input_reset_wearing_state(void) {
+    s_wearing_state_known = false;
+    floatair_info("wearing state reset: known=0");
 }
 
 /**
@@ -75,6 +122,16 @@ void system_runtime_input_set_wearing_state(bool worn) {
  * @return `true` 表示事件已被 popup 层消费，`false` 表示应继续分发给 app 层。
  */
 static bool system_try_intercept_popup_event(lv_event_code_t code) {
+    msgbox_event_result_t msgbox_result = msgbox_handle_active_event(code);
+
+    if (msgbox_result != MSGBOX_EVENT_IGNORED) {
+        if (msgbox_result == MSGBOX_EVENT_CONSUMED_REPORT &&
+            (code == LV_EVENT_CLICKED || code == LV_EVENT_DCLICKED)) {
+            (void)system_report_touch_event(code);
+        }
+        floatair_info("msgbox popup intercepted event %d", code);
+        return true;
+    }
     if (notify_handle_active_event(code)) {
         floatair_info("notify popup intercepted event %d", code);
         return true;
@@ -83,11 +140,10 @@ static bool system_try_intercept_popup_event(lv_event_code_t code) {
         floatair_info("notify_list popup intercepted event %d", code);
         return true;
     }
-    if (msgbox_handle_active_event(code)) {
-        floatair_info("msgbox popup intercepted event %d", code);
+    if (assistant_handle_event(code)) {
+        floatair_info("assistant popup intercepted event %d", code);
         return true;
     }
-
     return false;
 }
 
@@ -180,7 +236,7 @@ static bool system_runtime_input_try_top_event(lv_event_code_t code) {
 }
 
 /**
- * @brief Send the event to the current app.
+ * @brief 向普通 app 层当前页面根对象发送 LVGL 事件。
  * @param[in] raw_event 原始系统事件值，仅用于日志。
  * @param[in] code 待发送的 LVGL 事件码。
  * @return `true` 表示发送成功，`false` 表示当前页不可用。
@@ -190,10 +246,6 @@ static bool system_runtime_input_send_event_to_app(uint32_t raw_event, lv_event_
     lv_obj_t* obj = NULL;
 
     if (current_app != NULL && current_app->use_top_layer) {
-        return true;
-    }
-
-    if (system_ui_scroll_reply(code)) {
         return true;
     }
 
@@ -207,9 +259,20 @@ static bool system_runtime_input_send_event_to_app(uint32_t raw_event, lv_event_
     return true;
 }
 
+/**
+ * @brief 向当前 App 页面发送系统亮灭屏状态变化事件。
+ * @param[in] state 当前系统亮灭屏状态，`0` 表示灭屏，`1` 表示亮屏。
+ * @return `true` 表示发送成功，`false` 表示当前页面不可用。
+ */
 bool system_runtime_input_notify_sys_state(uint8_t state) {
     app_t* current_app = app_manager_current();
     lv_obj_t* obj = NULL;
+
+    if (!floatair_lcd_state_is_valid((lcd_state_t)state)) {
+        floatair_err("reject invalid screen state notification: %u, expected 0(OFF) or 1(ON)",
+                     (unsigned)state);
+        return false;
+    }
 
     if (current_app != NULL && current_app->use_top_layer) {
         return true;
@@ -220,30 +283,12 @@ bool system_runtime_input_notify_sys_state(uint8_t state) {
         return false;
     }
 
-    floatair_info("send sys state %u to app %p", (unsigned)state, obj);
+    floatair_info("send screen state %u(%s) to app %p",
+                  (unsigned)state,
+                  floatair_lcd_state_name((lcd_state_t)state),
+                  obj);
     (void)lv_obj_send_event(obj, system_runtime_input_get_sys_state_event(), &state);
     return true;
-}
-
-/** Toggle the screen through the runtime state reducer. */
-static void system_runtime_input_toggle_screen(const char* source) {
-    uint8_t next_state = system_get_sys_state() ? 0 : 1;
-
-    floatair_info("%s long-press: screen state -> %u", source, (unsigned)next_state);
-    system_set_sys_state(next_state);
-}
-
-/** Consume long presses before page input, and ignore other input while off. */
-static bool system_touch_handle_screen(uint8_t event, const char* source, bool long_press) {
-    if (long_press) {
-        system_runtime_input_toggle_screen(source);
-        return true;
-    }
-    if (system_get_sys_state() == 0) {
-        floatair_info("lcd off, ignore %s touch event %u", source, (unsigned)event);
-        return true;
-    }
-    return false;
 }
 
 /**
@@ -254,7 +299,14 @@ static bool system_touch_handle_screen(uint8_t event, const char* source, bool l
 bool system_touch_event(uint8_t event) {
     lv_event_code_t code = system_runtime_touch_event_to_lvgl(event);
 
-    if (system_touch_handle_screen(event, "remote", event == SYSTEM_TOUCH_EVENT_LONG_PRESSED)) {
+    if (event == SYSTEM_TOUCH_EVENT_LONG_PRESSED) {
+        system_touch_toggle_screen("remote", "remoteLongPress");
+        return true;
+    }
+    if (system_touch_lcd_off_blocked(event,
+                                     "remote",
+                                     false,
+                                     SYSTEM_SYS_STATE_TRIGGER_REMOTE_DOUBLE_CLICK)) {
         return true;
     }
 
@@ -289,7 +341,28 @@ bool system_touch_event_convert(uint8_t event) {
         return true;
     }
 
-    if (system_touch_handle_screen(event, "force", event == SET_FORCE_LONG_PRESSED)) {
+    if (event == SET_FORCE_LONG_PRESSED) {
+        system_touch_toggle_screen("force", "forceLongPress");
+        return true;
+    }
+
+    switch (event) {
+        case SET_FORCE_SINGLE_CLICK:
+            if (play_wav(UI_RES_AUDIO_CLICK_SINGLE) != 0) {
+                floatair_err("request single-click wav failed");
+            }
+            break;
+        case SET_FORCE_DOUBLE_CLICK:
+            if (play_wav(UI_RES_AUDIO_CLICK_DOUBLE) != 0) {
+                floatair_err("request double-click wav failed");
+            }
+            break;
+        default:
+            break;
+    }
+
+    if (floatair_lcd_get_state() == LCD_OFF) {
+        floatair_info("lcd off, ignore force event %u", (unsigned)event);
         return true;
     }
 
@@ -344,12 +417,18 @@ bool system_imu_event_convert_to_touch(uint8_t event) {
  * @return `true` 表示事件已处理，`false` 表示处理失败。
  */
 bool system_update_imu_tilt(JYT_ELF_MQ_MSG* msg) {
-    uint8_t next_state = 0;
+    lcd_state_t next_state = LCD_OFF;
+    const char* trigger = NULL;
     system_head_gesture_config_t config = {0};
 
     if (msg == NULL) {
         floatair_err("msg is NULL");
         return false;
+    }
+
+    if (!system_config_is_userguide_finished()) {
+        floatair_info("userguide unfinished, ignore imu_tilt %d", msg->Header.simple_data);
+        return true;
     }
 
     if (!system_config_get_head_gesture_config(&config) ||
@@ -367,7 +446,8 @@ bool system_update_imu_tilt(JYT_ELF_MQ_MSG* msg) {
                     "head up gesture disabled, ignore imu_tilt %d", msg->Header.simple_data);
                 return true;
             }
-            next_state = 1;
+            next_state = LCD_ON;
+            trigger = SYSTEM_SYS_STATE_TRIGGER_IMU_HEAD_UP;
             break;
         case TILT_DIRECTION_DOWN:
             if (!config.down_enabled) {
@@ -375,7 +455,8 @@ bool system_update_imu_tilt(JYT_ELF_MQ_MSG* msg) {
                     "head down gesture disabled, ignore imu_tilt %d", msg->Header.simple_data);
                 return true;
             }
-            next_state = 0;
+            next_state = LCD_OFF;
+            trigger = SYSTEM_SYS_STATE_TRIGGER_IMU_HEAD_DOWN;
             break;
         default:
             floatair_err("imu tilt %d not support", msg->Header.simple_data);
@@ -383,13 +464,16 @@ bool system_update_imu_tilt(JYT_ELF_MQ_MSG* msg) {
     }
 
     if (system_get_sys_state() == next_state) {
-        floatair_info("imu tilt keep lcd state: %u", (unsigned)next_state);
-        if (next_state != 0) {
+        floatair_info("imu tilt keep lcd state: %u(%s)",
+                      (unsigned)next_state,
+                      floatair_lcd_state_name(next_state));
+        if (next_state == LCD_ON) {
             app_sleep_timer_reset();
         }
         return true;
     }
 
     system_set_sys_state(next_state);
+    system_report_sys_state(next_state, trigger);
     return true;
 }

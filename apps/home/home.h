@@ -25,7 +25,7 @@ typedef struct app_page_t app_page_t;
 #include "system/system.h"
 #include "i18n.h"
 
-extern bool simple_guide;
+
 extern int32_t idle_img_center_h;
 extern int32_t idle_img_center_w;
 extern int32_t idle_img_left_h;
@@ -38,21 +38,26 @@ extern const app_home_unit_t g_home_units_arr[];
 extern const size_t g_home_units_count;
 
 /**
+ * @brief 按系统配置生成当前应显示的 Home 单元列表。
+ * @param[out] out_units 返回动态分配的单元数组，调用方负责使用 `free` 释放。
+ * @param[out] out_count 返回有效单元数量。
+ * @return 配置中至少存在一个受支持单元且成功生成时返回 `true`；调用方应在失败时回退静态数组。
+ */
+bool home_units_build_from_config(app_home_unit_t** out_units, size_t* out_count);
+
+/**
+ * @brief 按产品清单声明激活指定 Home 单元。
+ * @param[in] unit 待激活的 Home 单元。
+ * @return 动作执行成功返回 `true`，否则返回 `false`。
+ */
+bool home_unit_activate(const app_home_unit_t* unit);
+
+/**
  * @brief 注册 Home 到新 App framework。
  * @return `true` 表示注册成功，`false` 表示注册失败。
  */
 bool home_app_register(void);
 
-/**
- * @brief Get simple guide switch
- * @return true enabled; false disabled
- */
-bool home_get_simple_guide(void);
-/**
- * @brief Set simple guide switch
- * @param[in] guide switch value
- */
-void home_set_simple_guide(bool guide);
 /**
  * @brief Get play audio switch
  * @return true enabled; false disabled
@@ -75,6 +80,13 @@ const app_page_t* home_page_get(void);
  * @return `true` 表示支持，`false` 表示不支持。
  */
 bool home_is_supported_app(const char* app_name);
+
+/**
+ * @brief 获取指定 App 在 Home 中使用的国际化展示名称。
+ * @param[in] app_name App 协议名称。
+ * @return 返回当前语言展示名称；App 不在 Home 列表中时返回 `NULL`。
+ */
+const char* home_get_app_display_name(const char* app_name);
 
 /**
  * @brief Show home icons view

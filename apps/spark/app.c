@@ -120,7 +120,7 @@ static bool spark_message(mpack_node_t data, msg_pack_t* msg) {
         return app_mpack_send_ack(msg, ErrNotReady);
     }
     // The UI loop owns both updates; validation completes before either becomes visible.
-    bool applied = !has_reply || system_ui_set_reply(text);
+    bool applied = !has_reply || spark_reply_set(text);
     if (applied && has_page && !stale_navigation)
         applied = spark_display_apply(next, new_display || display_id[0] == '\0');
     if (!applied || stale_navigation) spark_display_free(next);
@@ -163,7 +163,7 @@ static void spark_app_on_stop(void) {
 static void spark_app_on_start(void) {
     int result = app_msg_register(&s_spark_message);
     floatair_assert(result == 0, "Spark message registration failed");
-    system_status_bar_set_mode(true);
+    system_status_bar_set_mode_at(true, STATUS_BAR_POS_TOP);
     if (!app_nav_replace(spark_page_get(), NULL, 0)) {
         floatair_assert(false, "Spark page replace failed");
     }

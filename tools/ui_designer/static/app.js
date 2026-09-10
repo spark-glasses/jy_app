@@ -8,6 +8,7 @@ const ROLLER_DEFAULT_BORDER_WIDTH = 2;
 const ROLLER_DEFAULT_NORMAL_OPA = 178;
 const ROLLER_DEFAULT_SELECTED_OPA = 255;
 const ROLLER_DEFAULT_SELECTED_PAD_VER = 2;
+const ROLLER_DEFAULT_HINT_GAP = 48;
 const OVERLAY_DEFAULT_MAX_ITEMS = 16;
 const OVERLAY_DEFAULT_POINT_SIZE = 6;
 const OVERLAY_DEFAULT_POINT_OPA = 255;
@@ -718,6 +719,21 @@ function renderRollerContent(el, node) {
     row.append(createTextContent(text, cfg));
     el.append(row);
   });
+  if (node.show_hint === true) {
+    const hint = document.createElement("div");
+    const hintGap = node.hint_gap === undefined ? ROLLER_DEFAULT_HINT_GAP : Math.max(0, Number(node.hint_gap) || 0);
+    const cfg = {
+      ...labelCfg,
+      text: localeStrings().ROLLER_OPERATION_HINT || "滑动切换 | 单击选择",
+      align: "center",
+      opa: node.opa_selected ?? ROLLER_DEFAULT_SELECTED_OPA,
+    };
+    hint.className = "rollerHint";
+    hint.style.marginTop = `${hintGap - rowGap}px`;
+    applyLabelStyle(hint, cfg);
+    hint.append(createTextContent(cfg.text, cfg));
+    el.append(hint);
+  }
 }
 
 function rollerRowMetrics(node, labelCfg) {
@@ -1365,6 +1381,16 @@ function appendRollerGroups(node) {
     ...propInput("行高", node.row_height, (v) => setOptionalObjectNumber(node, "row_height", v), "number"),
     ...propInput("行距", node.row_gap, (v) => setOptionalObjectNumber(node, "row_gap", v), "number"),
     ...propInput("选中上下留白", node.selected_pad_ver, (v) => setOptionalObjectNumber(node, "selected_pad_ver", v), "number"),
+    ...propSelect("底部操作提示", node.show_hint === true ? "true" : "false", [
+      { label: "关闭（默认）", value: "false" },
+      { label: "开启", value: "true" },
+    ], (v) => {
+      if (v === "true") node.show_hint = true;
+      else delete node.show_hint;
+      markDirty();
+      renderAll();
+    }),
+    ...propInput("提示间距", node.hint_gap, (v) => setOptionalObjectNumber(node, "hint_gap", v), "number"),
     ...propSelect("溢出", node.overflow_mode || "", [
       { label: "", value: "" },
       { label: "循环滚动", value: "scroll" },

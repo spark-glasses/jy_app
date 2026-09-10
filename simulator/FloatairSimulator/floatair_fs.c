@@ -56,8 +56,9 @@ static int fs_stat_path(const char* path, floatair_stat_t* st_out)
 #define SYSTEM_ROOT_PATH "/jyt_d"
 #define LVGL_SYSTEM_IMAGES_PATH "/romfs/system/images/"
 #define LVGL_SYSTEM_FONT_FILE   "/romfs/system/font/font.ttf" ///< 系统常规文字字体文件。
-#define LVGL_SYSTEM_I18N_PATH   "/jyt_d/system/i18n"
+#define LVGL_SYSTEM_I18N_PATH   "/romfs/system/i18n"
 #define SYSTEM_CONFIG_FILE "/jyt_d/system/config.json"
+#define SIMULATOR_LFSD_CAPACITY_BYTES (6U * 1024U * 1024U) ///< 模拟器中 LFSD 分区的模拟总容量。
 
 static void to_host_path(const char* in, char* out, size_t outsz)
 {
@@ -224,6 +225,20 @@ int floatair_fs_tell(void* handle, uint32_t* pos) {
     return FLOATAIR_FS_OK;
 }
 
+/**
+ * @brief 刷新模拟器文件流缓冲区。
+ * @param[in] handle 已打开的文件句柄。
+ * @return `FLOATAIR_FS_OK` 表示刷新完成，其他值表示刷新失败。
+ */
+int floatair_fs_sync(void* handle) {
+    if (!handle) return FLOATAIR_FS_ERR_PARAM;
+    fa_file_t* h = (fa_file_t*)handle;
+    if (fflush(h->fp) != 0) {
+        return FLOATAIR_FS_ERR_IO;
+    }
+    return FLOATAIR_FS_OK;
+}
+
 int floatair_fs_close(void* handle) {
     if (!handle) return FLOATAIR_FS_ERR_PARAM;
     fa_file_t* h = (fa_file_t*)handle;
@@ -272,7 +287,8 @@ int floatair_fs_mkdirs(const char* path_in) {
     for (i = 0; i < len; ++i) {
         tmp[i] = path[i];
         if (tmp[i] == '/') {
-            if (i > 0) {
+            /* Windows 盘符根目录已经存在，不能作为普通目录重复创建。 */
+            if (i > 0 && !(i == 2 && path[1] == ':')) {
                 if (simulator_platform_mkdir_one(tmp) != 0) {
                     return FLOATAIR_FS_ERR_IO;
                 }
@@ -312,6 +328,67 @@ bool floatair_fs_is_exist(const char* path_in) {
     char path[SYSTEM_MAX_PATH_LEN] = {0};
     to_host_path(path_in, path, sizeof(path));
     return simulator_platform_path_exists(path) == 0;
+}
+
+/**
+ * @brief 递归统计模拟器目录中的文件逻辑大小。
+ * @param[in] path 待统计目录的虚拟路径。
+ * @param[out] size 已累计的文件大小。
+ * @return `FLOATAIR_FS_OK` 表示成功，其他值表示目录读取失败。
+ */
+static int fs_accumulate_file_size(const char* path, uint64_t* size) {
+    floatair_dir_t* dir = NULL;
+    char name[SYSTEM_MAX_PATH_LEN] = {0};
+    bool is_dir = false;
+    int result = floatair_fs_dir_open(path, &dir);
+
+    if (result != FLOATAIR_FS_OK) {
+        return result;
+    }
+    while ((result = floatair_fs_dir_read(dir, name, sizeof(name), &is_dir)) == FLOATAIR_FS_OK) {
+        const char* child_name = name[0] == '/' ? name + 1 : name;
+        char child_path[SYSTEM_MAX_PATH_LEN] = {0};
+        floatair_stat_t st = {0};
+        int path_length = snprintf(child_path, sizeof(child_path), "%s/%s", path, child_name);
+
+        if (path_length < 0 || (size_t)path_length >= sizeof(child_path) ||
+            floatair_fs_stat(child_path, &st) != FLOATAIR_FS_OK) {
+            result = FLOATAIR_FS_ERR_IO;
+            break;
+        }
+        if (st.is_dir) {
+            result = fs_accumulate_file_size(child_path, size);
+            if (result != FLOATAIR_FS_OK) {
+                break;
+            }
+        } else {
+            *size += st.size;
+        }
+    }
+    if (result > FLOATAIR_FS_OK) {
+        result = FLOATAIR_FS_OK;
+    }
+    if (floatair_fs_dir_close(dir) != FLOATAIR_FS_OK && result == FLOATAIR_FS_OK) {
+        result = FLOATAIR_FS_ERR_IO;
+    }
+    return result;
+}
+
+int floatair_fs_get_usage(const char* path, floatair_fs_usage_t* usage) {
+    uint64_t used = 0;
+    int result = FLOATAIR_FS_OK;
+
+    if (path == NULL || usage == NULL) {
+        return FLOATAIR_FS_ERR_PARAM;
+    }
+    result = fs_accumulate_file_size(path, &used);
+    if (result != FLOATAIR_FS_OK || used > SIMULATOR_LFSD_CAPACITY_BYTES) {
+        return result != FLOATAIR_FS_OK ? result : FLOATAIR_FS_ERR_IO;
+    }
+    usage->total = SIMULATOR_LFSD_CAPACITY_BYTES;
+    usage->used = (uint32_t)used;
+    usage->remaining = usage->total - usage->used;
+    return FLOATAIR_FS_OK;
 }
 
 int floatair_fs_dir_open(const char* path_in, floatair_dir_t** out_dir) {
@@ -375,7 +452,7 @@ int floatair_fs_dir_read(floatair_dir_t* dir, char* namebuf, uint32_t buflen, bo
         return FLOATAIR_FS_OK;
     }
 
-    return FLOATAIR_FS_ERR_NOENT;
+    return 1;
 }
 
 int floatair_fs_dir_close(floatair_dir_t* dir) {

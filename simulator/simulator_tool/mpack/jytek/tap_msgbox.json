@@ -1,0 +1,40 @@
+[
+    {
+        "biz": "TapMsgbox",
+        "cmd": "showTapMsgbox",
+        "data": {
+            "title": "是否退出语音转写?",
+            "hint": "双击取消 | 单击退出"
+        },
+        "id": 0,
+        "name": "显示单击双击提示框",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "TapMsgbox",
+        "cmd": "showDownloadProgress",
+        "data": {
+            "title": "正在下载语言包",
+            "progress": 66
+        },
+        "id": 0,
+        "name": "更新下载进度",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "TapMsgbox",
+        "cmd": "closeDownloadProgress",
+        "data": {},
+        "id": 0,
+        "name": "关闭下载进度",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "TapMsgbox",
+        "cmd": "closeTapMsgbox",
+        "data": {},
+        "id": 0,
+        "name": "关闭单击双击提示框",
+        "type": "DATA_RELIABLE"
+    }
+]

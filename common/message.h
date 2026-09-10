@@ -13,25 +13,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "product_app_generated.h"
+
 #define APP_MSG_ID_SYSTEM (0)
-
-// Private base for application message IDs; IDs start from this value. 1-1000 are reserved.
-#define APP_MSG_ID_HOME         (1)
-#define APP_MSG_ID_TRANSCRIBE   (2)
-#define APP_MSG_ID_TRANSLATE    (3)
-#define APP_MSG_ID_NAVIGATION   (4)
-#define APP_MSG_ID_PROMPTER     (5)
-#define APP_MSG_ID_MUSIC        (6)
-#define APP_MSG_ID_GALLERY      (7)
-#define APP_MSG_ID_AI           (8)
-#define APP_MSG_ID_READER       (9)
-#define APP_MSG_ID_OTA          (10)
-#define APP_MSG_ID_POWEROFF     (11)
-#define APP_MSG_ID_POWERON      (12)
-#define APP_MSG_ID_GUIDE        (13)
-#define APP_MSG_ID_LANGSELECTION (14)
-
-#define APP_MSG_ID_IMAGEFUSION (1001)
 
 #define MSG_BIZ_MAX_LEN (32)
 #define MSG_CMD_MAX_LEN (32)
@@ -164,12 +148,12 @@ app_message_t* app_msg_query(uint32_t msg_id);
  */
 void app_msg_dump_summary(const char* msg, size_t msg_size, const char* tag);
 /**
- * @brief Dump a MsgPack buffer for debugging
- * @param[in] msg buffer pointer
- * @param[in] msg_size buffer size
- * @param[in] tag tag string
+ * @brief 紧凑分段输出 MsgPack 可读字段，二进制字段仅输出类型和长度
+ * @param[in] msg MsgPack 原始数据
+ * @param[in] msg_size 原始数据字节数
+ * @param[in] tag 日志标签
  */
-void app_msg_dump(char* msg, size_t msg_size, const char* tag);
+void app_msg_dump(const char* msg, size_t msg_size, const char* tag);
 /**
  * @brief Parse payload map to msg_pack_t fields
  * @param[in] node payload root node
@@ -203,6 +187,17 @@ bool app_emerg_msg_handle(char* msg, size_t msg_size);
  * @return true on success
  */
 bool app_system_msg_handle_payload(JYT_ELF_MQ_MSG* msg);
+/**
+ * @brief 亮屏后显示灭屏期间延迟的系统 Toast 消息。
+ * @return 无返回值。
+ */
+void app_message_flush_pending_after_screen_on(void);
+
+/**
+ * @brief 清空 ANCS UID 通知元数据、应用名称与第三方来电临时缓存。
+ * @return 无返回值。
+ */
+void app_message_reset_ancs_state(void);
 
 /**
  * @brief Create a msg_pack_t object

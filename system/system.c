@@ -10,6 +10,7 @@
 #include "system/system.h"
 #include "common/app_framework/app_router.h"
 #include "system/system_config_json.h"
+#include "system/system_runtime_input.h"
 #include "system/system_runtime_ui.h"
 #include "system/system_timer.h"
 #include "app_lcd.h"
@@ -19,50 +20,20 @@
 #include <inttypes.h>
 #include <string.h>
 
+static bool s_wear_removed = false; ///< 当前是否处于摘下状态，摘下期间任何消息都不重置无交互定时器。
+
 /** jy_app 应用版本号，默认由 CMake 根据 git describe 与产品名注入。 */
 #ifndef JY_APP_VERSION_STRING
 #define JY_APP_VERSION_STRING "unknown"
 #endif
 
-typedef struct {
-    const char* name;
-    system_factoryreset_handler_t handler;
-} system_factoryreset_entry_t;
-
-static system_factoryreset_entry_t g_factoryreset_handlers[16] = {0};
-static size_t g_factoryreset_handler_count = 0;
-
-bool system_factoryreset_register(const char* name, system_factoryreset_handler_t handler) {
-    if (name == NULL || name[0] == '\0' || handler == NULL) {
-        return false;
-    }
-    for (size_t i = 0; i < g_factoryreset_handler_count; i++) {
-        if (g_factoryreset_handlers[i].name != NULL &&
-            strcmp(g_factoryreset_handlers[i].name, name) == 0) {
-            g_factoryreset_handlers[i].handler = handler;
-            return true;
-        }
-    }
-    if (g_factoryreset_handler_count >= (sizeof(g_factoryreset_handlers) / sizeof(g_factoryreset_handlers[0]))) {
-        return false;
-    }
-    g_factoryreset_handlers[g_factoryreset_handler_count++] = (system_factoryreset_entry_t){
-        .name = name,
-        .handler = handler,
-    };
-    return true;
-}
-
-void system_factoryreset_invoke(void) {
-    for (size_t i = 0; i < g_factoryreset_handler_count; i++) {
-        if (g_factoryreset_handlers[i].handler == NULL) {
-            continue;
-        }
-        if (!g_factoryreset_handlers[i].handler()) {
-            floatair_err("factoryreset handler failed: %s",
-                         g_factoryreset_handlers[i].name ? g_factoryreset_handlers[i].name : "");
-        }
-    }
+/**
+ * @brief 关闭屏幕并请求 OS 执行恢复出厂流程。
+ * @return 请求成功发出返回 `true`，否则返回 `false`。
+ */
+bool system_factoryreset_execute(void) {
+    floatair_lcd_set_state(LCD_OFF);
+    return system_request_factory_reset();
 }
 
 /**
@@ -90,7 +61,9 @@ void system_init(void) {
     ret     = app_msg_register(&system_msg);
     floatair_assert(ret == 0, "app_msg_register failed");
     system_timer_init();
+    s_wear_removed = false;
     app_sleep_timer_init();
+    system_runtime_input_reset_wearing_state();
     app_router_reset_state();
     system_sync_config_to_device();
     system_request_device_state();
@@ -147,20 +120,57 @@ bool system_is_image_file(const char *name) {
  * @return 无返回值。
  */
 void app_sleep_timer_reset(void) {
+    if (floatair_lcd_is_off()) {
+        system_timer_sleep_deinit();
+        floatair_dbg("------- app sleep_timer_reset skipped: lcd off");
+        return;
+    }
+    if (s_wear_removed) {
+        floatair_dbg("------- app sleep_timer_reset skipped: wear removed");
+        return;
+    }
+/*
     if (!system_config_get_idle_detection_enabled()) {
         system_timer_sleep_deinit();
         floatair_dbg("------- app sleep_timer_reset skipped: idle detection disabled");
         return;
     }
-
-    if (system_config_get_inactivity_timeout() == 0) {
+*/
+    uint16_t inactivity_timeout = system_config_get_inactivity_timeout();
+    if (inactivity_timeout == 0) {
         system_timer_sleep_deinit();
         floatair_dbg("------- app sleep_timer_reset skipped: inactivity_timeout=0");
         return;
     }
 
-    system_timer_sleep_reset();
-    floatair_dbg("------- app sleep_timer_reset");
+    if (system_timer_sleep_reset()) {
+        floatair_dbg("------- app sleep_timer_reset");
+        return;
+    }
+
+    uint32_t sleep_ms = (uint32_t)inactivity_timeout * 1000u;
+    if (!system_timer_sleep_start(sleep_ms)) {
+        floatair_err("app sleep timer recreate failed: timeout=%" PRIu32 " ms", sleep_ms);
+        return;
+    }
+    floatair_dbg("------- app sleep timer recreated [%" PRIu32 "]", sleep_ms);
+}
+
+/**
+ * @brief 更新佩戴状态并按配置的无交互超时时间重新起算。
+ * @param[in] removed `true` 表示摘下，`false` 表示已佩戴。
+ * @return 无返回值。
+ */
+void app_sleep_timer_set_wear_removed(bool removed) {
+    if (removed == s_wear_removed) {
+        floatair_dbg("wear state unchanged: removed=%d", (int)removed);
+        return;
+    }
+
+    s_wear_removed = removed;
+    system_timer_sleep_deinit();
+    app_sleep_timer_init();
+    floatair_info("wear state changed, inactivity timer restarted: removed=%d", (int)removed);
 }
 
 /**
@@ -168,12 +178,18 @@ void app_sleep_timer_reset(void) {
  * @return 无返回值。
  */
 void app_sleep_timer_init(void) {
+    if (floatair_lcd_is_off()) {
+        system_timer_sleep_deinit();
+        floatair_dbg("------- app sleep disabled while lcd off");
+        return;
+    }
+/*
     if (!system_config_get_idle_detection_enabled()) {
         system_timer_sleep_deinit();
         floatair_dbg("------- app sleep disabled");
         return;
     }
-
+*/
     uint16_t inactivity_timeout = system_config_get_inactivity_timeout();
     if (inactivity_timeout == 0) {
         system_timer_sleep_deinit();
@@ -183,8 +199,8 @@ void app_sleep_timer_init(void) {
 
     uint32_t sleep_ms = (uint32_t)inactivity_timeout * 1000u;
     floatair_dbg("------- app sleep in [%" PRIu32 "]", sleep_ms);
-    bool ok = system_timer_sleep_init(sleep_ms);
-    floatair_assert(ok, "system_timer_sleep_init failed");
+    bool ok = system_timer_sleep_start(sleep_ms);
+    floatair_assert(ok, "system_timer_sleep_start failed");
 }
 
 /**
@@ -270,36 +286,50 @@ void system_dump_jyt_section(void) {
  * @return `1` 表示亮屏，`0` 表示灭屏。
  */
 uint8_t system_get_sys_state(void) {
-    return system_runtime_state_get_display_on() ? 1 : 0;
+    lcd_state_t lcd_state = floatair_lcd_get_state();
+    uint8_t state = (uint8_t)lcd_state;
+
+    floatair_info("get screen state: %u(%s)",
+                  (unsigned)state,
+                  floatair_lcd_state_name(lcd_state));
+    return state;
 }
 
 /**
  * @brief 设置当前系统亮屏状态。
- *
- * The phone owns microphone capture and stops it on the screen-off report, so
- * no local mic control happens here.
- * @param[in] state 目标系统状态，`0` 表示灭屏，其余值表示亮屏。
+ * @param[in] state 目标系统状态，`0` 表示灭屏，`1` 表示亮屏。
  * @return 无返回值。
  */
 void system_set_sys_state(uint8_t state) {
-    system_runtime_state_set_display_on(state != 0, "sys_state");
-}
+    lcd_state_t next_state = (lcd_state_t)state;
+    lcd_state_t previous_state = floatair_lcd_get_state();
 
-/**
- * @brief 获取设备总存储容量。
- * @return 返回总容量，单位为字节。
- */
-uint32_t system_get_rom_total(void) { return 1024u * 1024u * 512u; }
-/**
- * @brief 获取设备已用存储容量。
- * @return 返回已用容量，单位为字节。
- */
-uint32_t system_get_rom_used(void) { return 1024u * 1024u * 128u; }
-/**
- * @brief 获取设备剩余存储容量。
- * @return 返回剩余容量，单位为字节。
- */
-uint32_t system_get_rom_remaining(void) { return system_get_rom_total() - system_get_rom_used(); }
+    if (!floatair_lcd_state_is_valid(next_state)) {
+        floatair_err("reject invalid screen state: %u, expected 0(OFF) or 1(ON)",
+                     (unsigned)state);
+        return;
+    }
+
+    floatair_info("set screen state: %u(%s)",
+                  (unsigned)next_state,
+                  floatair_lcd_state_name(next_state));
+    if (next_state == LCD_OFF) {
+        system_timer_sleep_deinit();
+        floatair_lcd_set_state(LCD_OFF);
+    } else {
+        floatair_lcd_set_state(LCD_ON);
+        if (previous_state == LCD_OFF) {
+            app_sleep_timer_init();
+        } else {
+            app_sleep_timer_reset();
+        }
+        system_ui_flush_pending_after_screen_on();
+    }
+
+    if (previous_state != next_state) {
+        (void)system_runtime_input_notify_sys_state((uint8_t)next_state);
+    }
+}
 
 /**
  * @brief 获取产品序列号字符串。

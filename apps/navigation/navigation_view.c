@@ -22,6 +22,12 @@
 #include "common/widgets/status_bar.h"
 #include "ui_res.h"
 
+#define NAVIGATION_METRICS_BOTTOM_OFFSET (INFO_FRAME_HEIGHT + LVGL_UI_MARGIN_20)
+#define NAVIGATION_SPO_FRAME_OFFSET_X (-115)
+#define NAVIGATION_HEART_FRAME_OFFSET_X (0)
+#define NAVIGATION_SPEED_FRAME_OFFSET_X (110)
+#define NAVIGATION_INFO_FONT_SIZE (20)
+
 static lv_obj_t* navigation_init_label = NULL;
 static lv_obj_t* navigation_init_img = NULL;
 static lv_obj_t* navigation_init_cont = NULL;
@@ -53,7 +59,7 @@ static bool navigation_drive_icon_valid(void) {
 }
 
 static bool navigation_drive_icon_ensure(void) {
-    lv_obj_t* status_bar = system_get_status_bar(STATUS_BAR_POS_TOP);
+    lv_obj_t* status_bar = system_get_status_bar(STATUS_BAR_POS_BOTTOM);
 
     if (status_bar == NULL || !lv_obj_is_valid(status_bar)) {
         s_img_drive = NULL;
@@ -68,6 +74,13 @@ static bool navigation_drive_icon_ensure(void) {
     return navigation_drive_icon_valid();
 }
 
+static void navigation_dir_icon_clear(void) {
+    if (s_img_dir == NULL) {
+        return;
+    }
+    lv_obj_add_flag(s_img_dir, LV_OBJ_FLAG_HIDDEN);
+}
+
 static void navigation_view_set_init_visible(bool visible) {
     if (visible) {
         if (navigation_init_cont) lv_obj_remove_flag(navigation_init_cont, LV_OBJ_FLAG_HIDDEN);
@@ -78,6 +91,29 @@ static void navigation_view_set_init_visible(bool visible) {
 
 static void navigation_view_enter_map_mode(void) {
     navigation_view_set_init_visible(false);
+}
+
+static void navigation_speed_set_text(const char* speed) {
+    const char* unit = NULL;
+
+    if (s_lbl_speed == NULL) {
+        return;
+    }
+    if (speed == NULL || speed[0] == '\0') {
+        lv_label_set_text(s_lbl_speed, "");
+        return;
+    }
+
+    unit = strchr(speed, ' ');
+    if (unit != NULL && unit != speed && unit[1] != '\0') {
+        lv_label_set_text_fmt(s_lbl_speed,
+                              "%.*s\n%s",
+                              (int)(unit - speed),
+                              speed,
+                              unit + 1);
+    } else {
+        lv_label_set_text(s_lbl_speed, speed);
+    }
 }
 
 static void touch_event_handle(lv_event_t* e) {
@@ -118,37 +154,46 @@ static void navigation_page_create(lv_obj_t* root, const app_page_data_t* data) 
     lv_label_set_text(navigation_init_label, app_get_str("OPEN_IDLE_NAVI"));
 
     const lv_font_t* font_sys = get_system_font();
+    const lv_font_t* font_info = get_font_by_size_near(NAVIGATION_INFO_FONT_SIZE);
+    if (font_info == NULL) {
+        font_info = font_sys;
+    }
 
     s_info_frame = lv_obj_create(root);
     lv_obj_remove_style_all(s_info_frame);
-    lv_obj_set_size(s_info_frame, LV_PCT(100), INFO_FRAME_HEIGHT);
+    /*
+     * 导航信息实际按 INFO_FRAME_WIDTH 排布，固定宽度后整体居中；
+     * 避免在 540px 页面中从 x=0 起排导致视觉偏左。
+     */
+    lv_obj_set_size(s_info_frame, INFO_FRAME_WIDTH, INFO_FRAME_HEIGHT);
     lv_obj_align(s_info_frame, LV_ALIGN_BOTTOM_MID, 0, 0);
     lv_obj_add_flag(s_info_frame, LV_OBJ_FLAG_HIDDEN);
 
     s_img_dir = lv_image_create(s_info_frame);
     lv_obj_set_size(s_img_dir, IMG_DIR_SIZE, IMG_DIR_SIZE);
     lv_obj_align(s_img_dir, LV_ALIGN_LEFT_MID, 0, 0);
+    lv_obj_add_flag(s_img_dir, LV_OBJ_FLAG_HIDDEN);
 
     s_lbl_distance_left = lv_label_create(s_info_frame);
-    obj_set_text_font(s_lbl_distance_left, font_sys);
+    obj_set_text_font(s_lbl_distance_left, font_info);
     lv_obj_set_style_text_color(s_lbl_distance_left, lv_color_white(), 0);
     lv_obj_set_width(s_lbl_distance_left, 120);
     lv_label_set_long_mode(s_lbl_distance_left, LV_LABEL_LONG_SCROLL_CIRCULAR);
     lv_obj_align(s_lbl_distance_left, LV_ALIGN_TOP_LEFT, IMG_DIR_SIZE + 6, 0);
 
     s_lbl_mile_left = lv_label_create(s_info_frame);
-    obj_set_text_font(s_lbl_mile_left, font_sys);
+    obj_set_text_font(s_lbl_mile_left, font_info);
     lv_obj_set_style_text_color(s_lbl_mile_left, lv_color_white(), 0);
-    lv_obj_set_width(s_lbl_mile_left, 120);
+    lv_obj_set_width(s_lbl_mile_left, 100);
     lv_label_set_long_mode(s_lbl_mile_left, LV_LABEL_LONG_SCROLL_CIRCULAR);
-    lv_obj_align(s_lbl_mile_left, LV_ALIGN_TOP_LEFT, IMG_DIR_SIZE + 140, 0);
+    lv_obj_align(s_lbl_mile_left, LV_ALIGN_TOP_LEFT, IMG_DIR_SIZE + 130, 0);
 
     s_lbl_min_left = lv_label_create(s_info_frame);
-    obj_set_text_font(s_lbl_min_left, font_sys);
+    obj_set_text_font(s_lbl_min_left, font_info);
     lv_obj_set_style_text_color(s_lbl_min_left, lv_color_white(), 0);
-    lv_obj_set_width(s_lbl_min_left, 120);
+    lv_obj_set_width(s_lbl_min_left, INFO_FRAME_WIDTH - (IMG_DIR_SIZE + 240));
     lv_label_set_long_mode(s_lbl_min_left, LV_LABEL_LONG_SCROLL_CIRCULAR);
-    lv_obj_align(s_lbl_min_left, LV_ALIGN_TOP_LEFT, IMG_DIR_SIZE + 280, 0);
+    lv_obj_align(s_lbl_min_left, LV_ALIGN_TOP_LEFT, IMG_DIR_SIZE + 240, 0);
 
     s_lbl_road_name = lv_label_create(s_info_frame);
     obj_set_text_font(s_lbl_road_name, font_sys);
@@ -163,7 +208,10 @@ static void navigation_page_create(lv_obj_t* root, const app_page_data_t* data) 
     s_speed_frame = lv_obj_create(root);
     lv_obj_remove_style_all(s_speed_frame);
     lv_obj_set_size(s_speed_frame, 80, 80);
-    lv_obj_align(s_speed_frame, LV_ALIGN_BOTTOM_MID, 160, -INFO_FRAME_HEIGHT - LVGL_UI_MARGIN_20);
+    lv_obj_align(s_speed_frame,
+                 LV_ALIGN_BOTTOM_MID,
+                 NAVIGATION_SPEED_FRAME_OFFSET_X,
+                 -NAVIGATION_METRICS_BOTTOM_OFFSET);
     lv_obj_add_flag(s_speed_frame, LV_OBJ_FLAG_HIDDEN);
 
     s_speed_arc = lv_arc_create(s_speed_frame);
@@ -191,12 +239,16 @@ static void navigation_page_create(lv_obj_t* root, const app_page_data_t* data) 
     lv_obj_set_style_text_color(s_lbl_speed, lv_color_white(), 0);
     lv_obj_set_style_text_align(s_lbl_speed, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_width(s_lbl_speed, 70);
+    lv_label_set_long_mode(s_lbl_speed, LV_LABEL_LONG_WRAP);
     lv_obj_align(s_lbl_speed, LV_ALIGN_CENTER, 0, 0);
 
     s_heart_frame = lv_obj_create(root);
     lv_obj_remove_style_all(s_heart_frame);
     lv_obj_set_size(s_heart_frame, 120, 80);
-    lv_obj_align(s_heart_frame, LV_ALIGN_BOTTOM_MID, 50, -INFO_FRAME_HEIGHT - LVGL_UI_MARGIN_20);
+    lv_obj_align(s_heart_frame,
+                 LV_ALIGN_BOTTOM_MID,
+                 NAVIGATION_HEART_FRAME_OFFSET_X,
+                 -NAVIGATION_METRICS_BOTTOM_OFFSET);
     lv_obj_set_flex_flow(s_heart_frame, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(s_heart_frame, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_all(s_heart_frame, 0, LV_PART_MAIN);
@@ -215,7 +267,10 @@ static void navigation_page_create(lv_obj_t* root, const app_page_data_t* data) 
     s_spo_frame = lv_obj_create(root);
     lv_obj_remove_style_all(s_spo_frame);
     lv_obj_set_size(s_spo_frame, 100, 80);
-    lv_obj_align(s_spo_frame, LV_ALIGN_BOTTOM_MID, 0, -INFO_FRAME_HEIGHT - LVGL_UI_MARGIN_20);
+    lv_obj_align(s_spo_frame,
+                 LV_ALIGN_BOTTOM_MID,
+                 NAVIGATION_SPO_FRAME_OFFSET_X,
+                 -NAVIGATION_METRICS_BOTTOM_OFFSET);
     lv_obj_set_flex_flow(s_spo_frame, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(s_spo_frame, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_all(s_spo_frame, 0, LV_PART_MAIN);
@@ -242,7 +297,7 @@ static void navigation_page_appear(lv_obj_t* root) {
 }
 
 static void navigation_page_destroy(void) {
-    lv_obj_t* status_bar = system_get_status_bar(STATUS_BAR_POS_TOP);
+    lv_obj_t* status_bar = system_get_status_bar(STATUS_BAR_POS_BOTTOM);
 
     if (s_dir_icon_dsc) {
         if (s_dir_icon_buf) {
@@ -298,6 +353,15 @@ void navigation_map_clear(void) {
     if (s_spo_frame) lv_obj_add_flag(s_spo_frame, LV_OBJ_FLAG_HIDDEN);
     if (navigation_drive_icon_valid()) lv_obj_add_flag(s_img_drive, LV_OBJ_FLAG_HIDDEN);
 
+    navigation_dir_icon_clear();
+    if (s_lbl_distance_left) lv_label_set_text(s_lbl_distance_left, "");
+    if (s_lbl_mile_left) lv_label_set_text(s_lbl_mile_left, "");
+    if (s_lbl_min_left) lv_label_set_text(s_lbl_min_left, "");
+    if (s_lbl_road_name) lv_label_set_text(s_lbl_road_name, "");
+    if (s_lbl_speed) lv_label_set_text(s_lbl_speed, "");
+    if (s_lbl_heart) lv_label_set_text(s_lbl_heart, "");
+    if (s_lbl_spo) lv_label_set_text(s_lbl_spo, "");
+
     navigation_view_set_init_visible(true);
 }
 
@@ -309,21 +373,18 @@ void navigation_map_update_info(int navMode,
                                 const char* speed) {
     navigation_view_enter_map_mode();
     if (s_info_frame) lv_obj_remove_flag(s_info_frame, LV_OBJ_FLAG_HIDDEN);
-    if (nextRoadName && s_lbl_road_name) {
-        lv_label_set_text(s_lbl_road_name, nextRoadName);
+    if (s_lbl_road_name) lv_label_set_text(s_lbl_road_name, nextRoadName ? nextRoadName : "");
+    if (s_lbl_distance_left) {
+        lv_label_set_text(s_lbl_distance_left, curStepRetainDistance ? curStepRetainDistance : "");
     }
-    if (curStepRetainDistance && s_lbl_distance_left) {
-        lv_label_set_text(s_lbl_distance_left, curStepRetainDistance);
-    }
-    if (remainDistance && s_lbl_mile_left) {
-        lv_label_set_text(s_lbl_mile_left, remainDistance);
-    }
-    if (remainTime && s_lbl_min_left) {
-        lv_label_set_text(s_lbl_min_left, remainTime);
-    }
+    if (s_lbl_mile_left) lv_label_set_text(s_lbl_mile_left, remainDistance ? remainDistance : "");
+    if (s_lbl_min_left) lv_label_set_text(s_lbl_min_left, remainTime ? remainTime : "");
     if (speed && strlen(speed) > 0) {
         if (s_speed_frame) lv_obj_remove_flag(s_speed_frame, LV_OBJ_FLAG_HIDDEN);
-        if (s_lbl_speed) lv_label_set_text(s_lbl_speed, speed);
+        navigation_speed_set_text(speed);
+    } else {
+        if (s_speed_frame) lv_obj_add_flag(s_speed_frame, LV_OBJ_FLAG_HIDDEN);
+        navigation_speed_set_text("");
     }
     if (navigation_drive_icon_ensure()) {
         lv_obj_remove_flag(s_img_drive, LV_OBJ_FLAG_HIDDEN);
@@ -341,26 +402,37 @@ void navigation_map_update_info(int navMode,
     }
 }
 
-void navigation_map_update_bpm(const char* bmp) {
-    navigation_view_enter_map_mode();
-    if (s_heart_frame) lv_obj_remove_flag(s_heart_frame, LV_OBJ_FLAG_HIDDEN);
-    if (s_lbl_heart) lv_label_set_text(s_lbl_heart, bmp ? bmp : "");
+void navigation_map_update_bpm(const char* bpm) {
+    if (bpm && bpm[0] != '\0') {
+        navigation_view_enter_map_mode();
+        if (s_heart_frame) lv_obj_remove_flag(s_heart_frame, LV_OBJ_FLAG_HIDDEN);
+        if (s_lbl_heart) lv_label_set_text(s_lbl_heart, bpm);
+    } else {
+        if (s_heart_frame) lv_obj_add_flag(s_heart_frame, LV_OBJ_FLAG_HIDDEN);
+        if (s_lbl_heart) lv_label_set_text(s_lbl_heart, "");
+    }
 }
 
 void navigation_map_update_spo(const char* spo) {
-    navigation_view_enter_map_mode();
-    if (s_spo_frame) lv_obj_remove_flag(s_spo_frame, LV_OBJ_FLAG_HIDDEN);
-    if (s_lbl_spo) lv_label_set_text(s_lbl_spo, spo ? spo : "");
+    if (spo && spo[0] != '\0') {
+        navigation_view_enter_map_mode();
+        if (s_spo_frame) lv_obj_remove_flag(s_spo_frame, LV_OBJ_FLAG_HIDDEN);
+        if (s_lbl_spo) lv_label_set_text(s_lbl_spo, spo);
+    } else {
+        if (s_spo_frame) lv_obj_add_flag(s_spo_frame, LV_OBJ_FLAG_HIDDEN);
+        if (s_lbl_spo) lv_label_set_text(s_lbl_spo, "");
+    }
 }
 
 void navigation_map_update_dir_icon_bin(const uint8_t* data, size_t size) {
-    if (!data || size == 0 || !s_img_dir) return;
-    navigation_view_enter_map_mode();
     size_t expect = (size_t) IMG_DIR_SIZE * (size_t) IMG_DIR_SIZE;
+    if (!s_img_dir) return;
+    if (!data || size == 0) return;
     if (size != expect) {
         floatair_err("icon bin size unexpected: %u (expect %u)", (unsigned) size, (unsigned) expect);
         return;
     }
+    navigation_view_enter_map_mode();
     if (!s_dir_icon_dsc) {
         s_dir_icon_dsc = (lv_image_dsc_t*) malloc(sizeof(lv_image_dsc_t));
         floatair_assert(s_dir_icon_dsc, "malloc dir icon dsc failed");
@@ -387,4 +459,5 @@ void navigation_map_update_dir_icon_bin(const uint8_t* data, size_t size) {
     } else {
         lv_obj_invalidate(s_img_dir);
     }
+    lv_obj_remove_flag(s_img_dir, LV_OBJ_FLAG_HIDDEN);
 }

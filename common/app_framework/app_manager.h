@@ -225,12 +225,15 @@ const char* app_manager_current_name(void);
 lv_obj_t* app_manager_current_content_root(void);
 
 /**
- * @brief 同步当前 App 栈顶页面承载层尺寸。
+ * @brief 同步当前 App 栈顶页面承载层尺寸与纵向偏移。
  * @param[in] width 页面宽度。
  * @param[in] height 页面高度。
+ * @param[in] offset_y 页面相对父层的纵向偏移。
  * @return 无返回值。
  */
-void app_manager_sync_current_view_layout(int32_t width, int32_t height);
+void app_manager_sync_current_view_layout(int32_t width,
+                                          int32_t height,
+                                          int32_t offset_y);
 
 /**
  * @brief 判断 App 框架是否正在执行切换。

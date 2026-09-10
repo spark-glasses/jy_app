@@ -1,0 +1,65 @@
+[
+    {
+        "biz": "SystemControl",
+        "cmd": "setView",
+        "data": {
+            "viewName": "navigation"
+        },
+        "id": 0,
+        "name": "进入",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemControl",
+        "cmd": "setView",
+        "data": {
+            "viewName": "home"
+        },
+        "id": 0,
+        "name": "退出",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "navigation",
+        "cmd": "clearView",
+        "data": {},
+        "id": 4,
+        "name": "清空界面",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "navigation",
+        "cmd": "updateNav",
+        "data": {
+            "curStepRetainDistance": "100m",
+            "navMode": 1,
+            "nextRoadName": "Road",
+            "remainDistance": "1.2km",
+            "remainTime": "8min",
+            "speed": "20km/h"
+        },
+        "id": 4,
+        "name": "更新导航信息",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "navigation",
+        "cmd": "updateBpm",
+        "data": {
+            "bpm": "80"
+        },
+        "id": 4,
+        "name": "更新心率",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "navigation",
+        "cmd": "updateSpo",
+        "data": {
+            "spo": "98"
+        },
+        "id": 4,
+        "name": "更新血氧",
+        "type": "DATA_RELIABLE"
+    }
+]

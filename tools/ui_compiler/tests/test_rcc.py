@@ -69,6 +69,32 @@ class RccTests(unittest.TestCase):
         self.assertNotIn("extern", text)
         self.assertIn('#define UI_RES_IMAGE_AIRPODS "/romfs/system/images/airpods.jpg"', text)
 
+    def test_generates_audio_resource_header(self):
+        tmp_path = self.temp_dir()
+        res_path = tmp_path / "ui.res.json"
+        out_dir = tmp_path / "generated"
+        res_path.write_text(
+            json.dumps(
+                {
+                    "name": "ui",
+                    "audio": {
+                        "click_single": {
+                            "path": "/romfs/system/audio/click_single.wav",
+                        }
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        header_path = rcc.compile_resource_file(res_path, out_dir)
+
+        text = header_path.read_text(encoding="utf-8")
+        self.assertIn(
+            '#define UI_RES_AUDIO_CLICK_SINGLE "/romfs/system/audio/click_single.wav"',
+            text,
+        )
+
     def test_rejects_missing_name(self):
         tmp_path = self.temp_dir()
         res_path = tmp_path / "broken.res.json"

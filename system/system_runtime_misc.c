@@ -93,6 +93,7 @@ bool system_host_message_allowed_when_lcd_off(const msg_pack_t* msg) {
         strcmp(msg->biz, "DeviceInfo") == 0 ||
         strcmp(msg->biz, "Notification") == 0 ||
         strcmp(msg->biz, "Toast") == 0 ||
+        strcmp(msg->biz, "TapMsgbox") == 0 ||
         strcmp(msg->biz, "File") == 0 ||
         strcmp(msg->biz, "SystemInd") == 0) {
         return true;
@@ -107,6 +108,9 @@ bool system_host_message_allowed_when_lcd_off(const msg_pack_t* msg) {
         return strncmp(msg->cmd, "get", 3) == 0 ||
                strcmp(msg->cmd, "setTimeConfig") == 0;
     }
+    if (strcmp(msg->biz, "DeviceConnection") == 0) {
+        return strcmp(msg->cmd, "setAppConfig") == 0;
+    }
 
     return false;
 }
@@ -119,10 +123,14 @@ bool system_host_message_allowed_when_lcd_off(const msg_pack_t* msg) {
 static bool system_runtime_misc_notify_list_msg_allowed(const msg_pack_t* msg) {
     static const char* const notification_cmds[] = {
         "addNotification",
+        "updateNotification",
         "removeNotification",
     };
 
     return system_runtime_misc_system_control_allowed(msg, NULL, 0) ||
+           (msg != NULL &&
+            msg->id == APP_MSG_ID_SYSTEM &&
+            strcmp(msg->biz, "TapMsgbox") == 0) ||
            (msg != NULL &&
             msg->id == APP_MSG_ID_SYSTEM &&
             strcmp(msg->biz, "Notification") == 0 &&

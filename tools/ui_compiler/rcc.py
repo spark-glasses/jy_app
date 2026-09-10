@@ -55,6 +55,11 @@ def compile_resource_file(input_path: str | Path, output_dir: str | Path) -> Pat
         images = {}
     if not isinstance(images, dict):
         raise ValueError("$.images must be an object")
+    audio = data.get("audio", {})
+    if audio is None:
+        audio = {}
+    if not isinstance(audio, dict):
+        raise ValueError("$.audio must be an object")
 
     output_dir.mkdir(parents=True, exist_ok=True)
     guard = f"{_macro_part(name, '$.name')}_RES_H"
@@ -83,6 +88,16 @@ def compile_resource_file(input_path: str | Path, output_dir: str | Path) -> Pat
             symbol = _identifier(_require_str(image, "symbol", image_path), f"{image_path}.symbol")
             lines.append(f"extern {c_type} {symbol};")
             lines.append(f"#define {macro_name} (&{symbol})")
+        lines.append("")
+
+    for audio_id in sorted(audio):
+        audio_path = f"$.audio.{audio_id}"
+        audio_item = audio[audio_id]
+        if not isinstance(audio_item, dict):
+            raise ValueError(f"{audio_path} must be an object")
+        path = _require_str(audio_item, "path", audio_path)
+        macro_name = f"{macro_prefix}_RES_AUDIO_{_macro_part(audio_id, audio_path)}"
+        lines.append(f"#define {macro_name} {_c_string(path)}")
         lines.append("")
 
     lines.append(f"#endif /* {guard} */")

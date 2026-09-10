@@ -49,7 +49,8 @@ typedef struct {
  * @brief 获取默认 Toast 配置。
  *
  * 推荐先调用本函数拿一份默认值，再按需修改少数字段后传给
- * `toast_show_with_cfg()`。
+ * `toast_show_with_cfg()`。默认文本会在屏幕安全宽度内自动折行，
+ * Toast 高度随文本行数自适应。
  *
  * @return 返回填充好默认值的 Toast 配置结构体。
  */
@@ -91,6 +92,8 @@ toast_t* toast_show_with_level(const char* text, uint8_t level);
  * @return 创建成功返回 Toast 句柄，失败或被高等级 Toast 拦截时返回 `NULL`。
  */
 toast_t* toast_show_with_cfg(const char* text, const toast_cfg_t* cfg);
+toast_t* toast_show_localized(const char* key, const toast_cfg_t* cfg);
+void toast_refresh_localized(void);
 
 /**
  * @brief 按业务标识关闭当前活动 Toast。

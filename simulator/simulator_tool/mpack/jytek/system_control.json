@@ -1,0 +1,273 @@
+[
+    {
+        "biz": "SystemControl",
+        "cmd": "getView",
+        "data": {
+        },
+        "id": 0,
+        "name": "获取当前app",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemControl",
+        "cmd": "factoryReset",
+        "data": {
+        },
+        "id": 0,
+        "name": "恢复出厂设置",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemControl",
+        "cmd": "sendTouchEvent",
+        "data": {
+            "event": 1
+        },
+        "id": 0,
+        "name": "单击",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemControl",
+        "cmd": "sendTouchEvent",
+        "data": {
+            "event": 2
+        },
+        "id": 0,
+        "name": "双击",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemControl",
+        "cmd": "sendTouchEvent",
+        "data": {
+            "event": 3
+        },
+        "id": 0,
+        "name": "长按",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemControl",
+        "cmd": "sendTouchEvent",
+        "data": {
+            "event": 4
+        },
+        "id": 0,
+        "name": "上滑",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemControl",
+        "cmd": "sendTouchEvent",
+        "data": {
+            "event": 5
+        },
+        "id": 0,
+        "name": "下滑",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemControl",
+        "cmd": "sendTouchEvent",
+        "data": {
+            "event": 6
+        },
+        "id": 0,
+        "name": "左滑",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemControl",
+        "cmd": "sendTouchEvent",
+        "data": {
+            "event": 7
+        },
+        "id": 0,
+        "name": "右滑",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemControl",
+        "cmd": "openGuide",
+        "data": {
+        },
+        "id": 0,
+        "name": "打开引导",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemControl",
+        "cmd": "closeGuide",
+        "data": {
+        },
+        "id": 0,
+        "name": "关闭引导",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemControl",
+        "cmd": "openAssistant",
+        "data": {
+            "area": 0,
+            "msgType": 0
+        },
+        "id": 0,
+        "name": "打开语音助手",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemControl",
+        "cmd": "updateAssistantSttInfo",
+        "data": {
+            "actionType": 0,
+            "area": 0,
+            "createdAt": 1776916800000,
+            "id": 1,
+            "isFinal": 0,
+            "msgId": "assistant_1",
+            "msgType": 0,
+            "transcribe": "正在听...",
+            "translate": "",
+            "user": "User A"
+        },
+        "id": 0,
+        "name": "语音助手更新1",
+        "type": "DATA_UNRELIABLE"
+    },
+    {
+        "biz": "SystemControl",
+        "cmd": "updateAssistantSttInfo",
+        "data": {
+            "actionType": 1,
+            "area": 0,
+            "createdAt": 1776916801000,
+            "id": 1,
+            "isFinal": 1,
+            "msgId": "assistant_1",
+            "msgType": 0,
+            "transcribe": "帮我打开高尔夫。",
+            "translate": "",
+            "user": "User A"
+        },
+        "id": 0,
+        "name": "语音助手更新2",
+        "type": "DATA_UNRELIABLE"
+    },
+    {
+        "biz": "SystemControl",
+        "cmd": "updateAssistantSttInfo",
+        "data": {
+            "actionType": 1,
+            "area": 1,
+            "createdAt": 1776916802000,
+            "id": 2,
+            "isFinal": 1,
+            "msgId": "assistant_2",
+            "msgType": 0,
+            "transcribe": "好的，正在打开高尔夫。",
+            "translate": "",
+            "user": "Assistant"
+        },
+        "id": 0,
+        "name": "语音助手更新3",
+        "type": "DATA_UNRELIABLE"
+    },
+    {
+        "biz": "SystemControl",
+        "cmd": "updateAssistantSttInfo",
+        "data": {
+            "actionType": 1,
+            "area": 0,
+            "createdAt": 1776916803000,
+            "id": 3,
+            "isFinal": 1,
+            "msgId": "assistant_3",
+            "msgType": 0,
+            "transcribe": "再帮我把亮度调高一点。",
+            "translate": "",
+            "user": "User A"
+        },
+        "id": 0,
+        "name": "语音助手更新4",
+        "type": "DATA_UNRELIABLE"
+    },
+    {
+        "biz": "SystemControl",
+        "cmd": "closeAssistant",
+        "data": {
+        },
+        "id": 0,
+        "name": "关闭语音助手",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemControl",
+        "cmd": "sendHeartbeat",
+        "data": {
+        },
+        "id": 0,
+        "name": "处理心跳并刷新连接状态",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemControl",
+        "cmd": "sendKeepAlive",
+        "data": {
+        },
+        "id": 0,
+        "name": "处理保活并刷新连接状态",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemControl",
+        "cmd": "sendHandshake",
+        "data": {
+        },
+        "id": 0,
+        "name": "握手确认（当前仅回复成功）",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemControl",
+        "cmd": "setUploadProgressVisible",
+        "data": {
+            "visible": 1
+        },
+        "id": 0,
+        "name": "显示上传进度条",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemControl",
+        "cmd": "setUploadProgressVisible",
+        "data": {
+            "visible": 0
+        },
+        "id": 0,
+        "name": "隐藏上传进度条",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemControl",
+        "cmd": "setProgressVisible",
+        "data": {
+            "opa": 100,
+            "text": "",
+            "visible": 1
+        },
+        "id": 0,
+        "name": "打开加载中遮罩",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemControl",
+        "cmd": "setProgressVisible",
+        "data": {
+            "visible": 0
+        },
+        "id": 0,
+        "name": "关闭加载中遮罩",
+        "type": "DATA_RELIABLE"
+    }
+]

@@ -48,6 +48,8 @@ typedef struct {
     int32_t border_width;                ///< 当前项边框宽度。
     uint8_t opa_normal;                  ///< 非选中项文字与边框透明度。
     uint8_t opa_selected;                ///< 当前项文字与边框透明度。
+    bool show_hint;                      ///< 是否创建底部操作提示；默认 `false`，不创建。
+    int32_t hint_gap;                    ///< 选项区域与底部操作提示之间的间距；默认 48。
 } roller_cfg_t;
 
 /**

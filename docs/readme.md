@@ -174,6 +174,84 @@ Build modules are split by responsibility:
 
 `JY_APP_PRODUCT` selects the product overlay. The default value is `jytek`. During CMake configuration, the overlay is cleaned first and then the selected product overlay is applied.
 
+Each `products/<product>/lfsd/` directory contains that product's complete LFSD input, including shared resources and product-specific configuration. The repository-root `lfsd/` is only a generated working copy used during product synchronization and builds; the entire directory is ignored by Git and contains no version-controlled source files.
+
+Overlay cleanup clears the root `lfsd/` directory before copying the selected product's complete tree into it. Product switches must use this synchronization flow so files from the previous product cannot remain. Changes to shared LFSD resources must be propagated to every product that uses them.
+
+Each logical Speech App owns its configuration at `products/<product>/lfsd/apps/<app>/config.json`; do not add a shared `apps/speech/config.json` for multiple Speech entries.
+
+Each `products/<product>/product.json` is an allowlist of compiled App modules and declares logical App names, message IDs, common roles, and capabilities. The build collects only the selected `apps/<app>/` directories and generates the identity definitions and registration table in the build directory.
+
+`apps/common/` contains shared App-layer implementations without product identities, and each product selects the required shared submodules through `common_modules`. Logical entries that reuse those runtimes export static profile descriptors, so private entry directories can be removed without duplicating Speech, Phone, or STT view code.
+
+#### `product.json` Fields
+
+Top-level fields:
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `schema_version` | Yes | Manifest format version. Only `1` is currently supported. |
+| `product` | Yes | Product name. It must exactly match the `products/<product>/` directory name and may contain only letters, digits, underscores, and hyphens. |
+| `status_bar_headset` | No | Enables headset attachment status in the status bar. Defaults to `false`; when enabled, the status bar shows separate left, right, and dual-headset states. |
+| `home_status_bar_position` | No | Home status bar position: `bottom` (default) or `top`. |
+| `home_guide_step2_mode` | No | Home boot-guide Step 2 demo App and language bar: `translate` (default, translation with two languages), `transcribe` (transcription with one language), or `hidden` (translation with no language bar). |
+| `common_modules` | No | Allowlist of shared implementation directories under `apps/common/<module>/`. Defaults to an empty list. |
+| `modules` | Yes | Non-empty allowlist of App modules compiled and registered at startup, corresponding to `apps/<directory>/`. |
+| `apps` | Yes | Non-empty list of logical Apps known to the product. It generates App names, message IDs, and capability metadata. |
+| `roles` | Yes | Mapping from roles required by common logic to `apps[].key`. Every defined role must be present. |
+
+The module shorthand `"home"` is equivalent to:
+
+```json
+{"directory": "home", "api": "home", "registration": "function", "symbol": "home_app_register"}
+```
+
+Module object fields:
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `directory` | Yes | App source directory under `apps/<directory>/`; it determines whether that directory is compiled. |
+| `api` | No | Module API name, defaulting to `directory`. The required header is `apps/<directory>/<api>.h`. Use it when the directory and public API differ, for example `{"directory": "prompter_pro", "api": "prompter"}`. |
+| `registration` | No | Registration mode. `function` (default) calls a registration function; `descriptor` uses a static profile descriptor backed by a shared runtime. |
+| `runtime` | Conditional | Required for `descriptor` and must name a runtime selected by `common_modules`, such as `speech` or `phone`. It is forbidden for `function` modules. This validates the dependency; `common_modules` is what adds the shared sources to the build. |
+| `symbol` | No | Custom registration symbol. The default is `<api>_app_register` for `function` or `<api>_app_module` for `descriptor`. |
+
+Fields of each `apps` entry:
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `key` | Yes | Stable manifest-local identifier referenced by `roles`; it must be unique within the product. |
+| `macro` | Yes | Uppercase C macro suffix. For example, `TRANSCRIBE` generates `APP_NAME_TRANSCRIBE` and, when applicable, `APP_MSG_ID_TRANSCRIBE`. |
+| `module` | No | Selected module directory that implements the logical App; it must occur in `modules`. Omit it for an identity without a separately registered business module, such as the system-provided Assistant. |
+| `name` | Yes | Actual runtime/protocol App name. It must be unique and shorter than 32 bytes when UTF-8 encoded. |
+| `msg_id` | No | App protocol message ID from `1` through `0xFFFFFFFF`; it must be unique within the product. Omit it when the logical entry has no independent business message ID. |
+| `home_action` | No | Action used when the App is activated from Home: `set_view` (default) routes to the App, while `open_assistant` opens the Assistant popup on the current page. |
+| `capabilities` | No | Capabilities queried by common logic. Defaults to an empty list. |
+
+Supported capabilities:
+
+| Value | Meaning |
+| --- | --- |
+| `upload_progress` | Supports upload-progress display. |
+| `assistant_open_blocked` | Prevents Assistant from opening over this App. |
+| `display_position` | Moves both the App page and its `app_float` layer with the configured display position. |
+| `display_position_float` | Moves only the App's `app_float` layer while keeping the App page fixed. |
+| `guide` | Identifies an App that provides the onboarding guide. |
+| `guide_simple` | Uses the self-contained lightweight onboarding flow. |
+| `stt_question_no_skip` | STT question-area updates must not be dropped. |
+
+`roles` must contain every field below, with each value referencing an existing `apps[].key`:
+
+| Role | Meaning |
+| --- | --- |
+| `home` | Default home App. |
+| `langselection` | Language-selection App. |
+| `watch_home` | Home App used for the watch-connection scenario. |
+| `guide` | Onboarding guide App. |
+| `assistant` | App identity used by Assistant configuration. |
+
+In short, `modules` controls which sources are compiled and how they register, `apps` defines the product's logical identities and protocol IDs, and `roles` tells common code which logical App to use. Before deleting a private App directory, remove or replace its references in `modules`, `apps`, and `roles` for every product that remains.
+
 `JY_APP_PRODUCT=clean` only removes overlay files and cannot produce a build. Use an actual product name for builds.
 
 ## Build Overview
@@ -193,9 +271,9 @@ ARM and simulator builds also consume an OS SDK archive exported from the OS rep
 Board-side convenience scripts are split by purpose:
 
 - `scripts/develop.sh` / `scripts/develop.bat`: configure and build the ARM target.
-- `scripts/package.sh` / `scripts/package.bat`: configure and build the ARM target, then package `build/nuttx_lfsc.bin`, `build/nuttx_lfsd.bin`, `build/nuttx_romfs.bin`, and repository-root `burn_plan.ini` as `build/H6_APP_<tag>-<count>-g<hash>.7z`.
+- `scripts/package.sh` / `scripts/package.bat`: configure and build the ARM target, then package `build/nuttx_lfsc.bin`, `build/nuttx_lfsd.bin`, `build/nuttx_romfs.bin`, `build/nuttx_lromfs.bin`, and repository-root `burn_plan.ini` as `build/H6_APP_<tag>-<count>-g<hash>.7z`. `nuttx_lromfs.bin` uses product-specific KWS firmware and model from `products/<product>/left_romfs/kws/` when present, otherwise it uses the defaults under repository-root `left_romfs/kws/`.
 
-When using this burn package, only the right temple needs to be flashed.
+This burn package writes the app filesystems to the right temple and the KWS ROMFS to the left temple.
 
 `package.*` requires 7-Zip. On Linux/macOS, `7z` or `7za` must be available in `PATH`. On Windows, the script checks `PATH` first and then the default install path `C:\Program Files\7-Zip\7z.exe`.
 

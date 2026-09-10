@@ -9,18 +9,67 @@ set(I18N_DIR "${THIRDPARTY_DIR}/i18n")
 set(MPACK_DIR "${THIRDPARTY_DIR}/mpack")
 set(UI_COMPILER_DIR "${PROJECT_ROOT}/tools/ui_compiler")
 set(GENERATED_UI_DIR "${CMAKE_BINARY_DIR}/generated/ui")
-
-file(GLOB_RECURSE APP_SOURCES CONFIGURE_DEPENDS "${APPS_DIR}/*.c")
-file(GLOB_RECURSE SYSTEM_SOURCES CONFIGURE_DEPENDS "${SYSTEM_DIR}/*.c")
-file(GLOB_RECURSE COMMON_SOURCES CONFIGURE_DEPENDS "${COMMON_DIR}/*.c")
-file(GLOB_RECURSE LVGL_SOURCES "${LVGL_DIR}/src/*.c")
-file(GLOB_RECURSE UI_JSON_SOURCES CONFIGURE_DEPENDS
-    "${APPS_DIR}/*.ui.json"
-    "${SYSTEM_DIR}/*.ui.json"
-)
-set(RES_JSON_SOURCES "${PROJECT_ROOT}/ui.res.json")
+set(PRODUCT_GENERATED_DIR "${CMAKE_BINARY_DIR}/generated/product")
+set(PRODUCT_MANIFEST "${PROJECT_ROOT}/products/${JY_APP_PRODUCT}/product.json")
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
+
+if(NOT EXISTS "${PRODUCT_MANIFEST}")
+    message(FATAL_ERROR "Product manifest not found: ${PRODUCT_MANIFEST}")
+endif()
+
+file(MAKE_DIRECTORY "${PRODUCT_GENERATED_DIR}")
+execute_process(
+    COMMAND "${Python3_EXECUTABLE}" "${PROJECT_ROOT}/scripts/generate_product_apps.py"
+            --manifest "${PRODUCT_MANIFEST}"
+            --apps-dir "${APPS_DIR}"
+            --output-dir "${PRODUCT_GENERATED_DIR}"
+    WORKING_DIRECTORY "${PROJECT_ROOT}"
+    RESULT_VARIABLE _product_apps_result
+)
+if(NOT _product_apps_result EQUAL 0)
+    message(FATAL_ERROR
+        "generate_product_apps.py failed for ${JY_APP_PRODUCT} "
+        "with exit code ${_product_apps_result}")
+endif()
+
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${PRODUCT_MANIFEST}"
+    "${PROJECT_ROOT}/scripts/generate_product_apps.py"
+)
+include("${PRODUCT_GENERATED_DIR}/product_app_sources.cmake")
+
+file(GLOB APP_SOURCES CONFIGURE_DEPENDS "${APPS_DIR}/*.c")
+set(UI_JSON_SOURCES)
+foreach(_app_common_module IN LISTS PRODUCT_APP_COMMON_MODULES)
+    file(GLOB_RECURSE _app_common_sources CONFIGURE_DEPENDS
+        "${APPS_DIR}/common/${_app_common_module}/*.c"
+    )
+    file(GLOB_RECURSE _app_common_ui_sources CONFIGURE_DEPENDS
+        "${APPS_DIR}/common/${_app_common_module}/*.ui.json"
+    )
+    list(APPEND APP_SOURCES ${_app_common_sources})
+    list(APPEND UI_JSON_SOURCES ${_app_common_ui_sources})
+endforeach()
+foreach(_app_module IN LISTS PRODUCT_APP_MODULES)
+    file(GLOB_RECURSE _app_module_sources CONFIGURE_DEPENDS
+        "${APPS_DIR}/${_app_module}/*.c"
+    )
+    file(GLOB_RECURSE _app_module_ui_sources CONFIGURE_DEPENDS
+        "${APPS_DIR}/${_app_module}/*.ui.json"
+    )
+    list(APPEND APP_SOURCES ${_app_module_sources})
+    list(APPEND UI_JSON_SOURCES ${_app_module_ui_sources})
+endforeach()
+file(GLOB_RECURSE SYSTEM_SOURCES CONFIGURE_DEPENDS "${SYSTEM_DIR}/*.c")
+file(GLOB_RECURSE COMMON_SOURCES CONFIGURE_DEPENDS "${COMMON_DIR}/*.c")
+
+file(GLOB_RECURSE LVGL_SOURCES "${LVGL_DIR}/src/*.c")
+file(GLOB_RECURSE SYSTEM_UI_JSON_SOURCES CONFIGURE_DEPENDS "${SYSTEM_DIR}/*.ui.json")
+
+list(APPEND UI_JSON_SOURCES ${SYSTEM_UI_JSON_SOURCES})
+
+set(RES_JSON_SOURCES "${PROJECT_ROOT}/ui.res.json")
 
 set(GENERATED_UI_SOURCES)
 set(GENERATED_UI_HEADERS)
@@ -85,6 +134,7 @@ set(TARGET_SOURCES
     ${APP_SOURCES}
     ${SYSTEM_SOURCES}
     ${COMMON_SOURCES}
+    "${PRODUCT_GENERATED_DIR}/product_app_generated.c"
     ${GENERATED_UI_SOURCES}
     ${GENERATED_UI_HEADERS}
     ${GENERATED_RES_HEADERS}
@@ -93,6 +143,7 @@ set(TARGET_SOURCES
 set(COMMON_INCLUDE_DIRS
     "${PROJECT_ROOT}"
     "${CMAKE_BINARY_DIR}/generated"
+    "${PRODUCT_GENERATED_DIR}"
     "${GENERATED_UI_DIR}"
     "${APPS_DIR}"
     "${SYSTEM_DIR}"

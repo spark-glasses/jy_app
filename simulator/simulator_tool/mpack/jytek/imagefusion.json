@@ -1,0 +1,43 @@
+[
+    {
+        "biz": "SystemControl",
+        "cmd": "setView",
+        "data": {
+            "viewName": "imagefusion"
+        },
+        "id": 0,
+        "name": "进入",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemControl",
+        "cmd": "setView",
+        "data": {
+            "viewName": "home"
+        },
+        "id": 0,
+        "name": "退出",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "imagefusion",
+        "cmd": "getFusionParams",
+        "data": {},
+        "id": 1001,
+        "name": "获取融合参数",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "imagefusion",
+        "cmd": "setFusionParams",
+        "data": {
+            "lX": 0,
+            "lY": 0,
+            "rX": 0,
+            "rY": 0
+        },
+        "id": 1001,
+        "name": "设置融合参数",
+        "type": "DATA_RELIABLE"
+    }
+]

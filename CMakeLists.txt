@@ -92,6 +92,8 @@ set_target_properties(${TARGET_NAME} PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
 )
 
+jy_app_configure_product_sync(${TARGET_NAME})
+
 if(JY_APP_TARGET_PLATFORM STREQUAL "msvc")
     # Keep the actual target build in the same English Visual Studio locale used
     # during CMake compiler checks.
@@ -110,6 +112,7 @@ target_compile_definitions(${TARGET_NAME} PRIVATE
 )
 
 if(JY_APP_TARGET_PLATFORM STREQUAL "arm")
+    jy_app_resolve_left_romfs(JY_APP_LEFT_ROMFS_DIR)
     jy_app_configure_arm_target(${TARGET_NAME})
 else()
     jy_app_configure_simulator_target(${TARGET_NAME})

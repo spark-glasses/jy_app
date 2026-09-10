@@ -38,12 +38,6 @@ static lv_obj_t* g_business_area_frames[2] = {NULL, NULL};
 static uint8_t g_lcd_visual_brightness = UINT8_MAX;
 static lcd_state_t g_lcd_visual_state = LCD_ON;
 
-/* Opt-in per-frame render timing: FLOATAIR_SIM_RENDER_TIMING=1. Measures
- * LVGL render start to ready, the same window the hardware loop reports. */
-static bool g_render_timing_enabled = false;
-static uint32_t g_render_start_us = 0;
-static uint32_t g_render_total_us = 0;
-static uint32_t g_render_count = 0;
 static const char* g_screenshot_dir = NULL;
 static uint32_t g_screenshot_period_ms = 300;
 static uint32_t g_last_screenshot_ms = 0;
@@ -93,7 +87,7 @@ void simulator_update_lcd_visual(uint8_t brightness, lcd_state_t state) {
     lv_obj_set_style_bg_opa(g_lcd_mask, mask_opa, 0);
     lv_obj_invalidate(g_lcd_mask);
     if (g_disp != NULL) {
-        lv_refr_now(g_disp);
+        simulator_refresh_display_sync(g_disp);
     }
     g_lcd_visual_brightness = brightness;
     g_lcd_visual_state = state;
@@ -123,37 +117,6 @@ static void update_window_title(void) {
     }
 
     lv_sdl_window_set_title(g_disp, title);
-}
-
-static void simulator_render_timing_event(lv_event_t* event) {
-    if (lv_event_get_code(event) == LV_EVENT_RENDER_START) {
-        g_render_start_us = (uint32_t)GetTimeUs();
-    } else {
-        g_render_total_us += (uint32_t)GetTimeUs() - g_render_start_us;
-        g_render_count++;
-    }
-}
-
-static void simulator_render_timing_init(void) {
-    const char* enabled = getenv("FLOATAIR_SIM_RENDER_TIMING");
-    if (!enabled || enabled[0] == '\0' || enabled[0] == '0' || !g_disp) {
-        return;
-    }
-    g_render_timing_enabled = true;
-    lv_display_add_event_cb(g_disp, simulator_render_timing_event, LV_EVENT_RENDER_START, NULL);
-    lv_display_add_event_cb(g_disp, simulator_render_timing_event, LV_EVENT_RENDER_READY, NULL);
-    floatair_info("simulator render timing enabled");
-}
-
-static void simulator_render_timing_report(void) {
-    if (!g_render_timing_enabled || g_render_count == 0) {
-        return;
-    }
-    floatair_info("sim render_us=%lu renders=%lu",
-                  (unsigned long)g_render_total_us,
-                  (unsigned long)g_render_count);
-    g_render_total_us = 0;
-    g_render_count = 0;
 }
 
 static void simulator_screenshot_init(void) {
@@ -407,7 +370,6 @@ int main(int argc, char** argv) {
     // 4. Create SDL window
     floatair_info("4. Creating SDL window (%dx%d)...", output_width, output_height);
     g_disp = lv_sdl_window_create(output_width, output_height);
-    simulator_render_timing_init();
     if (g_disp) {
         floatair_info("SDL window created successfully: %p", g_disp);
         if (!app_stereo_install_display_mirror(g_disp)) {
@@ -501,8 +463,9 @@ int main(int argc, char** argv) {
     floatair_info("10. Application loaded, entering message loop...");
 
     while (!simulator_shutdown_requested()) {
+        simulator_process_display_refresh_requests();
         uint32_t ms = lv_timer_handler();
-        simulator_render_timing_report();
+        simulator_process_display_refresh_requests();
         simulator_screenshot_poll();
         if (ms > 20) ms = 20;
         simulator_platform_sleep_ms(ms);

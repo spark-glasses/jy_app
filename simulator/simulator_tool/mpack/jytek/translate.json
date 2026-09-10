@@ -1,0 +1,450 @@
+[
+    {
+        "biz": "SystemControl",
+        "cmd": "setView",
+        "data": {
+            "viewName": "translate"
+        },
+        "id": 0,
+        "name": "进入",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemControl",
+        "cmd": "setView",
+        "data": {
+            "viewName": "home"
+        },
+        "id": 0,
+        "name": "退出",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "translate",
+        "cmd": "clearView",
+        "data": {},
+        "id": 3,
+        "name": "清空界面",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "translate",
+        "cmd": "setFontConfig",
+        "data": {
+            "fontConfig": {
+                "rowSpace": 0,
+                "weight": 32,
+                "wordSpace": 0
+            }
+        },
+        "id": 3,
+        "name": "设置文字配置",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemControl",
+        "cmd": "setProgressVisible",
+        "data": {
+            "opa": 80,
+            "text": "翻译中",
+            "visible": 1
+        },
+        "id": 0,
+        "name": "显示翻译中遮罩",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemControl",
+        "cmd": "setProgressVisible",
+        "data": {
+            "visible": 0
+        },
+        "id": 0,
+        "name": "隐藏翻译中遮罩",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "translate",
+        "cmd": "updateSttInfo",
+        "data": {
+            "actionType": 1,
+            "area": 2,
+            "createdAt": 1776916799000,
+            "id": 100,
+            "isFinal": 1,
+            "msgId": "translate_notice",
+            "msgType": 0,
+            "transcribe": "点击开始翻译",
+            "user": "System"
+        },
+        "id": 3,
+        "name": "显示翻译提示",
+        "type": "DATA_UNRELIABLE"
+    },
+    {
+        "biz": "translate",
+        "cmd": "updateSttInfo",
+        "data": {
+            "actionType": 0,
+            "area": 0,
+            "createdAt": 1776916800000,
+            "id": 1,
+            "isFinal": 0,
+            "msgId": "translate_1",
+            "msgType": 0,
+            "transcribe": "Can you hear me",
+            "translate": "你能听见我",
+            "user": "User A"
+        },
+        "id": 3,
+        "name": "更新翻译信息1-中间结果",
+        "type": "DATA_UNRELIABLE"
+    },
+    {
+        "biz": "translate",
+        "cmd": "updateSttInfo",
+        "data": {
+            "actionType": 1,
+            "area": 0,
+            "createdAt": 1776916801000,
+            "id": 1,
+            "isFinal": 1,
+            "msgId": "translate_1",
+            "msgType": 0,
+            "transcribe": "Can you hear me clearly?",
+            "translate": "你能听清我说话吗？",
+            "user": "User A"
+        },
+        "id": 3,
+        "name": "更新翻译信息1-最终结果",
+        "type": "DATA_UNRELIABLE"
+    },
+    {
+        "biz": "translate",
+        "cmd": "updateSttInfo",
+        "data": {
+            "actionType": 1,
+            "area": 0,
+            "createdAt": 1776916802000,
+            "id": 2,
+            "isFinal": 1,
+            "msgId": "translate_2",
+            "msgType": 0,
+            "transcribe": "Short again.",
+            "translate": "短句。",
+            "user": "User A"
+        },
+        "id": 3,
+        "name": "更新翻译信息2",
+        "type": "DATA_UNRELIABLE"
+    },
+    {
+        "biz": "translate",
+        "cmd": "updateSttInfo",
+        "data": {
+            "actionType": 1,
+            "area": 0,
+            "createdAt": 1776916803000,
+            "id": 3,
+            "isFinal": 1,
+            "msgId": "translate_3",
+            "msgType": 0,
+            "transcribe": "I will start with a short sentence, then gradually make it longer.",
+            "translate": "我先说一句短的，然后逐渐说得更长一些。",
+            "user": "User A"
+        },
+        "id": 3,
+        "name": "更新翻译信息3",
+        "type": "DATA_UNRELIABLE"
+    },
+    {
+        "biz": "translate",
+        "cmd": "updateSttInfo",
+        "data": {
+            "actionType": 1,
+            "area": 0,
+            "createdAt": 1776916804000,
+            "id": 4,
+            "isFinal": 1,
+            "msgId": "translate_4",
+            "msgType": 0,
+            "transcribe": "Numbers and symbols: 12345, 67.89%, A/B, and URL-like text example.com/path?x=1&y=2.",
+            "translate": "数字与符号：12345、67.89%、A/B，以及类似链接的文本 example.com/path?x=1&y=2。",
+            "user": "User A"
+        },
+        "id": 3,
+        "name": "更新翻译信息4",
+        "type": "DATA_UNRELIABLE"
+    },
+    {
+        "biz": "translate",
+        "cmd": "updateSttInfo",
+        "data": {
+            "actionType": 1,
+            "area": 0,
+            "createdAt": 1776916805000,
+            "id": 5,
+            "isFinal": 1,
+            "msgId": "translate_5",
+            "msgType": 0,
+            "transcribe": "Sometimes the translation is much longer than the original.",
+            "translate": "有时译文会比原文长很多，因为需要补充上下文并让目标语言读起来更自然、更连贯。",
+            "user": "User A"
+        },
+        "id": 3,
+        "name": "更新翻译信息5",
+        "type": "DATA_UNRELIABLE"
+    },
+    {
+        "biz": "translate",
+        "cmd": "updateSttInfo",
+        "data": {
+            "actionType": 1,
+            "area": 0,
+            "createdAt": 1776916806000,
+            "id": 6,
+            "isFinal": 1,
+            "msgId": "translate_6",
+            "msgType": 0,
+            "transcribe": "Thanks, that works well.",
+            "translate": "谢谢，这样效果很好。",
+            "user": "User B"
+        },
+        "id": 3,
+        "name": "更新翻译信息6",
+        "type": "DATA_UNRELIABLE"
+    },
+    {
+        "biz": "translate",
+        "cmd": "updateSttInfo",
+        "data": {
+            "actionType": 1,
+            "area": 0,
+            "createdAt": 1776916807000,
+            "id": 7,
+            "isFinal": 1,
+            "msgId": "translate_7",
+            "msgType": 0,
+            "transcribe": "Final entry: mixed length, mixed punctuation; verify English and Chinese wrap nicely.",
+            "translate": "最后一条：长短混合、标点混合；验证英文和中文都能正常换行显示。",
+            "user": "User A"
+        },
+        "id": 3,
+        "name": "更新翻译信息7",
+        "type": "DATA_UNRELIABLE"
+    },
+    {
+        "biz": "translate",
+        "cmd": "setState",
+        "data": {
+            "state": 1
+        },
+        "id": 3,
+        "name": "开始翻译",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "translate",
+        "cmd": "setState",
+        "data": {
+            "state": 0
+        },
+        "id": 3,
+        "name": "停止翻译",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "translate",
+        "cmd": "setTextMode",
+        "data": {
+            "textMode": 0
+        },
+        "id": 3,
+        "name": "文本模式-默认（textMode=0）",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "translate",
+        "cmd": "setTextMode",
+        "data": {
+            "textMode": 1
+        },
+        "id": 3,
+        "name": "文本模式-历史（textMode=1）",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "translate",
+        "cmd": "setTextMode",
+        "data": {
+            "textMode": 2
+        },
+        "id": 3,
+        "name": "文本模式-会议（textMode=2）",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "translate",
+        "cmd": "setAudioTrackState",
+        "data": {
+            "audioTrack": 1
+        },
+        "id": 3,
+        "name": "下发音轨状态1（当前代码仅校验参数）",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "translate",
+        "cmd": "setAudioTrackState",
+        "data": {
+            "audioTrack": 0
+        },
+        "id": 3,
+        "name": "下发音轨状态0（当前代码仅校验参数）",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "translate",
+        "cmd": "setTransMode",
+        "data": {
+            "transMode": 0
+        },
+        "id": 3,
+        "name": "显示模式-仅译文（transMode=0）",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "translate",
+        "cmd": "setTransMode",
+        "data": {
+            "transMode": 1
+        },
+        "id": 3,
+        "name": "显示模式-原文译文双列（transMode=1）",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "translate",
+        "cmd": "setTransMode",
+        "data": {
+            "transMode": 2
+        },
+        "id": 3,
+        "name": "显示模式-仅原文（transMode=2）",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "translate",
+        "cmd": "setMaxLine",
+        "data": {
+            "maxLine": 3
+        },
+        "id": 3,
+        "name": "设置最大行数",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "translate",
+        "cmd": "setAudioSourceIndicator",
+        "data": {
+            "audioSourceIndicator": 0
+        },
+        "id": 3,
+        "name": "音源指示器-眼镜",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "translate",
+        "cmd": "setAudioSourceIndicator",
+        "data": {
+            "audioSourceIndicator": 1
+        },
+        "id": 3,
+        "name": "音源指示器-手机",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "translate",
+        "cmd": "setAudioSourceIndicator",
+        "data": {
+            "audioSourceIndicator": 2
+        },
+        "id": 3,
+        "name": "音源指示器-手表",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "translate",
+        "cmd": "setMicDirectional",
+        "data": {
+            "micDirectional": 0
+        },
+        "id": 3,
+        "name": "全向麦克风（micDirectional=0）",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "translate",
+        "cmd": "setMicDirectional",
+        "data": {
+            "micDirectional": 1
+        },
+        "id": 3,
+        "name": "定向麦克风（micDirectional=1）",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "translate",
+        "cmd": "setLanguageHint",
+        "data": {
+            "languageHint": {
+                "mode": 0,
+                "source": "en-US",
+                "target": ""
+            }
+        },
+        "id": 3,
+        "name": "语言提示-仅源语言（mode=0）",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "translate",
+        "cmd": "setLanguageHint",
+        "data": {
+            "languageHint": {
+                "mode": 1,
+                "source": "en-US",
+                "target": "zh-CN"
+            }
+        },
+        "id": 3,
+        "name": "语言提示-源语言和目标语言（mode=1）",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "translate",
+        "cmd": "textDirection",
+        "data": {
+            "textDirection": {
+                "source": 0,
+                "target": 0
+            }
+        },
+        "id": 3,
+        "name": "文字方向-源/目标从左到右",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "translate",
+        "cmd": "textDirection",
+        "data": {
+            "textDirection": {
+                "source": 1,
+                "target": 1
+            }
+        },
+        "id": 3,
+        "name": "文字方向-源/目标从右到左",
+        "type": "DATA_RELIABLE"
+    }
+]

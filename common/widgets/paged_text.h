@@ -93,6 +93,24 @@ void paged_text_set_text(paged_text_t* paged_text, const char* text);
 void paged_text_set_visible_text(paged_text_t* paged_text, const char* text);
 
 /**
+ * @brief 直接显示合并窗口文本，并在两个 UTF-8 字节偏移之间滚动。
+ *
+ * `from_offset` 和 `to_offset` 均相对 `text` 起点，且必须落在合法
+ * UTF-8 字符边界。组件会按排版后的字符坐标移动内部文本，遮罩位置不变。
+ *
+ * @param paged_text 目标组件句柄。
+ * @param text 合并后的窗口文本；传 `NULL` 时按空字符串处理。
+ * @param from_offset 动画起点的 UTF-8 字节偏移。
+ * @param to_offset 动画终点的 UTF-8 字节偏移。
+ * @param duration_ms 动画时长，单位毫秒；传 0 时直接定位到终点。
+ */
+void paged_text_set_visible_text_animated(paged_text_t* paged_text,
+                                          const char* text,
+                                          uint32_t from_offset,
+                                          uint32_t to_offset,
+                                          uint32_t duration_ms);
+
+/**
  * @brief 设置文本字体和间距。
  * @param paged_text 目标组件句柄。
  * @param font_info 字体配置；传 `NULL` 时使用系统默认字体。

@@ -13,10 +13,9 @@ Head-up and head-down control load as disabled. Touchpad long press toggles the
 screen before page or popup input. Double-tap remains available to the active
 page while the screen is on and does not wake the screen. Screen state is reported
 to the phone, which starts glasses capture on screen on and stops it on screen
-off. The footer avatar is visible while the screen is on and shows a static
-audio-wave mark only after the phone reports `SystemStatus setListenState` 1,
-so it shows real capture rather than the screen state.
-The page has no app launcher. Swipes scroll an overflowing footer reply. Other
+off. Reply text is owned by Spark and is drawn in an app-local overlay with the
+Open Runde bitmap font. The page has no app launcher. Swipes scroll an
+overflowing reply before they change page selection. Other
 app routes remain available to phone commands.
 
 The shared status bar is at the top, with the page content below it. The
@@ -61,8 +60,8 @@ all five rows fit. LVGL objects remain allocated across replacements.
 The receiver validates all supplied fields before applying either update.
 Only the three detail labels borrow strings owned by the current display;
 list and header labels copy text because ellipsis can modify the label buffer.
-Replacing a display detaches old detail strings before releasing them. Reply-only updates do not touch page
-labels, layout, or scroll position.
+Replacing a display detaches old detail strings before releasing them.
+Reply-only updates do not replace page data or reset page scroll position.
 
 The ACK contains `data: {"batch_id":"7"}`. A retry uses the same revision and
 payload. The receiver ACKs the current revision without parsing the page or
@@ -118,8 +117,8 @@ describes an already visible detail and does not request another send.
 Updates echo the latest report sequence. For the same display ID, an older
 sequence cannot replace a view after a local swipe or Back. The receiver ACKs
 that request and reports the actual view, including on a retry. The phone
-continues to report only the visible page to the server. The existing footer
-scroll and popup priorities remain.
+continues to report only the visible page to the server. Vendor popup input
+priority remains unchanged.
 
 ### Offline checks
 
@@ -134,23 +133,16 @@ geometry, 20-row navigation, local Back, delayed detail responses, wrapped
 detail layout, input reports, lifecycle, and partial redraws.
 The optional artifact directory receives `list.ppm` and `item.ppm`.
 
-## Footer reply
+## Reply overlay
 
-`Display.update` can set the footer without replacing the page.
-Replies use Open Runde Medium at 14 pixels. The reply UI loads one bitmap file
-from ROMFS into SRAM during initialization and keeps it resident. There is no
-runtime font or size selector. Missing glyphs use the system font. Other UI text
-keeps its existing font. Source, conversion instructions, and the OFL license
-are in `fonts/`. UI command cycles log render timing even below the slow-cycle
-threshold.
+`Display.update` can set the reply without replacing the page. Replies use Open
+Runde Medium at 14 pixels. Spark loads the bitmap font from ROMFS and uses the
+vendor system font as a fallback. Source, conversion instructions, and the OFL
+license are in `fonts/`.
 
-The footer keeps the ball at the lower left and wraps reply text to its right.
-The footer itself stays 72 pixels tall. The bubble is opaque and grows upward
-over the page, so the page container and active page keep their size and are
-not redrawn for a reply. The bubble is sized from one text measurement and
-stays below the status bar. At the screen limit, the reply scrolls while the
-ball stays fixed. A new reply starts at the top; repeated text keeps its scroll
-position. Empty text hides the bubble.
+The reply panel is an opaque Spark page overlay. It grows upward from the bottom
+and stays below the status bar. At the screen limit, the reply scrolls. A new
+reply starts at the top. Empty text hides the panel.
 
 After a build, check short, multiline, Unicode, and screen-length replies with
 a display replacement. Check forward/backward scrolling, repeated text, and

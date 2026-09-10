@@ -4,14 +4,37 @@ function(jy_app_configure_arm_target target_name)
     target_compile_options(${target_name} PRIVATE ${PLATFORM_COMPILE_OPTIONS})
     target_link_options(${target_name} PRIVATE ${PLATFORM_LINK_OPTIONS})
 
+    if(NOT IS_DIRECTORY "${JY_APP_LEFT_ROMFS_DIR}")
+        message(FATAL_ERROR "Left ROMFS source directory not found: ${JY_APP_LEFT_ROMFS_DIR}")
+    endif()
+
+    set(_left_kws_firmware "${JY_APP_LEFT_ROMFS_DIR}/kws/kws_firmware.bin")
+    set(_left_kws_model "${JY_APP_LEFT_ROMFS_DIR}/kws/kws_model.bin")
+    foreach(_left_kws_file IN ITEMS "${_left_kws_firmware}" "${_left_kws_model}")
+        if(NOT EXISTS "${_left_kws_file}")
+            message(FATAL_ERROR "Required left ROMFS KWS file not found: ${_left_kws_file}")
+        endif()
+    endforeach()
+
+    # Regenerate filesystem images when KWS resources change even if no C source changed.
+    set_property(TARGET ${target_name} APPEND PROPERTY LINK_DEPENDS
+        "${_left_kws_firmware}"
+        "${_left_kws_model}"
+    )
+
     add_custom_command(TARGET ${target_name} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E remove_directory "${CMAKE_CURRENT_BINARY_DIR}/romfs_staging"
+        COMMAND ${CMAKE_COMMAND} -E remove_directory "${CMAKE_CURRENT_BINARY_DIR}/left_romfs_staging"
         COMMAND ${CMAKE_COMMAND} -E copy_directory
                 "${PROJECT_ROOT}/romfs"
                 "${CMAKE_CURRENT_BINARY_DIR}/romfs_staging"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${JY_APP_LEFT_ROMFS_DIR}"
+                "${CMAKE_CURRENT_BINARY_DIR}/left_romfs_staging"
         COMMAND "${Python3_EXECUTABLE}" "${PROJECT_ROOT}/scripts/fs_img.py"
                 --source "$<TARGET_FILE:${target_name}>"
                 --romfs-dir "${CMAKE_CURRENT_BINARY_DIR}/romfs_staging"
+                --left-romfs-dir "${CMAKE_CURRENT_BINARY_DIR}/left_romfs_staging"
                 --symbol-file "${JY_APP_OS_SDK_FLOATAIR_DIR}/SymbolTable.def"
         WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
         VERBATIM
@@ -80,15 +103,17 @@ function(jy_app_configure_simulator_target target_name)
     add_custom_command(TARGET ${target_name} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E remove_directory "${CMAKE_BINARY_DIR}/jyt_d"
         COMMAND ${CMAKE_COMMAND} -E remove_directory "${CMAKE_BINARY_DIR}/romfs"
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-                "${PROJECT_ROOT}/lfsd"
-                "${CMAKE_BINARY_DIR}/jyt_d"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/jyt_d"
         COMMAND ${CMAKE_COMMAND} -E copy_directory
                 "${PROJECT_ROOT}/romfs"
                 "${CMAKE_BINARY_DIR}/romfs"
+        COMMAND ${CMAKE_COMMAND} -E remove_directory "${CMAKE_BINARY_DIR}/romfs/lfsd"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${PROJECT_ROOT}/lfsd"
+                "${CMAKE_BINARY_DIR}/romfs/lfsd"
         COMMAND "${Python3_EXECUTABLE}" "${PROJECT_ROOT}/scripts/StringPool.py"
                 --csv "${PROJECT_ROOT}/StringPool.csv"
-                --json-out "${CMAKE_BINARY_DIR}/jyt_d/system/i18n"
+                --json-out "${CMAKE_BINARY_DIR}/romfs/system/i18n"
     )
 
     set(SIMULATOR_INSTALL_RUNTIME_FILES)

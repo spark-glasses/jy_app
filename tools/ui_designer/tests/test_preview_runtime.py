@@ -288,6 +288,7 @@ class PreviewRuntimeTests(unittest.TestCase):
         self.assertEqual(preview_runtime.ROLLER_DEFAULT_BORDER_WIDTH, 2)
         self.assertEqual(preview_runtime.ROLLER_DEFAULT_NORMAL_OPA, 178)
         self.assertEqual(preview_runtime.ROLLER_DEFAULT_SELECTED_OPA, 255)
+        self.assertEqual(preview_runtime.ROLLER_DEFAULT_HINT_GAP, 48)
 
     def test_layout_padding_matches_uic_location(self):
         node = {
@@ -307,6 +308,21 @@ class PreviewRuntimeTests(unittest.TestCase):
             preview_runtime.roller_visible_rows(node),
             [("2", False), ("3", True), ("4", False)],
         )
+
+    def test_roller_hint_is_opt_in_and_increases_content_height(self):
+        node = {
+            "type": "roller",
+            "items": ["1", "2"],
+            "row_height": 20,
+            "row_gap": 4,
+        }
+        base_height = preview_runtime.estimate_content_height(node, 200)
+
+        node["show_hint"] = True
+        node["hint_gap"] = 12
+        hint_height = preview_runtime.estimate_content_height(node, 200)
+
+        self.assertGreater(hint_height, base_height)
 
     def test_roller_preview_draws_normal_item_borders(self):
         image = Image.new("RGBA", (100, 60), (0, 0, 0, 255))

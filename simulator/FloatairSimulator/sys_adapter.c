@@ -20,6 +20,51 @@ extern jyt_section_data_t g_section_data;
 extern bt_info g_bt_info;
 
 static __thread int g_simulator_lvgl_lock_depth = 0;
+static bool g_simulator_initial_frame_pending = true;
+static pthread_mutex_t g_simulator_refresh_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t g_simulator_refresh_cond = PTHREAD_COND_INITIALIZER;
+static uint64_t g_simulator_refresh_requested = 0;
+static uint64_t g_simulator_refresh_completed = 0;
+static lv_display_t* g_simulator_refresh_display = NULL;
+static pthread_mutex_t g_simulator_time_mutex = PTHREAD_MUTEX_INITIALIZER;
+static bool g_simulator_time_synced = false;
+static time_t g_simulator_time_base = (time_t)0;
+static time_t g_simulator_host_time_base = (time_t)0;
+
+/**
+ * @brief 在模拟器中记录 WAV 文件播放请求。
+ * @param[in] path WAV 文件绝对路径。
+ * @return 始终返回 0，表示请求已被模拟器接收。
+ */
+int play_wav(const char* path) {
+    floatair_info("simulator wav path=%s", path ? path : "<null>");
+    return 0;
+}
+
+/**
+ * @brief 禁止 display 刷新定时器自动提交画面，保留主循环中的其他 LVGL 定时器。
+ * @param[in] timer display 刷新定时器。
+ * @return 无返回值。
+ */
+static void simulator_event_refresh_timer_cb(lv_timer_t* timer) {
+    lv_timer_pause(timer);
+}
+
+/**
+ * @brief 记录一次由 SDL 主线程处理的 display 刷新请求。
+ * @param[in] display 目标 display。
+ * @return 本次请求序号。
+ */
+static uint64_t simulator_enqueue_display_refresh(lv_display_t* display) {
+    uint64_t sequence = 0;
+
+    pthread_mutex_lock(&g_simulator_refresh_mutex);
+    g_simulator_refresh_requested++;
+    sequence = g_simulator_refresh_requested;
+    g_simulator_refresh_display = display;
+    pthread_mutex_unlock(&g_simulator_refresh_mutex);
+    return sequence;
+}
 
 const char *floatair_os_version_string(void) {
     return "floatair_simulator";
@@ -78,7 +123,58 @@ void simulator_lvgl_leave_ui_critical(void) {
 }
 
 uint32_t simulator_lv_timer_handler(void) {
+    simulator_request_display_refresh(NULL);
     return 1;
+}
+
+void simulator_request_display_refresh(lv_display_t* display) {
+    (void)simulator_enqueue_display_refresh(display);
+}
+
+void simulator_refresh_display_sync(lv_display_t* display) {
+    uint64_t sequence = simulator_enqueue_display_refresh(display);
+    int lock_depth = g_simulator_lvgl_lock_depth;
+
+    while (g_simulator_lvgl_lock_depth > 0) {
+        simulator_lvgl_leave_ui_critical();
+    }
+
+    pthread_mutex_lock(&g_simulator_refresh_mutex);
+    while (g_simulator_refresh_completed < sequence) {
+        pthread_cond_wait(&g_simulator_refresh_cond, &g_simulator_refresh_mutex);
+    }
+    pthread_mutex_unlock(&g_simulator_refresh_mutex);
+
+    while (g_simulator_lvgl_lock_depth < lock_depth) {
+        simulator_lvgl_enter_ui_critical();
+    }
+}
+
+void simulator_process_display_refresh_requests(void) {
+    lv_display_t* display = NULL;
+    uint64_t sequence = 0;
+
+    pthread_mutex_lock(&g_simulator_refresh_mutex);
+    if (g_simulator_refresh_completed < g_simulator_refresh_requested) {
+        sequence = g_simulator_refresh_requested;
+        display = g_simulator_refresh_display;
+    }
+    pthread_mutex_unlock(&g_simulator_refresh_mutex);
+
+    if (sequence == 0) {
+        return;
+    }
+
+    lv_lock();
+    lv_refr_now(display);
+    lv_unlock();
+
+    pthread_mutex_lock(&g_simulator_refresh_mutex);
+    if (g_simulator_refresh_completed < sequence) {
+        g_simulator_refresh_completed = sequence;
+    }
+    pthread_cond_broadcast(&g_simulator_refresh_cond);
+    pthread_mutex_unlock(&g_simulator_refresh_mutex);
 }
 
 long int GetTimeUs(void) {
@@ -282,31 +378,62 @@ static void sys_start_socket_worker(void) {
     pthread_mutex_unlock(&g_mq_mutex);
 }
 
-int Waiting4SystemMessage(void* pMsg) {
+int Waiting4SystemMessageTimeout(void* pMsg, int timeout_ms) {
+    struct timespec deadline = {0};
+
     if (!pMsg) return -1;
+    *(JYT_ELF_MQ_MSG**)pMsg = NULL;
 
     if (simulator_lvgl_is_ui_critical_held()) {
+        if (g_simulator_initial_frame_pending) {
+            lv_timer_t* refresh_timer = NULL;
+
+            refresh_timer = lv_display_get_refr_timer(NULL);
+            if (refresh_timer != NULL) {
+                lv_timer_set_cb(refresh_timer, simulator_event_refresh_timer_cb);
+                lv_timer_pause(refresh_timer);
+            }
+            simulator_request_display_refresh(NULL);
+            g_simulator_initial_frame_pending = false;
+            floatair_info("simulator display switched to event-driven refresh");
+        }
         simulator_lvgl_leave_ui_critical();
     }
     sys_start_socket_worker();
 
+    if (timeout_ms >= 0) {
+        clock_gettime(CLOCK_REALTIME, &deadline);
+        deadline.tv_sec += timeout_ms / 1000;
+        deadline.tv_nsec += (long)(timeout_ms % 1000) * 1000L * 1000L;
+        if (deadline.tv_nsec >= 1000000000L) {
+            deadline.tv_sec += 1;
+            deadline.tv_nsec -= 1000000000L;
+        }
+    }
+
     pthread_mutex_lock(&g_mq_mutex);
     while (g_mq_head == NULL && !g_shutdown_requested) {
-        struct timespec ts;
-        clock_gettime(CLOCK_REALTIME, &ts);
-        ts.tv_nsec += 20 * 1000 * 1000;
-        if (ts.tv_nsec >= 1000000000L) {
-            ts.tv_sec += 1;
-            ts.tv_nsec -= 1000000000L;
-        }
+        int wait_ret = 0;
 
-        pthread_cond_timedwait(&g_mq_cond, &g_mq_mutex, &ts);
+        if (timeout_ms < 0) {
+            wait_ret = pthread_cond_wait(&g_mq_cond, &g_mq_mutex);
+        } else {
+            wait_ret = pthread_cond_timedwait(&g_mq_cond, &g_mq_mutex, &deadline);
+        }
+        if (wait_ret == ETIMEDOUT) {
+            break;
+        }
     }
 
     if (g_shutdown_requested) {
         pthread_mutex_unlock(&g_mq_mutex);
         *(JYT_ELF_MQ_MSG**)pMsg = NULL;
         return -1;
+    }
+    if (g_mq_head == NULL) {
+        pthread_mutex_unlock(&g_mq_mutex);
+        simulator_lvgl_enter_ui_critical();
+        return 0;
     }
 
     MQNode* node = g_mq_head;
@@ -318,6 +445,10 @@ int Waiting4SystemMessage(void* pMsg) {
     *(JYT_ELF_MQ_MSG**)pMsg = node->msg;
     free(node);
     return (int)sizeof(JYT_ELF_MQ_MSG*);
+}
+
+int Waiting4SystemMessage(void* pMsg) {
+    return Waiting4SystemMessageTimeout(pMsg, -1);
 }
 
 void simulator_request_shutdown(void) {
@@ -437,14 +568,98 @@ int jyt_dual_scree_root_pos_y_trans(int y_pos) { return y_pos; }
 int jyt_dual_scree_node_pos_x_trans(int delta_z, int x_pos) { return x_pos; }
 
 int set_system_time_from_string(const char* time_str, const char* format) {
+    int year = 0;
+    int month = 0;
+    int day = 0;
+    int hour = 0;
+    int minute = 0;
+    int second = 0;
+    char trailing = '\0';
+    struct tm parsed = {0};
+    struct tm* normalized = NULL;
+    time_t epoch = (time_t)-1;
+
     if (!time_str || !format) {
         floatair_err("time_str or format is NULL");
         return -1;
     }
     floatair_info("time_str=%s format=%s", time_str, format);
-    FLOATAIR_UNUSED(time_str);
     FLOATAIR_UNUSED(format);
+
+    if (sscanf(time_str,
+               "%d-%d-%d %d:%d:%d%c",
+               &year,
+               &month,
+               &day,
+               &hour,
+               &minute,
+               &second,
+               &trailing) != 6 ||
+        year < 1970 || month < 1 || month > 12 || day < 1 || day > 31 ||
+        hour < 0 || hour > 23 || minute < 0 || minute > 59 ||
+        second < 0 || second > 59) {
+        floatair_err("invalid simulator time string: %s", time_str);
+        return -1;
+    }
+
+    parsed.tm_year = year - 1900;
+    parsed.tm_mon = month - 1;
+    parsed.tm_mday = day;
+    parsed.tm_hour = hour;
+    parsed.tm_min = minute;
+    parsed.tm_sec = second;
+    parsed.tm_isdst = -1;
+    epoch = mktime(&parsed);
+    normalized = localtime(&epoch);
+    if (epoch == (time_t)-1 || normalized == NULL ||
+        normalized->tm_year != year - 1900 ||
+        normalized->tm_mon != month - 1 ||
+        normalized->tm_mday != day ||
+        normalized->tm_hour != hour ||
+        normalized->tm_min != minute ||
+        normalized->tm_sec != second) {
+        floatair_err("invalid simulator calendar time: %s", time_str);
+        return -1;
+    }
+
+    pthread_mutex_lock(&g_simulator_time_mutex);
+    g_simulator_time_base = epoch;
+    g_simulator_host_time_base = time(NULL);
+    g_simulator_time_synced = true;
+    pthread_mutex_unlock(&g_simulator_time_mutex);
     return 0;
+}
+
+time_t simulator_system_time_now(void) {
+    time_t host_now = time(NULL);
+    time_t device_now = host_now;
+
+    pthread_mutex_lock(&g_simulator_time_mutex);
+    if (g_simulator_time_synced) {
+        device_now = g_simulator_time_base + (host_now - g_simulator_host_time_base);
+    }
+    pthread_mutex_unlock(&g_simulator_time_mutex);
+    return device_now;
+}
+
+void simulator_handle_local_mq_msg(MQ_NAME_ID qid,
+                                   LOCAL_MSG_ID msg_id,
+                                   const void* payload,
+                                   uint32_t payload_len) {
+    (void)payload;
+    (void)payload_len;
+
+    if (qid == MQ_JYT_SYSTEM_MANAGER_DATA_IN &&
+        msg_id == LMID_SMMAN_GET_DEV_STATE) {
+        jyt_device_state_t device_state = {0};
+
+        device_state.time_now = simulator_system_time_now();
+        device_state.host_connected = sim_socket_get_connection_status() ? 1 : 0;
+        simulator_post_system_event_ex(SET_REPORT_DEVICE_STATE,
+                                       0,
+                                       &device_state,
+                                       (uint16_t)sizeof(device_state));
+    }
 }
 
 int jyt_nuttx_lcd_capture(uint8_t* buf, int size) {

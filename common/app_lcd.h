@@ -7,18 +7,28 @@
 #include "app_def.h"
 
 /**
- * @brief Get the current LCD state
- * @return lcd_state_t Current LCD state
+ * @brief LCD 亮灭屏状态；全系统统一使用 `0` 表示灭屏、`1` 表示亮屏。
  */
 typedef enum
 {
-    LCD_ON,
-    LCD_OFF
+    LCD_OFF = 0,
+    LCD_ON = 1
 } lcd_state_t;
 
 /**
- * @brief Get the current LCD state
- * @return lcd_state_t Current LCD state
+ * @brief 判断 LCD 状态值是否符合 `0=灭屏、1=亮屏` 的统一约定。
+ */
+bool floatair_lcd_state_is_valid(lcd_state_t state);
+
+/**
+ * @brief 获取 LCD 状态的可读名称。
+ * @return `"OFF"`、`"ON"` 或 `"INVALID"`。
+ */
+const char* floatair_lcd_state_name(lcd_state_t state);
+
+/**
+ * @brief 获取当前 LCD 亮灭屏状态。
+ * @return `LCD_OFF(0)` 表示灭屏，`LCD_ON(1)` 表示亮屏。
  */
 lcd_state_t floatair_lcd_get_state(void);
 
@@ -29,8 +39,8 @@ lcd_state_t floatair_lcd_get_state(void);
 bool floatair_lcd_is_off(void);
 
 /**
- * @brief Set the LCD state
- * @param state LCD state to set
+ * @brief 设置 LCD 亮灭屏状态。
+ * @param state `LCD_OFF(0)` 表示灭屏，`LCD_ON(1)` 表示亮屏。
  */
 void floatair_lcd_set_state(lcd_state_t state);
 
@@ -39,6 +49,13 @@ void floatair_lcd_set_state(lcd_state_t state);
  * @param brightness Brightness value (0-255)
  */
 void floatair_lcd_set_brightness(uint8_t brightness);
+
+/**
+ * @brief 立即使目标对象失效，并将其所属 display 的当前画面提交到 LCD。
+ * @param[in] target 需要刷新的目标 LVGL 对象。
+ * @return 无返回值。
+ */
+void floatair_lcd_commit_frame(lv_obj_t* target);
 
 /**
  * @brief Get the current LCD brightness

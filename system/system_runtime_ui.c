@@ -19,59 +19,40 @@
 #include "common/app_framework/app_layers.h"
 #include "common/app_framework/app_router.h"
 #include "common/app_framework/app_stereo.h"
+#include "common/product_app.h"
 #include "system/popups/notify/notify.h"
 #include "common/widgets/toast.h"
-#include "common/widgets/avatar.h"
-#include "common/widgets/label.h"
+#include "system/popups/assistant/assistant.h"
 #include "system/popups/notify_list/notify_list.h"
 #include "app_lcd.h"
-#include "lvgl/src/font/lv_binfont_loader.h"
+#include "sys_adapter.h"
+#include "ui_res.h"
 
 #include <inttypes.h>
-#include <string.h>
 #include <time.h>
 
-#define SYSTEM_FOOTER_HEIGHT 72
-#define SYSTEM_AVATAR_LEFT 35
-#define SYSTEM_AVATAR_SIZE 40
-#define SYSTEM_AVATAR_BOTTOM 16
-#define SYSTEM_REPLY_GAP 16
-#define SYSTEM_REPLY_LEFT (SYSTEM_AVATAR_LEFT + SYSTEM_AVATAR_SIZE + SYSTEM_REPLY_GAP)
-#define SYSTEM_REPLY_RIGHT 24
-#define SYSTEM_REPLY_EDGE_PADDING 8
-#define SYSTEM_REPLY_PADDING_HOR 12
-#define SYSTEM_REPLY_PADDING_VER 8
-#define SYSTEM_REPLY_BORDER_WIDTH 1
-#define SYSTEM_REPLY_RADIUS 12
-#define SYSTEM_FRAME_PERIOD_MS 67
-#define SYSTEM_REPLY_FONT_SIZE 12
-#define SYSTEM_REPLY_LINE_SPACE 2
-#define SYSTEM_REPLY_FONT_PATH "A:/romfs/system/font/open_runde_12.bin"
-
-static lv_obj_t* g_status_bar_top = NULL;          ///< app 层顶部状态栏对象
-static lv_obj_t* g_page_content = NULL;           ///< Page area between the header and footer.
-static lv_obj_t* g_footer = NULL;                 ///< System-owned footer outside the page roots.
-static avatar_t* g_footer_avatar = NULL;
-static lv_obj_t* g_reply_viewport = NULL;        ///< Reply bubble; a footer sibling that overlays the page.
-static lv_obj_t* g_reply_label = NULL;
-static lv_font_t* g_reply_bitmap_font = NULL;
-static lv_obj_t* g_bt_disconnect_status_bar = NULL;   ///< 蓝牙断连遮罩层顶部状态栏对象
-static bool g_status_bar_top_visible = true;       ///< 顶部状态栏期望显隐状态
+static lv_obj_t* g_status_bar = NULL;                 ///< app 层当前状态栏对象
+static lv_obj_t* g_bt_disconnect_status_bar = NULL;   ///< 蓝牙断连遮罩层底部状态栏对象
+static bool g_status_bar_visible = true;              ///< 当前状态栏期望显隐状态
+static bool g_status_bar_overlay = false;             ///< 状态栏是否叠加在全高页面内容之上
+static status_bar_widget_pos_t g_status_bar_position = STATUS_BAR_POS_BOTTOM; ///< 当前状态栏位置
 static lv_obj_t* g_bt_disconnect_overlay = NULL;      ///< 蓝牙断连全屏遮罩
 static system_bt_disconnect_overlay_ui_t g_bt_disconnect_overlay_ui; ///< 蓝牙断连遮罩生成布局句柄
 static bool g_bt_disconnect_overlay_visible = false;  ///< 蓝牙断连遮罩当前显隐状态
 static uint32_t g_display_level_applied = UINT32_MAX; ///< 最近一次已应用的显示距离档位
 static uint8_t g_status_bar_battery = DEFAULT_BATTERY_LEVEL; ///< 最近一次通过消息推送同步的电量
 static uint8_t g_status_bar_charge_state = 0;         ///< 最近一次通过消息推送同步的充电状态
-static bool g_status_bar_wear_detection_visible = false; ///< 最近一次同步的佩戴检测图标显隐状态
+static bool g_status_bar_left_headset_connected = false;  ///< 最近一次同步的左侧耳机附件连接状态。
+static bool g_status_bar_right_headset_connected = false; ///< 最近一次同步的右侧耳机附件连接状态。
 static time_t g_status_bar_time_epoch = 0;            ///< 最近一次收到的设备时间戳
 static bool g_status_bar_time_valid = false;          ///< 设备时间戳缓存是否有效
 static bool g_status_bar_time_reliable = false;       ///< 时间是否已通过手机对表确认可靠
+static bool g_status_bar_time_visible = true;         ///< 当前 App 是否允许状态栏展示时间
 static bool g_status_bar_refresh_pending = false;     ///< 灭屏期间状态栏缓存变化后待亮屏刷新标记
-static bool g_screen_refresh_pending = false;         ///< 灭屏期间收到强制刷屏请求后的待刷新标记
+static bool g_screen_refresh_pending = false;         ///< 等待下一应用刷新周期处理的强制刷屏标记
 static uint32_t g_progress_hint_event_id = 0;         ///< 自定义进度提示事件 ID
 
-static void system_ui_sync_app_layer_scene(void);
+static bool system_ui_sync_app_layer_scene(void);
 
 uint32_t system_ui_get_progress_hint_event(void) {
     if (g_progress_hint_event_id == 0) {
@@ -103,9 +84,8 @@ bool system_ui_send_progress_hint(const system_progress_hint_param_t* param) {
  * @return `true` 表示允许显示断连遮罩，`false` 表示当前应让前置流程独占页面。
  */
 static bool system_bt_disconnect_overlay_should_show(void) {
-    // The setup screen is needed only before the phone supplies app configuration.
-    // A configured pair remains usable when its phone transport is disconnected.
-    return !app_router_has_app_config();
+    return system_config_get_langselection_finish() &&
+           (!system_get_btconn_state() || !app_router_has_app_config());
 }
 
 /**
@@ -116,6 +96,10 @@ void system_ui_refresh_bt_disconnect_overlay_text(void) {
     const char* bt_name = system_get_btname();
     lv_obj_t* notice_obj = NULL;
     lv_obj_t* name_obj = NULL;
+
+    if (!system_config_get_langselection_finish()) {
+        return;
+    }
 
     notice_obj = label_get_obj(g_bt_disconnect_overlay_ui.notice);
     name_obj = label_get_obj(g_bt_disconnect_overlay_ui.name);
@@ -141,26 +125,26 @@ static bool system_bt_disconnect_overlay_is_active(void) {
 }
 
 /**
- * @brief 获取当前活动页面顶部状态栏对象。
+ * @brief 获取当前活动页面状态栏对象。
  * @return 成功返回当前页面状态栏，失败返回 `NULL`。
  */
 static lv_obj_t* system_ui_get_current_status_bar(void) {
-    if (g_status_bar_top == NULL || !lv_obj_is_valid(g_status_bar_top)) {
+    if (g_status_bar == NULL || !lv_obj_is_valid(g_status_bar)) {
         return NULL;
     }
 
-    return g_status_bar_top;
+    return g_status_bar;
 }
 
 /**
- * @brief Calculate page height between the optional header and permanent footer.
- * @param[in] show_top Whether the top status bar reserves space.
- * @return Page content height.
+ * @brief 依据状态栏模式计算页面内容区高度。
+ * @param[in] visible `true` 表示状态栏可见，`false` 表示状态栏隐藏。
+ * @return 返回内容区高度。
  */
-static lv_coord_t system_ui_calc_page_content_height(bool show_top) {
-    lv_coord_t height = (lv_coord_t)config_lcd.ui_height - SYSTEM_FOOTER_HEIGHT;
+static lv_coord_t system_ui_calc_page_content_height(bool visible) {
+    lv_coord_t height = (lv_coord_t)config_lcd.ui_height;
 
-    if (show_top) {
+    if (visible && !g_status_bar_overlay) {
         height -= STATUS_BAR_HEIGHT;
     }
 
@@ -172,160 +156,30 @@ static lv_coord_t system_ui_calc_page_content_height(bool show_top) {
 }
 
 /**
+ * @brief 依据状态栏模式计算页面内容区纵向偏移。
+ * @param[in] visible `true` 表示状态栏可见。
+ * @param[in] pos 状态栏位置。
+ * @return 返回页面内容区相对 app 层顶部的偏移。
+ */
+static lv_coord_t system_ui_calc_page_content_offset_y(
+    bool visible,
+    status_bar_widget_pos_t pos) {
+    return (visible && !g_status_bar_overlay && pos == STATUS_BAR_POS_TOP)
+               ? STATUS_BAR_HEIGHT
+               : 0;
+}
+
+/**
  * @brief 获取当前状态栏模式下的页面内容区高度。
  * @return 返回内容区高度。
  */
 lv_coord_t system_ui_get_page_content_height(void) {
-    return system_ui_calc_page_content_height(g_status_bar_top_visible);
+    return system_ui_calc_page_content_height(g_status_bar_visible);
 }
 
-lv_obj_t* system_ui_get_page_parent(void) {
-    return g_page_content;
-}
-
-lv_obj_t* system_ui_get_footer(void) {
-    return g_footer;
-}
-
-void system_ui_set_avatar_visible(bool visible) {
-    if (g_footer_avatar == NULL ||
-        ui_widget_is_hidden(UI_WIDGET(g_footer_avatar)) == !visible) {
-        return;
-    }
-
-    avatar_set_visible(g_footer_avatar, visible);
-    if (visible) {
-        avatar_play_entrance(g_footer_avatar, NULL, NULL);
-    } else {
-        avatar_set_state(g_footer_avatar, AVATAR_STATE_NORMAL);
-    }
-}
-
-void system_ui_set_avatar_listening(bool listening) {
-    if (g_footer_avatar != NULL) {
-        avatar_set_state(g_footer_avatar,
-                         listening ? AVATAR_STATE_LISTENING : AVATAR_STATE_NORMAL);
-    }
-}
-
-void system_ui_sync_avatar_state(const char* source) {
-    bool visible = system_runtime_state_get_display_on();
-    bool listening = visible && system_get_btconn_state() &&
-                     system_runtime_state_get_listen_state() == SYSTEM_LISTEN_STATE_LISTENING;
-
-    system_ui_set_avatar_visible(visible);
-    system_ui_set_avatar_listening(listening);
-    floatair_info("avatar visible=%d listening=%d source=%s",
-                  (int)visible, (int)listening, source != NULL ? source : "unknown");
-}
-
-/**
- * Size and place the reply bubble from one text measurement.
- *
- * The footer keeps its fixed height and the bubble, a sibling of the footer in
- * the app layer, overlays the page above it. A reply therefore invalidates only
- * the bubble's old and new areas. Resizing the page host instead made every
- * reply redraw the whole eye. The bubble is not a footer child because LVGL
- * clips invalidation to the parent's coords even with OVERFLOW_VISIBLE.
- */
-static void system_ui_layout_footer(void) {
-    if (g_reply_viewport == NULL || g_reply_label == NULL) return;
-
-    const char* text = lv_label_get_text(g_reply_label);
-    if (text == NULL || text[0] == '\0') {
-        lv_obj_add_flag(g_reply_viewport, LV_OBJ_FLAG_HIDDEN);
-        return;
-    }
-
-    const lv_font_t* font = lv_obj_get_style_text_font(g_reply_label, LV_PART_MAIN);
-    lv_coord_t text_inset = SYSTEM_REPLY_PADDING_HOR + SYSTEM_REPLY_BORDER_WIDTH;
-    lv_coord_t max_bubble_width = LV_MAX(1, (lv_coord_t)config_lcd.ui_width -
-                                             SYSTEM_REPLY_LEFT - SYSTEM_REPLY_RIGHT);
-    lv_coord_t max_text_width = LV_MAX(1, max_bubble_width - 2 * text_inset);
-    lv_point_t size = {0, 0};
-
-    /* Same wrapping as the label draw, without any object layout passes. */
-    lv_text_get_size(&size, text, font, 0, SYSTEM_REPLY_LINE_SPACE, max_text_width, LV_TEXT_FLAG_NONE);
-    lv_coord_t text_width = LV_CLAMP(1, (lv_coord_t)size.x, max_text_width);
-    lv_coord_t text_height = LV_MAX(1, (lv_coord_t)size.y);
-
-    lv_coord_t status_bar_bottom = g_status_bar_top_visible ? STATUS_BAR_HEIGHT : 0;
-    lv_coord_t max_bubble_height = LV_MAX(1, (lv_coord_t)config_lcd.ui_height - status_bar_bottom -
-                                              2 * SYSTEM_REPLY_EDGE_PADDING);
-    lv_coord_t bubble_width = text_width + 2 * text_inset;
-    lv_coord_t bubble_height = LV_MIN(text_height + 2 * (SYSTEM_REPLY_PADDING_VER + SYSTEM_REPLY_BORDER_WIDTH),
-                                      max_bubble_height);
-
-    /* Layer-local top: centered on the ball, kept below the status bar and
-     * above the bottom edge padding. Anchored to the bottom like the footer. */
-    lv_coord_t ui_height = (lv_coord_t)config_lcd.ui_height;
-    lv_coord_t avatar_mid_y = ui_height - SYSTEM_AVATAR_BOTTOM - SYSTEM_AVATAR_SIZE / 2;
-    lv_coord_t min_top = status_bar_bottom + SYSTEM_REPLY_EDGE_PADDING;
-    lv_coord_t max_top = LV_MAX(min_top, ui_height - SYSTEM_REPLY_EDGE_PADDING - bubble_height);
-    lv_coord_t top = LV_CLAMP(min_top, avatar_mid_y - bubble_height / 2, max_top);
-
-    lv_obj_set_size(g_reply_label, text_width, text_height);
-    lv_obj_set_size(g_reply_viewport, bubble_width, bubble_height);
-    lv_obj_align(g_reply_viewport, LV_ALIGN_BOTTOM_LEFT, SYSTEM_REPLY_LEFT,
-                 -(ui_height - top - bubble_height));
-    lv_obj_remove_flag(g_reply_viewport, LV_OBJ_FLAG_HIDDEN);
-}
-
-static void system_ui_layout_page_content(void) {
-    system_ui_layout_footer();
-    if (g_page_content == NULL) {
-        return;
-    }
-    lv_obj_set_size(g_page_content, config_lcd.ui_width, system_ui_get_page_content_height());
-    lv_obj_align(g_page_content, LV_ALIGN_TOP_LEFT, 0,
-                 g_status_bar_top_visible ? STATUS_BAR_HEIGHT : 0);
-}
-
-static const lv_font_t* system_ui_reply_font(void) {
-    if (g_reply_bitmap_font == NULL) {
-        g_reply_bitmap_font = lv_binfont_create(SYSTEM_REPLY_FONT_PATH);
-        if (g_reply_bitmap_font != NULL) {
-            g_reply_bitmap_font->fallback = get_font_by_size_near(SYSTEM_REPLY_FONT_SIZE);
-        }
-        floatair_info("reply font load path=%s size=%u loaded=%d",
-                      SYSTEM_REPLY_FONT_PATH, (unsigned int)SYSTEM_REPLY_FONT_SIZE,
-                      g_reply_bitmap_font != NULL);
-    }
-    return g_reply_bitmap_font != NULL
-        ? g_reply_bitmap_font
-        : get_font_by_size_near(SYSTEM_REPLY_FONT_SIZE);
-}
-
-bool system_ui_set_reply(const char* text) {
-    if (text == NULL || g_reply_label == NULL || g_reply_viewport == NULL) return false;
-    if (strcmp(lv_label_get_text(g_reply_label), text) == 0) return true;
-
-    lv_label_set_text(g_reply_label, text);
-    system_ui_layout_footer();
-    lv_obj_scroll_to_y(g_reply_viewport, 0, LV_ANIM_OFF);
-    system_ui_request_frame();
-    return true;
-}
-
-bool system_ui_scroll_reply(lv_event_code_t code) {
-    if ((code != LV_EVENT_GESTURE_LEFT && code != LV_EVENT_GESTURE_RIGHT) ||
-        g_reply_viewport == NULL || g_reply_label == NULL ||
-        lv_obj_has_flag(g_reply_viewport, LV_OBJ_FLAG_HIDDEN)) {
-        return false;
-    }
-    lv_obj_update_layout(g_reply_viewport);
-    lv_coord_t max_scroll = lv_obj_get_scroll_y(g_reply_viewport) +
-                            lv_obj_get_scroll_bottom(g_reply_viewport);
-    if (max_scroll <= 0) return false;
-
-    /* Page by the visible height, keeping one line of context. */
-    const lv_font_t* font = lv_obj_get_style_text_font(g_reply_label, LV_PART_MAIN);
-    lv_coord_t line_advance = (lv_coord_t)lv_font_get_line_height(font) + SYSTEM_REPLY_LINE_SPACE;
-    lv_coord_t step = LV_MAX(1, lv_obj_get_content_height(g_reply_viewport) - line_advance);
-    lv_coord_t next = lv_obj_get_scroll_y(g_reply_viewport) +
-                     (code == LV_EVENT_GESTURE_LEFT ? step : -step);
-    lv_obj_scroll_to_y(g_reply_viewport, LV_CLAMP(0, next, max_scroll), LV_ANIM_OFF);
-    return true;
+lv_coord_t system_ui_get_page_content_offset_y(void) {
+    return system_ui_calc_page_content_offset_y(g_status_bar_visible,
+                                                g_status_bar_position);
 }
 
 /**
@@ -351,12 +205,53 @@ static bool system_ui_apply_display_distance_level_if_needed(void) {
 }
 
 /**
- * @brief 同步 app 层尺寸与显示距离位移。
- * @return 无返回值。
+ * @brief 同步 app 层尺寸、显示距离与垂直显示位置。
+ * @return `true` 表示应用图层纵向位置发生变化，`false` 表示保持不变。
  */
-static void system_ui_sync_app_layer_scene(void) {
+static bool system_ui_sync_app_layer_scene(void) {
+    const char* current_app = app_manager_current_name();
+    system_display_position_t position = system_ui_get_display_position();
+    bool move_app = product_app_name_has_capability(
+        current_app,
+        PRODUCT_APP_CAP_DISPLAY_POSITION);
+    bool move_app_float = move_app || product_app_name_has_capability(
+        current_app,
+        PRODUCT_APP_CAP_DISPLAY_POSITION_FLOAT);
+    int32_t available_shift = 0;
+    int32_t position_offset_y = 0;
+    int32_t app_offset_y = 0;
+    int32_t app_float_offset_y = 0;
+
     app_layers_resize((int32_t)config_lcd.ui_width, (int32_t)config_lcd.ui_height);
-    system_ui_layout_page_content();
+
+    if (move_app_float) {
+        available_shift = (int32_t)config_lcd.ui_height -
+                          SYSTEM_UI_HALF_PAGE_HEIGHT -
+                          STATUS_BAR_HEIGHT;
+        if (available_shift < 0) {
+            available_shift = 0;
+        }
+
+        if (position == SYSTEM_DISPLAY_POSITION_TOP) {
+            position_offset_y = -available_shift;
+        } else if (position == SYSTEM_DISPLAY_POSITION_MIDDLE) {
+            position_offset_y = -(available_shift / 2);
+        }
+    }
+
+    app_offset_y = move_app ? position_offset_y : 0;
+    app_float_offset_y = move_app_float ? position_offset_y : 0;
+    if (!app_layers_set_vertical_offsets(app_offset_y, app_float_offset_y)) {
+        return false;
+    }
+
+    floatair_info("sync app vertical position: app=%s position=%d app_offset_y=%" PRId32
+                  " app_float_offset_y=%" PRId32,
+                  current_app != NULL ? current_app : "N/A",
+                  (int)position,
+                  app_offset_y,
+                  app_float_offset_y);
+    return true;
 }
 
 /**
@@ -386,6 +281,10 @@ static bool system_ui_refresh_status_bar_time(lv_obj_t* status_bar, time_t time_
 
     snprintf(timebuf, sizeof(timebuf), "%02d:%02d", ptm->tm_hour, ptm->tm_min);
     status_bar_update_time(status_bar, timebuf);
+    status_bar_update_calendar(status_bar,
+                               (uint8_t)ptm->tm_mday,
+                               (uint8_t)(ptm->tm_mon + 1),
+                               (uint8_t)ptm->tm_wday);
     return true;
 }
 
@@ -419,127 +318,65 @@ void system_ui_set_time_reliable(bool reliable) {
     }
 
     status_bar = system_ui_get_current_status_bar();
-    system_ui_set_status_bar_time_visible(status_bar, reliable);
+    system_ui_set_status_bar_time_visible(status_bar,
+                                          reliable && g_status_bar_time_visible);
     system_ui_set_status_bar_time_visible(g_bt_disconnect_status_bar, reliable);
 }
 
 /**
- * @brief 按当前遮罩状态同步当前页顶部状态栏显隐。
+ * @brief 按当前遮罩状态同步当前页状态栏显隐。
  * @return 无返回值。
  */
 static void system_bt_disconnect_overlay_sync_status_bar(void) {
     lv_obj_t* status_bar = system_ui_get_current_status_bar();
     const char* current_app = app_manager_current_name();
-    bool show_top = g_status_bar_top_visible;
+    bool show_status_bar = g_status_bar_visible;
 
     if (status_bar == NULL) {
-        floatair_info("sync bt disconnect status bar skipped: status_bar=NULL, app=%s, current_app=%s, overlay_visible=%d, top_expected=%d",
+        floatair_info("sync bt disconnect status bar skipped: status_bar=NULL, app=%s, current_app=%s, overlay_visible=%d, expected=%d",
                       app_router_get_app(),
                       (current_app != NULL) ? current_app : "N/A",
                       (int)g_bt_disconnect_overlay_visible,
-                      (int)show_top);
+                      (int)show_status_bar);
         return;
     }
 
     status_bar_set_visible(status_bar,
-                           g_bt_disconnect_overlay_visible ? false : show_top);
-    floatair_info("sync bt disconnect status bar: status_bar=%p, current_app=%s, overlay_visible=%d, top_expected=%d",
+                           g_bt_disconnect_overlay_visible ? false : show_status_bar);
+    floatair_info("sync bt disconnect status bar: status_bar=%p, current_app=%s, overlay_visible=%d, expected=%d",
                   status_bar,
                   (current_app != NULL) ? current_app : "N/A",
                   (int)g_bt_disconnect_overlay_visible,
-                  (int)show_top);
+                  (int)show_status_bar);
 
-    if (!g_bt_disconnect_overlay_visible && show_top) {
+    if (!g_bt_disconnect_overlay_visible && show_status_bar) {
         lv_obj_move_foreground(status_bar);
     }
 }
 
 /**
- * @brief 创建 app 层顶部状态栏。
+ * @brief 创建 app 层状态栏。
  * @param[in] parent 状态栏父对象。
  * @return 无返回值。
  */
-static void system_status_bar_top_create(lv_obj_t* parent) {
-    if (parent == NULL || g_status_bar_top != NULL) {
+static void system_status_bar_create(lv_obj_t* parent) {
+    if (parent == NULL || g_status_bar != NULL) {
         return;
     }
 
-    g_status_bar_top = status_bar_create_with_pos(
+    g_status_bar = status_bar_create_with_pos(
         parent,
         (int32_t)config_lcd.ui_width,
         NULL,
-        STATUS_BAR_POS_TOP);
-    floatair_assert(g_status_bar_top != NULL, "top status bar create failed");
-    system_ui_refresh_status_bar(g_status_bar_top);
-    status_bar_set_visible(g_status_bar_top, g_status_bar_top_visible);
-    lv_obj_move_foreground(g_status_bar_top);
-    floatair_info("top status bar created: parent=%p status_bar=%p", parent, g_status_bar_top);
-}
-
-static void system_footer_avatar_deleted(lv_event_t* event) {
-    (void)event;
-    g_footer_avatar = NULL;
-}
-
-/** Create the footer and its avatar once, alongside the top status bar. */
-static void system_footer_create(lv_obj_t* parent) {
-    if (parent == NULL || g_footer != NULL) {
-        return;
-    }
-
-    g_footer = lv_obj_create(parent);
-    floatair_assert(g_footer != NULL, "footer create failed");
-    lv_obj_remove_style_all(g_footer);
-    lv_obj_remove_flag(g_footer, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE |
-                                    LV_OBJ_FLAG_CLICK_FOCUSABLE);
-    lv_obj_set_size(g_footer, LV_PCT(100), SYSTEM_FOOTER_HEIGHT);
-    lv_obj_align(g_footer, LV_ALIGN_BOTTOM_LEFT, 0, 0);
-    lv_obj_null_on_delete(&g_footer);
-
-    g_footer_avatar = avatar_create(g_footer, SYSTEM_AVATAR_SIZE);
-    floatair_assert(g_footer_avatar != NULL, "footer avatar create failed");
-    lv_obj_t* avatar_obj = ui_widget_get_obj(UI_WIDGET(g_footer_avatar));
-    lv_obj_align(avatar_obj, LV_ALIGN_BOTTOM_LEFT, SYSTEM_AVATAR_LEFT, -SYSTEM_AVATAR_BOTTOM);
-    lv_obj_add_event_cb(avatar_obj, system_footer_avatar_deleted, LV_EVENT_DELETE, NULL);
-    avatar_set_visible(g_footer_avatar, false);
-
-    /* Sibling above the footer so it can extend over the page; see system_ui_layout_footer. */
-    g_reply_viewport = lv_obj_create(parent);
-    floatair_assert(g_reply_viewport != NULL, "reply viewport create failed");
-    lv_obj_remove_style_all(g_reply_viewport);
-    lv_obj_remove_flag(g_reply_viewport, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CLICK_FOCUSABLE |
-                                       LV_OBJ_FLAG_SCROLL_ELASTIC | LV_OBJ_FLAG_SCROLL_MOMENTUM |
-                                       LV_OBJ_FLAG_SCROLL_CHAIN);
-    lv_obj_set_scroll_dir(g_reply_viewport, LV_DIR_VER);
-    lv_obj_set_scrollbar_mode(g_reply_viewport, LV_SCROLLBAR_MODE_OFF);
-    /* Opaque: the bubble covers page content beneath it. */
-    lv_obj_set_style_bg_color(g_reply_viewport, lv_color_black(), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(g_reply_viewport, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_pad_hor(g_reply_viewport, SYSTEM_REPLY_PADDING_HOR, LV_PART_MAIN);
-    lv_obj_set_style_pad_ver(g_reply_viewport, SYSTEM_REPLY_PADDING_VER, LV_PART_MAIN);
-    lv_obj_set_style_border_color(g_reply_viewport, lv_color_white(), LV_PART_MAIN);
-    lv_obj_set_style_border_opa(g_reply_viewport, LV_OPA_60, LV_PART_MAIN);
-    lv_obj_set_style_border_width(g_reply_viewport, SYSTEM_REPLY_BORDER_WIDTH, LV_PART_MAIN);
-    lv_obj_set_style_radius(g_reply_viewport, SYSTEM_REPLY_RADIUS, LV_PART_MAIN);
-    lv_obj_set_size(g_reply_viewport, 1, 1);
-    lv_obj_align(g_reply_viewport, LV_ALIGN_BOTTOM_LEFT, SYSTEM_REPLY_LEFT, -SYSTEM_REPLY_EDGE_PADDING);
-    lv_obj_add_flag(g_reply_viewport, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_null_on_delete(&g_reply_viewport);
-
-    /* A plain label: the widget wrapper's font binding and layout passes are
-     * not needed, since system_ui_layout_footer sizes it explicitly. */
-    g_reply_label = lv_label_create(g_reply_viewport);
-    floatair_assert(g_reply_label != NULL, "reply label create failed");
-    lv_obj_remove_flag(g_reply_label, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CLICK_FOCUSABLE);
-    lv_label_set_long_mode(g_reply_label, LV_LABEL_LONG_WRAP);
-    lv_label_set_text(g_reply_label, "");
-    lv_obj_set_style_text_font(g_reply_label, system_ui_reply_font(), LV_PART_MAIN);
-    lv_obj_set_style_text_color(g_reply_label, lv_color_white(), LV_PART_MAIN);
-    lv_obj_set_style_text_align(g_reply_label, LV_TEXT_ALIGN_LEFT, LV_PART_MAIN);
-    lv_obj_set_style_text_line_space(g_reply_label, SYSTEM_REPLY_LINE_SPACE, LV_PART_MAIN);
-    lv_obj_set_size(g_reply_label, 1, 1);
-    lv_obj_set_pos(g_reply_label, 0, 0);
-    lv_obj_null_on_delete(&g_reply_label);
+        g_status_bar_position);
+    floatair_assert(g_status_bar != NULL, "status bar create failed");
+    system_ui_refresh_status_bar(g_status_bar);
+    status_bar_set_visible(g_status_bar, g_status_bar_visible);
+    lv_obj_move_foreground(g_status_bar);
+    floatair_info("status bar created: parent=%p status_bar=%p position=%d",
+                  parent,
+                  g_status_bar,
+                  (int)g_status_bar_position);
 }
 
 /**
@@ -567,7 +404,7 @@ static void system_bt_disconnect_overlay_create(lv_obj_t* parent) {
         status_bar_host,
         (int32_t)config_lcd.ui_width,
         NULL,
-        STATUS_BAR_POS_TOP);
+        STATUS_BAR_POS_BOTTOM);
     floatair_assert(g_bt_disconnect_status_bar != NULL, "bt disconnect status bar create failed");
     system_ui_refresh_status_bar(g_bt_disconnect_status_bar);
 
@@ -597,8 +434,14 @@ void system_ui_refresh_status_bar(lv_obj_t* status_bar) {
 
     status_bar_update_battery(status_bar, g_status_bar_battery);
     status_bar_update_charge_state(status_bar, g_status_bar_charge_state);
-    status_bar_set_wear_detection_visible(status_bar, g_status_bar_wear_detection_visible);
-    system_ui_set_status_bar_time_visible(status_bar, g_status_bar_time_reliable);
+    status_bar_update_headset_state(status_bar,
+                                    g_status_bar_left_headset_connected,
+                                    g_status_bar_right_headset_connected);
+    status_bar_update_bt_state(status_bar, system_get_btconn_state());
+    system_ui_set_status_bar_time_visible(
+        status_bar,
+        g_status_bar_time_reliable &&
+            (status_bar != g_status_bar || g_status_bar_time_visible));
     if (g_status_bar_time_reliable && g_status_bar_time_valid) {
         (void)system_ui_refresh_status_bar_time(status_bar, g_status_bar_time_epoch);
     }
@@ -609,15 +452,19 @@ void system_ui_refresh_status_bar(lv_obj_t* status_bar) {
  * @return 无返回值。
  */
 void system_ui_refresh_display_distance_level(void) {
+    lv_coord_t content_h = system_ui_get_page_content_height();
+
     if (!system_ui_apply_display_distance_level_if_needed()) {
         return;
     }
 
-    lv_coord_t content_h = system_ui_get_page_content_height();
     floatair_info("refresh display distance level: app=%s content_h=%d",
                   app_manager_current_name() != NULL ? app_manager_current_name() : "N/A",
                   (int)content_h);
-    app_manager_sync_current_view_layout((int32_t)config_lcd.ui_width, content_h);
+    app_manager_sync_current_view_layout(
+        (int32_t)config_lcd.ui_width,
+        content_h,
+        (int32_t)system_ui_get_page_content_offset_y());
     system_bt_disconnect_overlay_sync_status_bar();
     if (system_bt_disconnect_overlay_is_active()) {
         lv_obj_move_foreground(g_bt_disconnect_overlay);
@@ -643,30 +490,111 @@ bool system_ui_refresh_screen_now(void) {
         return false;
     }
 
+    (void)system_ui_sync_app_layer_scene();
     floatair_info("refresh screen now: screen=%p", screen);
-    lv_obj_invalidate(screen);
-    lv_refr_now(NULL);
+    floatair_lcd_commit_frame(screen);
     return true;
 }
 
-void system_ui_request_frame(void) {
-    lv_timer_t* refr_timer = NULL;
+bool system_ui_request_screen_refresh(void) {
+    g_screen_refresh_pending = true;
+    return true;
+}
 
-    if (floatair_lcd_get_state() == LCD_OFF) {
-        return;
+bool system_ui_apply_pending_screen_refresh(void) {
+    lv_obj_t* screen = NULL;
+
+    if (!g_screen_refresh_pending || floatair_lcd_get_state() == LCD_OFF) {
+        return false;
     }
 
-    /* Only reschedules the refresh timer. If nothing was invalidated the
-     * refresh is a no-op, so this is safe to call on every input event. */
-    refr_timer = lv_display_get_refr_timer(NULL);
-    if (refr_timer == NULL) {
-        return;
+    screen = lv_screen_active();
+    if (screen == NULL || !lv_obj_is_valid(screen)) {
+        floatair_warn("pending refresh retained: active screen invalid");
+        return false;
     }
-    lv_timer_ready(refr_timer);
+
+    (void)system_ui_sync_app_layer_scene();
+    g_screen_refresh_pending = false;
+    lv_obj_invalidate(screen);
+    floatair_dbg("pending refresh applied: screen=%p", screen);
+    return true;
 }
 
 /**
- * @brief 将电量值同步到顶部状态栏。
+ * @brief 获取当前持久化的应用垂直显示位置。
+ * @return 返回顶部、中部或底部显示位置。
+ */
+system_display_position_t system_ui_get_display_position(void) {
+    uint32_t position = system_config_get_displayposition();
+
+    if (position < (uint32_t)SYSTEM_DISPLAY_POSITION_TOP ||
+        position > (uint32_t)SYSTEM_DISPLAY_POSITION_BOTTOM) {
+        return SYSTEM_DISPLAY_POSITION_BOTTOM;
+    }
+    return (system_display_position_t)position;
+}
+
+bool system_ui_set_display_position(system_display_position_t position) {
+    system_display_position_t previous = system_ui_get_display_position();
+
+    if (position < SYSTEM_DISPLAY_POSITION_TOP ||
+        position > SYSTEM_DISPLAY_POSITION_BOTTOM) {
+        floatair_err("invalid display position: %d", (int)position);
+        return false;
+    }
+
+    if (position == previous) {
+        return true;
+    }
+
+    if (!system_config_set_displayposition((uint32_t)position)) {
+        floatair_err("persist display position failed: %d", (int)position);
+        return false;
+    }
+    floatair_info("set display position: %d->%d", (int)previous, (int)position);
+    return system_ui_request_screen_refresh();
+}
+
+bool system_ui_render_screen_off_frame(void) {
+    lv_obj_t* parent = NULL;
+    lv_obj_t* frame = NULL;
+
+    if (floatair_lcd_get_state() == LCD_OFF) {
+        return false;
+    }
+
+    parent = app_layers_get_top();
+    if (parent == NULL || !lv_obj_is_valid(parent)) {
+        floatair_warn("screen off frame unavailable: parent=%p", parent);
+        return false;
+    }
+
+    frame = lv_obj_create(parent);
+    if (frame == NULL) {
+        floatair_warn("screen off frame create failed");
+        return false;
+    }
+    lv_obj_remove_style_all(frame);
+    lv_obj_set_size(frame, LV_PCT(100), LV_PCT(100));
+    lv_obj_align(frame, LV_ALIGN_TOP_LEFT, 0, 0);
+    lv_obj_set_style_bg_color(frame, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(frame, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_bg_image_src(frame, UI_RES_IMAGE_PROCESSING, LV_PART_MAIN);
+    lv_obj_set_style_bg_image_opa(frame, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_bg_image_tiled(frame, false, LV_PART_MAIN);
+    lv_obj_clear_flag(frame, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_move_foreground(frame);
+    lv_obj_update_layout(frame);
+
+    floatair_lcd_commit_frame(frame);
+    lv_obj_delete(frame);
+    floatair_info("screen off processing frame committed");
+    return true;
+}
+
+/**
+ * @brief 将电量值同步到底部状态栏。
  * @param[in] battery 电量百分比。
  * @return 无返回值。
  */
@@ -690,7 +618,7 @@ void system_ui_update_battery(uint8_t battery) {
 }
 
 /**
- * @brief 将充电状态同步到顶部状态栏。
+ * @brief 将充电状态同步到底部状态栏。
  * @param[in] charge_state 充电状态值。
  * @return 无返回值。
  */
@@ -714,31 +642,51 @@ void system_ui_update_charge_state(uint8_t charge_state) {
 }
 
 /**
- * @brief 设置顶部状态栏佩戴检测图标显隐。
- * @param[in] visible `true` 表示显示图标占位，`false` 表示隐藏图标占位。
+ * @brief 将左右耳机附件连接状态同步到全局状态栏。
+ * @param[in] left_connected `true` 表示左侧耳机附件已连接。
+ * @param[in] right_connected `true` 表示右侧耳机附件已连接。
  * @return 无返回值。
  */
-void system_ui_set_wear_detection_visible(bool visible) {
+void system_ui_update_headset_state(bool left_connected, bool right_connected) {
     lv_obj_t* status_bar = NULL;
 
-    g_status_bar_wear_detection_visible = visible;
+    g_status_bar_left_headset_connected = left_connected;
+    g_status_bar_right_headset_connected = right_connected;
     if (floatair_lcd_get_state() == LCD_OFF) {
         g_status_bar_refresh_pending = true;
-        floatair_dbg("wear detection ui update deferred: lcd off");
+        floatair_dbg("headset state ui update deferred: lcd off");
         return;
     }
 
     status_bar = system_ui_get_current_status_bar();
     if (status_bar != NULL && lv_obj_is_valid(status_bar)) {
-        status_bar_set_wear_detection_visible(status_bar, visible);
+        status_bar_update_headset_state(status_bar, left_connected, right_connected);
     }
     if (g_bt_disconnect_status_bar != NULL && lv_obj_is_valid(g_bt_disconnect_status_bar)) {
-        status_bar_set_wear_detection_visible(g_bt_disconnect_status_bar, visible);
+        status_bar_update_headset_state(g_bt_disconnect_status_bar,
+                                        left_connected,
+                                        right_connected);
     }
 }
 
 /**
- * @brief 按指定时间戳刷新顶部状态栏时间。
+ * @brief 获取当前设备时间及手机对时可靠性。
+ * @param[out] reliable 时间是否已通过手机对时确认可靠；允许传入 `NULL`。
+ * @return 当前设备时间戳。
+ */
+time_t system_ui_time_now(bool* reliable) {
+    if (reliable != NULL) {
+        *reliable = g_status_bar_time_reliable;
+    }
+#if defined(BUILD_NATIVE) && BUILD_NATIVE
+    return simulator_system_time_now();
+#else
+    return time(NULL);
+#endif
+}
+
+/**
+ * @brief 按指定时间戳刷新状态栏时间与日期。
  * @param[in] time_now 需要显示的时间戳。
  * @return `true` 表示刷新成功，`false` 表示刷新失败。
  */
@@ -755,7 +703,9 @@ bool system_ui_update_time_from_epoch(time_t time_now) {
 
     bool ok = true;
     status_bar = system_ui_get_current_status_bar();
-    system_ui_set_status_bar_time_visible(status_bar, g_status_bar_time_reliable);
+    system_ui_set_status_bar_time_visible(status_bar,
+                                          g_status_bar_time_reliable &&
+                                              g_status_bar_time_visible);
     system_ui_set_status_bar_time_visible(g_bt_disconnect_status_bar, g_status_bar_time_reliable);
     if (!g_status_bar_time_reliable) {
         return true;
@@ -775,22 +725,17 @@ bool system_ui_update_time_from_epoch(time_t time_now) {
  * @return 无返回值。
  */
 void system_ui_flush_pending_after_screen_on(void) {
-    bool refresh_screen = g_screen_refresh_pending;
-
     if (floatair_lcd_get_state() == LCD_OFF) {
         return;
     }
 
     if (g_status_bar_refresh_pending) {
         g_status_bar_refresh_pending = false;
-        system_ui_refresh_status_bar(g_status_bar_top);
+        system_ui_refresh_status_bar(g_status_bar);
         system_ui_refresh_status_bar(g_bt_disconnect_status_bar);
     }
 
-    if (refresh_screen) {
-        g_screen_refresh_pending = false;
-        (void)system_ui_refresh_screen_now();
-    }
+    /* 强制刷屏请求由应用消息循环在下一刷新周期统一执行。 */
 }
 
 /**
@@ -798,6 +743,9 @@ void system_ui_flush_pending_after_screen_on(void) {
  * @return `true` 表示事件已被遮罩吞掉，`false` 表示应继续分发。
  */
 bool system_ui_try_intercept_bt_disconnect_overlay_input(void) {
+    if (!system_config_get_langselection_finish()) {
+        return false;
+    }
     if (!system_bt_disconnect_overlay_is_active()) {
         return false;
     }
@@ -821,6 +769,11 @@ void system_ui_sync_shell_state(void) {
                   app_manager_current_name() != NULL ? app_manager_current_name() : "N/A",
                   (int)g_bt_disconnect_overlay_visible);
     system_ui_set_bt_disconnect_overlay_visible(overlay_visible);
+    if (system_ui_sync_app_layer_scene()) {
+        (void)system_ui_request_screen_refresh();
+    }
+    status_bar_update_bt_state(g_status_bar, bt_connected);
+    status_bar_update_bt_state(g_bt_disconnect_status_bar, bt_connected);
 }
 
 /**
@@ -832,7 +785,9 @@ void system_ui_set_bt_disconnect_overlay_visible(bool visible) {
     bool overlay_valid = g_bt_disconnect_overlay != NULL && lv_obj_is_valid(g_bt_disconnect_overlay);
     bool hidden_before = false;
 
-    if (visible) (void)system_ui_set_reply("");
+    if (!system_config_get_langselection_finish()) {
+        visible = false;
+    }
 
     if (overlay_valid) {
         hidden_before = lv_obj_has_flag(g_bt_disconnect_overlay, LV_OBJ_FLAG_HIDDEN);
@@ -867,6 +822,7 @@ void system_ui_set_bt_disconnect_overlay_visible(bool visible) {
         system_notification_clear();
         toast_dismiss_active();
         (void)notify_list_close();
+        (void)assistant_close(false);
         jyt_dual_screen_set_root_distance((int)distance);
         g_display_level_applied = level;
         system_ui_sync_app_layer_scene();
@@ -887,11 +843,11 @@ void system_ui_set_bt_disconnect_overlay_visible(bool visible) {
                   (int)visible,
                   (int)lv_obj_has_flag(g_bt_disconnect_overlay, LV_OBJ_FLAG_HIDDEN),
                   (int)system_bt_disconnect_overlay_is_active(),
-                  (int)g_status_bar_top_visible);
+                  (int)g_status_bar_visible);
 }
 
 /**
- * @brief Initialize the system screen, page container, header, and footer.
+ * @brief 初始化系统 LVGL 根节点、页面容器和状态栏。
  * @return 返回当前活动屏幕根对象，失败时触发断言。
  */
 lv_obj_t* system_init_lvgl_fb(void) {
@@ -900,18 +856,6 @@ lv_obj_t* system_init_lvgl_fb(void) {
     int32_t output_width = 0;
     int32_t output_height = 0;
     floatair_assert(p_root != NULL, "lv_screen_active failed");
-
-    /* Pace animation and regular redraws at about 15 FPS in every state.
-     * Input and reply updates can still request an immediate refresh. */
-    lv_timer_t* animation_timer = lv_anim_get_timer();
-    lv_timer_t* refresh_timer = lv_display_get_refr_timer(NULL);
-    if (animation_timer != NULL) {
-        lv_timer_set_period(animation_timer, SYSTEM_FRAME_PERIOD_MS);
-    }
-    if (refresh_timer != NULL) {
-        lv_timer_set_period(refresh_timer, SYSTEM_FRAME_PERIOD_MS);
-    }
-
     config_lcd.ui_x_begin = SYSTEM_LCD_UI_X_BEGIN;
     config_lcd.ui_y_begin = SYSTEM_LCD_UI_Y_BEGIN;
     config_lcd.ui_width = SYSTEM_LCD_UI_WIDTH;
@@ -938,31 +882,22 @@ lv_obj_t* system_init_lvgl_fb(void) {
         page_parent = p_root;
     }
 
-    g_page_content = lv_obj_create(page_parent);
-    floatair_assert(g_page_content != NULL, "page content create failed");
-    lv_obj_remove_style_all(g_page_content);
-    lv_obj_remove_flag(g_page_content, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_null_on_delete(&g_page_content);
-    system_ui_layout_page_content();
-
-    system_status_bar_top_create(page_parent);
-    system_footer_create(page_parent);
+    system_status_bar_create(page_parent);
     system_bt_disconnect_overlay_create(
         (app_layers_get_overlay() != NULL) ? app_layers_get_overlay() : p_root);
     floatair_info("init lvgl fb: defer shell sync until first page load");
     (void)system_ui_apply_display_distance_level_if_needed();
     system_ui_sync_app_layer_scene();
-    system_ui_sync_avatar_state("init");
     return p_root;
 }
 
 /**
  * @brief 获取指定位置的系统状态栏对象。
  * @param[in] pos 状态栏位置。
- * @return 返回对应位置的状态栏对象；当前仅支持顶部状态栏。
+ * @return 返回对应位置的当前状态栏对象；位置不匹配时返回 `NULL`。
  */
 lv_obj_t* system_get_status_bar(status_bar_widget_pos_t pos) {
-    if (pos != STATUS_BAR_POS_TOP) {
+    if (pos != g_status_bar_position) {
         return NULL;
     }
 
@@ -970,30 +905,100 @@ lv_obj_t* system_get_status_bar(status_bar_widget_pos_t pos) {
 }
 
 /**
- * @brief 设置顶部状态栏显示模式，并同步页面布局与遮罩层级。
- * @param[in] show_top `true` 表示显示顶部状态栏，`false` 表示隐藏。
+ * @brief 设置状态栏显示模式与位置，并同步页面布局与遮罩层级。
+ * @param[in] visible `true` 表示显示状态栏，`false` 表示隐藏。
+ * @param[in] pos 状态栏目标位置。
  * @return 无返回值。
  */
-void system_status_bar_set_mode(bool show_top) {
+void system_status_bar_set_mode_at(bool visible, status_bar_widget_pos_t pos) {
     lv_coord_t content_h = 0;
-    bool prev_show_top = true;
+    lv_coord_t content_offset_y = 0;
+    bool prev_visible = g_status_bar_visible;
+    status_bar_widget_pos_t prev_position = g_status_bar_position;
 
-    prev_show_top = g_status_bar_top_visible;
-    g_status_bar_top_visible = show_top;
-    floatair_info("set status bar mode: prev=%d next=%d current_app=%s",
-                  (int)prev_show_top,
-                  (int)show_top,
-                  app_manager_current_name() != NULL ? app_manager_current_name() : "N/A");
-
-    if (prev_show_top == show_top) {
+    if (pos != STATUS_BAR_POS_TOP && pos != STATUS_BAR_POS_BOTTOM) {
+        floatair_err("invalid status bar position: %d", (int)pos);
         return;
     }
 
-    system_ui_layout_page_content();
-    content_h = system_ui_get_page_content_height();
-    app_manager_sync_current_view_layout((int32_t)config_lcd.ui_width, content_h);
+    g_status_bar_visible = visible;
+    g_status_bar_position = pos;
+    status_bar_set_position(g_status_bar, pos);
+    floatair_info("set status bar mode: visible=%d->%d position=%d->%d current_app=%s",
+                  (int)prev_visible,
+                  (int)visible,
+                  (int)prev_position,
+                  (int)pos,
+                  app_manager_current_name() != NULL ? app_manager_current_name() : "N/A");
+
+    if (prev_visible != visible || prev_position != pos) {
+        content_h = system_ui_calc_page_content_height(visible);
+        content_offset_y = system_ui_calc_page_content_offset_y(visible, pos);
+        app_manager_sync_current_view_layout((int32_t)config_lcd.ui_width,
+                                             content_h,
+                                             content_offset_y);
+    }
+
+    if (visible) {
+        system_ui_refresh_status_bar(g_status_bar);
+    }
     system_bt_disconnect_overlay_sync_status_bar();
     if (system_bt_disconnect_overlay_is_active()) {
         lv_obj_move_foreground(g_bt_disconnect_overlay);
     }
+}
+
+void system_status_bar_set_position(status_bar_widget_pos_t pos) {
+    system_status_bar_set_mode_at(g_status_bar_visible, pos);
+}
+
+void system_status_bar_set_mode(bool show_bottom) {
+    system_status_bar_set_mode_at(show_bottom, STATUS_BAR_POS_BOTTOM);
+}
+
+/**
+ * @brief 切换状态栏占位模式，并同步当前页面承载区尺寸。
+ * @param[in] overlay `true` 表示页面内容保持全高，`false` 表示为状态栏预留高度。
+ * @return 无返回值。
+ */
+void system_status_bar_set_overlay(bool overlay) {
+    lv_coord_t content_h = 0;
+    lv_coord_t content_offset_y = 0;
+
+    if (g_status_bar_overlay == overlay) {
+        return;
+    }
+
+    g_status_bar_overlay = overlay;
+    content_h = system_ui_calc_page_content_height(g_status_bar_visible);
+    content_offset_y = system_ui_calc_page_content_offset_y(g_status_bar_visible,
+                                                            g_status_bar_position);
+    app_manager_sync_current_view_layout((int32_t)config_lcd.ui_width,
+                                         content_h,
+                                         content_offset_y);
+    system_bt_disconnect_overlay_sync_status_bar();
+    if (system_bt_disconnect_overlay_is_active()) {
+        lv_obj_move_foreground(g_bt_disconnect_overlay);
+    }
+}
+
+/**
+ * @brief 设置当前 App 状态栏的时间显示策略。
+ * @param[in] visible `true` 表示时间可靠时允许显示，`false` 表示始终隐藏。
+ * @return 无返回值。
+ */
+void system_status_bar_set_time_visible(bool visible) {
+    lv_obj_t* status_bar = system_ui_get_current_status_bar();
+
+    g_status_bar_time_visible = visible;
+    system_ui_set_status_bar_time_visible(status_bar,
+                                          visible && g_status_bar_time_reliable);
+}
+
+void system_status_bar_set_app_name(const char* app_name) {
+    if (g_status_bar == NULL || !lv_obj_is_valid(g_status_bar)) {
+        return;
+    }
+
+    status_bar_update_app_name(g_status_bar, app_name);
 }

@@ -174,6 +174,84 @@ CMake 模块按职责拆分：
 
 `JY_APP_PRODUCT` 用于选择产品 overlay，默认值为 `jytek`。CMake 配置阶段会先执行 overlay 清理，再应用对应产品目录。
 
+每个 `products/<product>/lfsd/` 都保存该产品完整的 LFSD 输入，包括通用资源和产品专属配置。仓库根目录 `lfsd/` 只是在产品同步和构建期间生成的工作副本，目录整体由 Git 忽略，不保存任何受版本控制的源文件。
+
+Overlay 清理会清空根目录 `lfsd/`，随后把当前产品的 `lfsd/` 完整复制到根目录。切换产品时必须执行该同步流程，避免保留上一个产品的文件。修改通用 LFSD 资源时，需要同步更新所有使用该资源的产品目录。
+
+每个 Speech 逻辑 App 的配置独立保存在 `products/<product>/lfsd/apps/<app>/config.json`；多个 Speech 入口之间不得再共用 `apps/speech/config.json`。
+
+每个 `products/<product>/product.json` 使用正向清单声明参与构建的 App 模块、逻辑 App 的 name/msgid、公共角色和能力。构建只收集清单中的 `apps/<app>/`，并在构建目录生成身份定义和注册表；未列入清单的 App 目录不会参与源码或 UI 编译。
+
+`apps/common/` 存放多个 App 复用且不包含产品身份的共享实现，产品通过 `common_modules` 正向选择参与编译的共享子模块。复用共享运行时的逻辑入口使用静态 profile 描述符，因此可以独立删除入口目录，而不会复制 Speech、Phone 或 STT 视图代码。
+
+#### `product.json` 字段说明
+
+顶层字段：
+
+| 字段 | 必填 | 含义 |
+| --- | --- | --- |
+| `schema_version` | 是 | 清单格式版本，目前只支持 `1`。 |
+| `product` | 是 | 产品名，必须与 `products/<product>/` 的目录名完全一致，只能包含字母、数字、下划线和连字符。 |
+| `status_bar_headset` | 否 | 是否启用状态栏耳机附件显示，默认为 `false`；启用后按左耳、右耳和双耳连接状态显示三态图。 |
+| `home_status_bar_position` | 否 | Home 状态栏位置：`bottom`（默认）或 `top`。 |
+| `home_guide_step2_mode` | 否 | Home 开机引导第二步演示 App 与语言栏：`translate`（默认，翻译双语言）、`transcribe`（转写单语言）或 `hidden`（翻译且隐藏语言栏）。 |
+| `common_modules` | 否 | 参与编译的共享实现目录列表，对应 `apps/common/<module>/`。未声明时默认为空。 |
+| `modules` | 是 | 参与编译并在启动时注册的 App 模块正向清单，对应 `apps/<directory>/`。至少包含一项。 |
+| `apps` | 是 | 当前产品可识别的逻辑 App 清单，用于生成 App name、msgid 和能力表。至少包含一项。 |
+| `roles` | 是 | 公共逻辑所需的角色到 `apps[].key` 的映射。所有规定角色都必须配置。 |
+
+`modules` 的字符串写法 `"home"` 等价于：
+
+```json
+{"directory": "home", "api": "home", "registration": "function", "symbol": "home_app_register"}
+```
+
+对象写法支持以下字段：
+
+| 字段 | 必填 | 含义 |
+| --- | --- | --- |
+| `directory` | 是 | App 源码目录名，对应 `apps/<directory>/`，同时决定该目录是否参与编译。 |
+| `api` | 否 | 模块 API 名，默认等于 `directory`；头文件必须为 `apps/<directory>/<api>.h`。当目录名与公开 API 不同时使用，例如 `{"directory": "prompter_pro", "api": "prompter"}`。 |
+| `registration` | 否 | 注册方式：`function`（默认）调用注册函数；`descriptor` 使用静态 profile 描述符接入共享运行时。 |
+| `runtime` | 条件必填 | 仅用于 `descriptor`，必须引用已选入 `common_modules` 的共享运行时，例如 `speech` 或 `phone`；`function` 模块不能声明此字段。该字段用于校验依赖，真正把共享源码加入构建的是 `common_modules`。 |
+| `symbol` | 否 | 自定义注册符号。`function` 默认 `<api>_app_register`，`descriptor` 默认 `<api>_app_module`。 |
+
+`apps` 中每一项支持以下字段：
+
+| 字段 | 必填 | 含义 |
+| --- | --- | --- |
+| `key` | 是 | 清单内部的稳定标识，供 `roles` 引用；同一产品内必须唯一。 |
+| `macro` | 是 | 生成 C 宏的后缀，必须是大写标识符，例如 `TRANSCRIBE` 会生成 `APP_NAME_TRANSCRIBE` 和可选的 `APP_MSG_ID_TRANSCRIBE`。 |
+| `module` | 否 | 逻辑 App 对应的已选模块目录，必须出现在 `modules` 中。省略时表示只声明产品身份、不注册独立业务模块，例如系统提供的 Assistant。 |
+| `name` | 是 | App 的真实运行时/协议名称，UTF-8 编码后必须少于 32 字节，同一产品内必须唯一。 |
+| `msg_id` | 否 | App 协议消息 ID，范围为 `1` 至 `0xFFFFFFFF`，同一产品内必须唯一。没有独立业务消息 ID 的逻辑入口可以省略。 |
+| `home_action` | 否 | 从 Home 激活 App 时执行的动作：`set_view`（默认）切换到对应 App，`open_assistant` 在当前页面打开 Assistant 弹层。 |
+| `capabilities` | 否 | 公共逻辑查询的能力列表，未声明时为空。 |
+
+当前支持的 `capabilities`：
+
+| 值 | 含义 |
+| --- | --- |
+| `upload_progress` | 支持显示上传进度。 |
+| `assistant_open_blocked` | 当前 App 页面阻止打开 Assistant。 |
+| `display_position` | 按显示位置同时搬移 App 页面和 `app_float` 浮层。 |
+| `display_position_float` | App 页面保持不动，仅按显示位置搬移 `app_float` 浮层。 |
+| `guide` | 该 App 承担新手引导能力。 |
+| `guide_simple` | 使用 Guide 内部自闭环的轻量引导。 |
+| `stt_question_no_skip` | STT 问题区更新不可丢弃。 |
+
+`roles` 必须包含以下字段，其值均为同一清单中已存在的 `apps[].key`：
+
+| 角色 | 含义 |
+| --- | --- |
+| `home` | 默认首页。 |
+| `langselection` | 语言选择页。 |
+| `watch_home` | 手表连接场景首页。 |
+| `guide` | 新手引导页。 |
+| `assistant` | Assistant 配置主体。 |
+
+`modules` 控制“哪些源码参与编译以及如何注册”，`apps` 控制“产品有哪些逻辑身份和协议 ID”，`roles` 控制“公共代码应使用哪个逻辑 App”。删除某个私有 App 目录前，需要先从所有保留产品的 `modules`、`apps` 和 `roles` 中移除或替换对应引用。
+
 如果只是清理 overlay，不能直接用 `JY_APP_PRODUCT=clean` 产出构建；需要选择实际产品名。
 
 ## 构建概览
@@ -193,9 +271,9 @@ ARM 和模拟器构建都需要使用 OS 仓导出的 OS SDK 包。直接调用 
 板端常用脚本分为开发构建和烧录包打包两类：
 
 - `scripts/develop.sh` / `scripts/develop.bat`：配置并构建 ARM 目标。
-- `scripts/package.sh` / `scripts/package.bat`：配置并构建 ARM 目标，成功后把 `build/nuttx_lfsc.bin`、`build/nuttx_lfsd.bin`、`build/nuttx_romfs.bin` 和仓库根目录 `burn_plan.ini` 打成 `build/H6_APP_<tag>-<count>-g<hash>.7z`。
+- `scripts/package.sh` / `scripts/package.bat`：配置并构建 ARM 目标，成功后把 `build/nuttx_lfsc.bin`、`build/nuttx_lfsd.bin`、`build/nuttx_romfs.bin`、`build/nuttx_lromfs.bin` 和仓库根目录 `burn_plan.ini` 打成 `build/H6_APP_<tag>-<count>-g<hash>.7z`。`nuttx_lromfs.bin` 优先使用 `products/<product>/left_romfs/kws/` 下的产品专属 KWS 固件和模型；产品未提供时使用根目录 `left_romfs/kws/` 的默认资源。
 
-使用该烧录包时只需要烧录右腿。
+该烧录包会把 App 文件系统烧到右腿，并把 KWS ROMFS 烧到左腿。
 
 `package.*` 依赖 7-Zip：Linux/macOS 需要 `7z` 或 `7za` 在 `PATH` 中；Windows 会优先查找 `PATH`，再尝试默认安装路径 `C:\Program Files\7-Zip\7z.exe`。
 

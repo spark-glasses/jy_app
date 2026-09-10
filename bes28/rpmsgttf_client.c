@@ -45,7 +45,7 @@ typedef struct {
     int32_t line_height;
     int32_t base_line;
 
-    /* Bitmap wrapper for LVGL — points to its draw buffer */
+    /* Bitmap wrapper for LVGL — points to OS-side buffer */
     lv_draw_buf_t bitmap_wrapper;
     uint32_t      current_pool_slot;
     uint8_t       wrapper_in_use;
@@ -110,11 +110,13 @@ static const void* rpmsgttf_get_glyph_bitmap_cb(lv_font_glyph_dsc_t* g_dsc,
     const lv_font_t* font = g_dsc->resolved_font;
     rpmsgttf_font_desc_t* dsc = (rpmsgttf_font_desc_t*)font->dsc;
 
-    /* The OS rasterizes into the buffer supplied by LVGL. */
-    struct rpmsgttf_glyph_bmp_resp_s resp = {
-        .m33_addr = (uint32_t)(uintptr_t)draw_buf->data,
-        .data_size = draw_buf->data_size,
-    };
+    /* Provide draw_buf to rpmsgttf_get_glyph_bmp via resp fields:
+     * m33_addr = buffer address, data_size = buffer capacity.
+     * The function writes directly into this buffer. */
+    struct rpmsgttf_glyph_bmp_resp_s resp;
+    resp.m33_addr  = (uint32_t)(uintptr_t)draw_buf->data;
+    resp.data_size = draw_buf->data_size;
+
     int ret = rpmsgttf_get_glyph_bmp(dsc->font_id, glyph_index, &resp);
     if (ret != 0) {
         floatair_err("[RTTF] glyph_bmp failed: font_id=%" PRId32 " gi=%" PRIu32 " ret=%d",
@@ -122,7 +124,7 @@ static const void* rpmsgttf_get_glyph_bitmap_cb(lv_font_glyph_dsc_t* g_dsc,
         return NULL;
     }
 
-    /* Keep LVGL's buffer ownership and use the returned glyph dimensions. */
+    /* Rasterization wrote directly into draw_buf->data — no memcpy needed */
     dsc->bitmap_wrapper.data = draw_buf->data;
     dsc->bitmap_wrapper.header = draw_buf->header;
     dsc->bitmap_wrapper.header.w = resp.w;

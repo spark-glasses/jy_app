@@ -1,6 +1,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <sys/statfs.h>
 #include <dirent.h>
 #include <errno.h>
 #include <stdlib.h>
@@ -23,7 +24,7 @@ struct floatair_dir {
 #define SYSTEM_ROOT_PATH "/jyt_d"
 #define SYSTEM_IMAGES_PATH "/romfs/system/images/"
 #define SYSTEM_FONT_FILE "/romfs/system/font/font.ttf" ///< 系统常规文字字体文件。
-#define SYSTEM_I18N_PATH "/jyt_d/system/i18n"
+#define SYSTEM_I18N_PATH "/romfs/system/i18n"
 #define SYSTEM_CONFIG_FILE "/jyt_d/system/config.json"
 
 #define APPS_BASE_PATH "/jyt_d/apps/"
@@ -153,6 +154,21 @@ int floatair_fs_tell(void* handle, uint32_t* pos) {
     return FLOATAIR_FS_OK;
 }
 
+/**
+ * @brief 同步文件数据到 LittleFS 底层存储。
+ * @param[in] handle 已打开的文件句柄。
+ * @return `FLOATAIR_FS_OK` 表示同步完成，其他值表示同步失败。
+ */
+int floatair_fs_sync(void* handle) {
+    if (!handle) return FLOATAIR_FS_ERR_PARAM;
+    fa_file_t* h = (fa_file_t*)handle;
+    if (fsync(h->fd) != 0) {
+        floatair_err("fsync fail errno=%d(%s)", errno, strerror(errno));
+        return FLOATAIR_FS_ERR_IO;
+    }
+    return FLOATAIR_FS_OK;
+}
+
 int floatair_fs_close(void* handle) {
     if (!handle) return FLOATAIR_FS_ERR_PARAM;
     fa_file_t* h = (fa_file_t*)handle;
@@ -273,6 +289,34 @@ bool floatair_fs_is_exist(const char* path_in) {
     if (!path_in) return false;
     struct stat st;
     return stat(path_in, &st) == 0;
+}
+
+int floatair_fs_get_usage(const char* path, floatair_fs_usage_t* usage) {
+    struct statfs fs = {0};
+    uint64_t total = 0;
+    uint64_t free = 0;
+    uint64_t remaining = 0;
+
+    if (path == NULL || usage == NULL) {
+        return FLOATAIR_FS_ERR_PARAM;
+    }
+    if (statfs(path, &fs) != 0 || fs.f_bsize == 0) {
+        floatair_err("statfs failed: path=%s errno=%d", path, errno);
+        return FLOATAIR_FS_ERR_IO;
+    }
+
+    total = (uint64_t)fs.f_bsize * (uint64_t)fs.f_blocks;
+    free = (uint64_t)fs.f_bsize * (uint64_t)fs.f_bfree;
+    remaining = (uint64_t)fs.f_bsize * (uint64_t)fs.f_bavail;
+    if (total > UINT32_MAX || free > total || remaining > UINT32_MAX) {
+        floatair_err("filesystem usage out of range: path=%s", path);
+        return FLOATAIR_FS_ERR_GENERIC;
+    }
+
+    usage->total = (uint32_t)total;
+    usage->used = (uint32_t)(total - free);
+    usage->remaining = (uint32_t)remaining;
+    return FLOATAIR_FS_OK;
 }
 
 int floatair_fs_dir_open(const char* path_in, floatair_dir_t** out_dir) {

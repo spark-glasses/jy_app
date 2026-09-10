@@ -17,12 +17,6 @@
 #include "lvgl/src/draw/lv_draw_buf.h"
 #include "system/system_runtime_types.h"
 
-/* Per-frame dirty-area syslog on the UI thread (8-10 lines per frame).
- * Diagnostic only; costs about 1 ms per frame when enabled. */
-#ifndef APP_STEREO_TRACE_INV_AREAS
-#define APP_STEREO_TRACE_INV_AREAS 0
-#endif
-
 #define APP_STEREO_INV_AREA_COMPACT_THRESHOLD (LV_INV_BUF_SIZE - 4u) ///< LVGL 脏区接近上限时提前压缩源脏区。
 #define APP_STEREO_AREA_NEAR_GAP_MAX 2u ///< 允许近邻小脏区合并的最大间隔像素。
 #define APP_STEREO_AREA_NEAR_EXTRA_MAX 256u ///< 允许局部小脏区合并额外增加的最大面积。
@@ -395,7 +389,6 @@ static void app_stereo_insert_display_inv_area(lv_display_t* disp, const lv_area
     disp->inv_area_joined[best_join_index] = 0;
 }
 
-#if APP_STEREO_TRACE_INV_AREAS
 /**
  * @brief 获取眼位名称。
  * @param[in] eye 目标眼位。
@@ -493,8 +486,6 @@ static void app_stereo_log_inv_areas(lv_display_t* disp, const char* stage, bool
     app_stereo_log_eye_inv_areas(disp, stage, APP_STEREO_EYE_RIGHT, active_only);
 }
 
-#endif /* APP_STEREO_TRACE_INV_AREAS */
-
 /**
  * @brief 在 LVGL 渲染合并前统一压缩本帧左右眼脏区。
  * @param[in] e LVGL display 事件。
@@ -515,9 +506,7 @@ static void app_stereo_refr_start_event_cb(lv_event_t* e) {
         return;
     }
 
-#if APP_STEREO_TRACE_INV_AREAS
     app_stereo_log_inv_areas(disp, "small", false);
-#endif
     app_stereo_compact_display_inv_areas(disp);
 }
 
@@ -537,11 +526,7 @@ static void app_stereo_render_start_event_cb(lv_event_t* e) {
         return;
     }
 
-#if APP_STEREO_TRACE_INV_AREAS
     app_stereo_log_inv_areas(disp, "merged", true);
-#else
-    (void)disp;
-#endif
 }
 
 /**

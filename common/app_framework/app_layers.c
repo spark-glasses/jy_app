@@ -12,6 +12,7 @@
 #include "app_def.h"
 #include "common/app_framework/app_stereo.h"
 #include "lvgl/src/core/lv_refr.h"
+#include "lvgl/src/display/lv_display_private.h"
 #include "lvgl/src/draw/lv_draw.h"
 #include "system/system_runtime_types.h"
 
@@ -25,12 +26,16 @@ typedef struct {
     lv_obj_t* app;         ///< 应用页面层
     lv_obj_t* app_float;   ///< 应用内容浮层
     lv_obj_t* overlay;     ///< 系统遮罩层
-    lv_obj_t* popup;       ///< 弹窗层
+    lv_obj_t* popup;       ///< 固定弹窗父层
+    lv_obj_t* popup_background; ///< 固定弹窗背景层
+    lv_obj_t* popup_content; ///< 带视差的弹窗内容层
     lv_obj_t* top;         ///< 最高优先级 UI 层
     int32_t width;         ///< 层级宽度
     int32_t height;        ///< 层级高度
     int32_t root_offset_x; ///< 根层当前横向业务位置
     int32_t root_offset_y; ///< 根层当前纵向业务位置
+    int32_t app_offset_y;  ///< 应用页面层当前纵向位置
+    int32_t app_float_offset_y; ///< 应用内容浮层当前纵向位置
     int32_t app_float_offset_x; ///< 应用内容浮层当前横向视差位置
     int32_t popup_offset_x;///< 弹窗层当前横向视差位置
 } app_layers_state_t;
@@ -38,6 +43,8 @@ typedef struct {
 static app_layers_state_t g_layers = {
     .root_offset_x = INT32_MIN,
     .root_offset_y = INT32_MIN,
+    .app_offset_y = 0,
+    .app_float_offset_y = 0,
     .app_float_offset_x = INT32_MIN,
     .popup_offset_x = INT32_MIN,
 };
@@ -76,6 +83,40 @@ static bool app_layers_layer_has_visible_content(lv_obj_t* layer) {
 }
 
 /**
+ * @brief 根据弹窗内容层是否存在弹窗根对象更新统一背景显隐。
+ * @return 无返回值。
+ */
+static void app_layers_update_popup_background_visibility(void) {
+    bool should_hide = false;
+
+    if (!app_layers_obj_valid(g_layers.popup_background)) {
+        return;
+    }
+
+    should_hide = !app_layers_obj_valid(g_layers.popup_content) ||
+                  lv_obj_get_child_count(g_layers.popup_content) == 0;
+    if (lv_obj_has_flag(g_layers.popup_background, LV_OBJ_FLAG_HIDDEN) == should_hide) {
+        return;
+    }
+
+    if (should_hide) {
+        lv_obj_add_flag(g_layers.popup_background, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_remove_flag(g_layers.popup_background, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+/**
+ * @brief 弹窗内容增删时更新统一背景显隐。
+ * @param[in] e LVGL 事件对象。
+ * @return 无返回值。
+ */
+static void app_layers_popup_content_change_event_handle(lv_event_t* e) {
+    (void)e;
+    app_layers_update_popup_background_visibility();
+}
+
+/**
  * @brief 判断现有层级对象是否仍可复用。
  * @param[in] root 期望的根对象。
  * @return `true` 表示可以复用，`false` 表示需要重建。
@@ -90,6 +131,8 @@ static bool app_layers_is_reusable(lv_obj_t* root) {
            app_layers_obj_valid(g_layers.app_float) &&
            app_layers_obj_valid(g_layers.overlay) &&
            app_layers_obj_valid(g_layers.popup) &&
+           app_layers_obj_valid(g_layers.popup_background) &&
+           app_layers_obj_valid(g_layers.popup_content) &&
            app_layers_obj_valid(g_layers.top);
 }
 
@@ -102,6 +145,8 @@ static void app_layers_reset(void) {
     g_layers = (app_layers_state_t){
         .root_offset_x = INT32_MIN,
         .root_offset_y = INT32_MIN,
+        .app_offset_y = 0,
+        .app_float_offset_y = 0,
         .app_float_offset_x = INT32_MIN,
         .popup_offset_x = INT32_MIN,
     };
@@ -162,12 +207,19 @@ static void app_layers_apply_eye_scene(app_stereo_eye_t eye) {
         lv_obj_align(g_layers.root, LV_ALIGN_TOP_LEFT, root_offset_x, root_offset_y);
     }
 
-    if (app_layers_obj_valid(g_layers.app_float)) {
-        lv_obj_align(g_layers.app_float, LV_ALIGN_CENTER, app_float_offset_x, 0);
+    if (app_layers_obj_valid(g_layers.app)) {
+        lv_obj_align(g_layers.app, LV_ALIGN_TOP_LEFT, 0, g_layers.app_offset_y);
     }
 
-    if (app_layers_obj_valid(g_layers.popup)) {
-        lv_obj_align(g_layers.popup, LV_ALIGN_CENTER, popup_offset_x, 0);
+    if (app_layers_obj_valid(g_layers.app_float)) {
+        lv_obj_align(g_layers.app_float,
+                     LV_ALIGN_CENTER,
+                     app_float_offset_x,
+                     g_layers.app_float_offset_y);
+    }
+
+    if (app_layers_obj_valid(g_layers.popup_content)) {
+        lv_obj_align(g_layers.popup_content, LV_ALIGN_CENTER, popup_offset_x, 0);
     }
 
     if (eye == APP_STEREO_EYE_LEFT) {
@@ -238,6 +290,7 @@ static void app_layers_redraw_obj_to_eye(lv_display_t* disp,
                                          int32_t shift_x,
                                          int32_t shift_y) {
     lv_layer_t layer;
+    lv_layer_t* saved_layer_head = NULL;
     lv_area_t layer_area;
 
     if (disp == NULL || dst_buf == NULL || local_area == NULL || !app_layers_obj_valid(obj) ||
@@ -261,8 +314,18 @@ static void app_layers_redraw_obj_to_eye(lv_display_t* disp,
     lv_matrix_identity(&layer.matrix);
 #endif
 
+    /*
+     * lv_draw_finalize_task_creation() 通过 display 的 layer 链派发任务。
+     * 临时 layer 如果不加入该链，整棵对象树的任务会全部积压到 lv_obj_redraw() 返回后，
+     * 再由 app_layers_wait_draw_layer() 一次性处理，导致全屏刷新出现大量 task/dsc 峰值。
+     */
+    saved_layer_head = disp->layer_head;
+    layer.next = saved_layer_head;
+    disp->layer_head = &layer;
     lv_obj_redraw(&layer, obj);
     app_layers_wait_draw_layer(disp, &layer);
+    disp->layer_head = saved_layer_head;
+    layer.next = NULL;
 }
 
 /**
@@ -297,7 +360,8 @@ static void app_layers_redraw_right_eye_layers(lv_display_t* disp, lv_draw_buf_t
     app_layers_redraw_obj_to_eye(disp, right_buf, local_area, g_layers.background, 0, 0);
     app_layers_redraw_obj_to_eye(disp, right_buf, local_area, g_layers.app, 0, 0);
     app_layers_redraw_obj_to_eye(disp, right_buf, local_area, g_layers.app_float, app_float_shift_x, 0);
-    app_layers_redraw_obj_to_eye(disp, right_buf, local_area, g_layers.popup, popup_shift_x, 0);
+    app_layers_redraw_obj_to_eye(disp, right_buf, local_area, g_layers.popup_background, 0, 0);
+    app_layers_redraw_obj_to_eye(disp, right_buf, local_area, g_layers.popup_content, popup_shift_x, 0);
     app_layers_redraw_obj_to_eye(disp, right_buf, local_area, g_layers.overlay, 0, 0);
     app_layers_redraw_obj_to_eye(disp, right_buf, local_area, g_layers.top, 0, 0);
     app_layers_redraw_obj_to_eye(disp, right_buf, local_area, lv_display_get_layer_top(disp), -right_origin_x, -right_origin_y);
@@ -470,9 +534,8 @@ static bool app_layers_render_eye_cb(lv_display_t* disp,
     }
     right_local_area = right_flush_area;
     lv_area_move(&right_local_area, -right_origin_x, -right_origin_y);
-
     if (!app_layers_layer_has_visible_content(g_layers.app_float) &&
-        !app_layers_layer_has_visible_content(g_layers.popup) &&
+        !app_layers_layer_has_visible_content(g_layers.popup_content) &&
         app_layers_copy_left_eye_to_right(buf, flush_area, &right_flush_area, px_size)) {
         return true;
     }
@@ -553,6 +616,8 @@ bool app_layers_init(lv_obj_t* screen_root, int32_t width, int32_t height) {
     g_layers.app = app_layers_create_layer(g_layers.root, width, height);
     g_layers.app_float = app_layers_create_layer(g_layers.root, width, height);
     g_layers.popup = app_layers_create_layer(g_layers.root, width, height);
+    g_layers.popup_background = app_layers_create_layer(g_layers.popup, width, height);
+    g_layers.popup_content = app_layers_create_layer(g_layers.popup, width, height);
     g_layers.overlay = app_layers_create_layer(g_layers.root, width, height);
     g_layers.top = app_layers_create_layer(g_layers.root, width, height);
 
@@ -562,11 +627,35 @@ bool app_layers_init(lv_obj_t* screen_root, int32_t width, int32_t height) {
         g_layers.app_float == NULL ||
         g_layers.overlay == NULL ||
         g_layers.popup == NULL ||
+        g_layers.popup_background == NULL ||
+        g_layers.popup_content == NULL ||
         g_layers.top == NULL) {
         if (g_layers.root != NULL) lv_obj_delete(g_layers.root);
         g_layers = (app_layers_state_t){
             .root_offset_x = INT32_MIN,
             .root_offset_y = INT32_MIN,
+            .app_offset_y = 0,
+            .app_float_offset_y = 0,
+            .app_float_offset_x = INT32_MIN,
+            .popup_offset_x = INT32_MIN,
+        };
+        return false;
+    }
+
+    if (lv_obj_add_event_cb(g_layers.popup_content,
+                            app_layers_popup_content_change_event_handle,
+                            LV_EVENT_CHILD_CREATED,
+                            NULL) == NULL ||
+        lv_obj_add_event_cb(g_layers.popup_content,
+                            app_layers_popup_content_change_event_handle,
+                            LV_EVENT_CHILD_DELETED,
+                            NULL) == NULL) {
+        lv_obj_delete(g_layers.root);
+        g_layers = (app_layers_state_t){
+            .root_offset_x = INT32_MIN,
+            .root_offset_y = INT32_MIN,
+            .app_offset_y = 0,
+            .app_float_offset_y = 0,
             .app_float_offset_x = INT32_MIN,
             .popup_offset_x = INT32_MIN,
         };
@@ -617,7 +706,12 @@ void app_layers_resize(int32_t width, int32_t height) {
     app_layers_prepare_layer(g_layers.app_float, width, height);
     app_layers_prepare_layer(g_layers.overlay, width, height);
     app_layers_prepare_layer(g_layers.popup, width, height);
+    app_layers_prepare_layer(g_layers.popup_background, width, height);
+    app_layers_prepare_layer(g_layers.popup_content, width, height);
     app_layers_prepare_layer(g_layers.top, width, height);
+    lv_obj_set_style_bg_color(g_layers.popup_background, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(g_layers.popup_background, LV_OPA_70, LV_PART_MAIN);
+    app_layers_update_popup_background_visibility();
 
     app_layers_apply_eye_scene(APP_STEREO_EYE_LEFT);
 
@@ -625,8 +719,22 @@ void app_layers_resize(int32_t width, int32_t height) {
     if (g_layers.app != NULL) lv_obj_move_foreground(g_layers.app);
     if (g_layers.app_float != NULL) lv_obj_move_foreground(g_layers.app_float);
     if (g_layers.popup != NULL) lv_obj_move_foreground(g_layers.popup);
+    if (g_layers.popup_background != NULL) lv_obj_move_background(g_layers.popup_background);
+    if (g_layers.popup_content != NULL) lv_obj_move_foreground(g_layers.popup_content);
     if (g_layers.overlay != NULL) lv_obj_move_foreground(g_layers.overlay);
     if (g_layers.top != NULL) lv_obj_move_foreground(g_layers.top);
+}
+
+bool app_layers_set_vertical_offsets(int32_t app_offset_y, int32_t app_float_offset_y) {
+    if (g_layers.app_offset_y == app_offset_y &&
+        g_layers.app_float_offset_y == app_float_offset_y) {
+        return false;
+    }
+
+    g_layers.app_offset_y = app_offset_y;
+    g_layers.app_float_offset_y = app_float_offset_y;
+    app_layers_apply_eye_scene(APP_STEREO_EYE_LEFT);
+    return true;
 }
 
 lv_obj_t* app_layers_get_background(void) {
@@ -646,7 +754,7 @@ lv_obj_t* app_layers_get_overlay(void) {
 }
 
 lv_obj_t* app_layers_get_popup(void) {
-    return g_layers.popup;
+    return g_layers.popup_content;
 }
 
 lv_obj_t* app_layers_get_top(void) {

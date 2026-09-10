@@ -58,7 +58,6 @@ typedef enum {
     LV_DRAW_TASK_TYPE_MASK_RECTANGLE,
     LV_DRAW_TASK_TYPE_MASK_BITMAP,
     LV_DRAW_TASK_TYPE_VECTOR,
-    LV_DRAW_TASK_TYPE_CUSTOM,      /* Ordered application drawing in the SW unit. */
 } lv_draw_task_type_t;
 
 typedef enum {
@@ -117,13 +116,6 @@ typedef struct {
     size_t dsc_size;
     void * user_data;
 } lv_draw_dsc_base_t;
-
-/* The descriptor and any callback inputs must live until the task completes.
- * LVGL frees the descriptor when it removes the completed task. */
-typedef struct {
-    lv_draw_dsc_base_t base;
-    void (*draw_cb)(lv_draw_unit_t * unit, const void * dsc, const lv_area_t * coords);
-} lv_draw_custom_dsc_t;
 
 /**********************
  * GLOBAL PROTOTYPES

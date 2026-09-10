@@ -28,9 +28,8 @@ lv_screen_active()
 └── root
     ├── background
     ├── app
-    │   ├── page area below the status bar
-    │   │   └── page host
-    │   └── top status bar
+    │   ├── page host
+    │   └── bottom status bar
     ├── popup
     ├── overlay
     └── top
@@ -38,7 +37,7 @@ lv_screen_active()
 
 - `root`：业务层级根，承载 app framework 的所有固定层。
 - `background`：背景层。
-- `app`：页面内容和顶部状态栏，保持在业务坐标系内。
+- `app`：页面内容和底部状态栏，保持在业务坐标系内。
 - `popup`：toast、msgbox、notify、assistant 等普通浮层，使用浮层距离偏移。
 - `overlay`：蓝牙断连、锁屏等系统遮罩，压过普通 popup。
 - `top`：最高优先级 UI，例如调试 HUD；普通弹窗不要放这里。
@@ -111,22 +110,26 @@ on_back       页面自定义返回；返回 true 表示已消费
 
 - 切换前检查 `app_manager` 是否 busy。
 - 当前有来电 notify 或蓝牙断连遮罩时，按规则阻止切换。
-- 切换时清理顶部状态栏自定义 widget。
+- 切换时清理底部状态栏自定义 widget。
 - 本地进入时上报 view change，远端拉起时抑制重复上报。
 - 根据语言选择、新手引导和配置首页解析 `app_router_call_home()` 目标。
 
 新增 App 时通常需要：
 
-1. 将 App 源码放入 `apps/<app_name>/`，构建系统会自动收集源码与 UI 资源。
-2. 在 `app_router.c` 引入 app 头文件并注册 `*_app_register()`。
-3. 确认 `*_app_register()` 已在 `app_router_init()` 注册。
+1. 在需要启用该模块的 `products/<product>/product.json` 中加入模块目录。
+2. 在同一产品清单的 `apps` 中声明逻辑 App 的 name、msgid、角色和通用能力。
+3. 独立实现模块使用默认 `*_app_register()` 约定；复用 `apps/common/` 运行时的入口使用 `registration: "descriptor"` 导出静态 profile 描述符。
 4. 检查首页配置、远端 `setView` 名称和退出返回首页行为。
+
+产品清单使用正向模块列表。未列入清单的 `apps/<app>/` 不参与源码和 UI 编译，公共路由通过构建目录中生成的注册表统一注册模块，不保存具体 App 列表。
+
+`apps/common/` 只保存 App 层真正共享的运行时、视图与控件实现，不能包含具体产品名、私有 App name/msgid 或产品选择判断。产品通过 `common_modules` 正向选择需要的共享子模块，具体入口身份放在独立 App 目录中，以便开源时按目录删除而不复制共享实现。
 
 ## 使用边界
 
 - 框架层只暴露 `lv_obj_t*`，不依赖 `container.h`。
 - 页面内部可以使用 `container`、`label`、`img` 等现有 widget。
-- 顶部状态栏由 `system_runtime_ui` 在 `app` 层统一创建和显隐，页面不要创建私有顶部状态栏。
+- 底部状态栏由 `system_runtime_ui` 在 `app` 层统一创建和显隐，页面不要创建私有底部状态栏。
 - 系统级遮罩挂到 `overlay`，普通通知和弹窗挂到 `popup`。
 - 新增或维护 App 时优先通过 `app_nav_*()` 做页面跳转，避免业务代码直接操作页面栈结构。
 - 修改显示距离、双眼输出或层级顺序时，要同步检查 `system_runtime_ui.c`、弹窗 widget 和 simulator/native 输出模式。

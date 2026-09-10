@@ -267,6 +267,24 @@ static inline int pthread_cond_destroy(pthread_cond_t* cond)
     return 0;
 }
 
+/**
+ * @brief 等待条件变量，并在等待期间原子释放互斥锁。
+ * @param[in] cond 条件变量。
+ * @param[in,out] mutex 调用前已持有、返回前重新持有的互斥锁。
+ * @return 成功返回 0，参数无效或 Win32 等待失败返回 EINVAL。
+ */
+static inline int pthread_cond_wait(pthread_cond_t* cond, pthread_mutex_t* mutex)
+{
+    if (!cond || !mutex) {
+        return EINVAL;
+    }
+
+    if (SleepConditionVariableCS(cond, &mutex->section, INFINITE)) {
+        return 0;
+    }
+    return EINVAL;
+}
+
 
 static inline int pthread_cond_signal(pthread_cond_t* cond)
 {

@@ -16,6 +16,9 @@
 #include <stdint.h>
 #include <time.h>
 
+/** S 系列应用统一使用的底部半屏内容高度。 */
+#define SYSTEM_UI_HALF_PAGE_HEIGHT 170
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -47,28 +50,36 @@ uint32_t system_ui_get_progress_hint_event(void);
 bool system_ui_send_progress_hint(const system_progress_hint_param_t* param);
 
 /**
- * @brief 将电量值同步到顶部状态栏。
+ * @brief 将电量值同步到底部状态栏。
  * @param[in] battery 电量百分比。
  * @return 无返回值。
  */
 void system_ui_update_battery(uint8_t battery);
 
 /**
- * @brief 将充电状态同步到顶部状态栏。
+ * @brief 将充电状态同步到底部状态栏。
  * @param[in] charge_state 充电状态值。
  * @return 无返回值。
  */
 void system_ui_update_charge_state(uint8_t charge_state);
 
 /**
- * @brief 设置顶部状态栏佩戴检测图标显隐。
- * @param[in] visible `true` 表示显示图标占位，`false` 表示隐藏图标占位。
+ * @brief 将左右耳机附件连接状态同步到全局状态栏。
+ * @param[in] left_connected `true` 表示左侧耳机附件已连接。
+ * @param[in] right_connected `true` 表示右侧耳机附件已连接。
  * @return 无返回值。
  */
-void system_ui_set_wear_detection_visible(bool visible);
+void system_ui_update_headset_state(bool left_connected, bool right_connected);
 
 /**
- * @brief 按指定时间戳刷新顶部状态栏时间。
+ * @brief 获取当前设备时间及手机对时可靠性。
+ * @param[out] reliable 时间是否已通过手机对时确认可靠；允许传入 `NULL`。
+ * @return 当前设备时间戳。
+ */
+time_t system_ui_time_now(bool* reliable);
+
+/**
+ * @brief 按指定时间戳刷新底部状态栏时间。
  * @param[in] time_now 需要显示的时间戳。
  * @return `true` 表示刷新成功，`false` 表示刷新失败。
  */
@@ -107,7 +118,7 @@ void system_ui_refresh_bt_disconnect_overlay_text(void);
 void system_ui_sync_shell_state(void);
 
 /**
- * @brief Initialize the system screen, page container, header, and footer.
+ * @brief 初始化系统 LVGL 根节点、页面容器和底部状态栏。
  * @return 返回当前活动屏幕根对象。
  */
 lv_obj_t* system_init_lvgl_fb(void);
@@ -116,25 +127,11 @@ lv_obj_t* system_init_lvgl_fb(void);
  * @return 返回内容区高度。
  */
 lv_coord_t system_ui_get_page_content_height(void);
-/** Return the system-owned parent for normal app pages. */
-lv_obj_t* system_ui_get_page_parent(void);
-/** Return the permanent footer container, or NULL before screen initialization. */
-lv_obj_t* system_ui_get_footer(void);
-
-/** Replace the footer reply. Empty text restores the minimum footer height. */
-bool system_ui_set_reply(const char* text);
-/** Consume forward/backward swipes when the reply needs scrolling. */
-bool system_ui_scroll_reply(lv_event_code_t code);
-/** Show the existing avatar with a roll-in, or hide it and stop its animations. */
-void system_ui_set_avatar_visible(bool visible);
-/** Update the permanent avatar's listening state. */
-void system_ui_set_avatar_listening(bool listening);
 /**
- * Apply the avatar rule from current state: visible while the screen is on,
- * listening while the screen is on and a host is connected. Call after the
- * LCD state or the host connection changes; `source` is for the log only.
+ * @brief 获取当前状态栏模式下页面内容区的纵向偏移。
+ * @return 顶部状态栏可见时返回状态栏高度，否则返回 0。
  */
-void system_ui_sync_avatar_state(const char* source);
+lv_coord_t system_ui_get_page_content_offset_y(void);
 /**
  * @brief 立即刷新指定状态栏的缓存时间、电量和充电状态。
  * @param[in] status_bar 目标状态栏对象。
@@ -152,11 +149,44 @@ void system_ui_refresh_display_distance_level(void);
  */
 bool system_ui_refresh_screen_now(void);
 /**
- * @brief 请求在下一次 lv_timer_handler() 时立即出一帧，不等待刷新周期。
- *        用于用户输入：状态已同步更新，尽早显示而动画仍按刷新周期节奏。
- * @return 无返回值。
+ * @brief 请求在下一次应用刷新周期强制刷新当前活动屏幕。
+ *
+ * 连续请求会合并；灭屏期间的请求会保留到亮屏后的刷新周期。
+ *
+ * @return 始终返回 `true`，表示请求已记录。
  */
-void system_ui_request_frame(void);
+bool system_ui_request_screen_refresh(void);
+/**
+ * @brief 将待处理的强制刷屏请求转换为当前屏幕的 LVGL 无效区域。
+ *
+ * 本函数不立即刷屏，应在周期调用 `lv_timer_handler()` 前执行。
+ *
+ * @return `true` 表示本次应用了一个待处理请求，`false` 表示无请求或暂不可刷新。
+ */
+bool system_ui_apply_pending_screen_refresh(void);
+/**
+ * @brief 获取当前持久化的应用垂直显示位置。
+ * @return 返回顶部、中部或底部显示位置。
+ */
+system_display_position_t system_ui_get_display_position(void);
+/**
+ * @brief 设置支持搬屏应用的垂直显示位置。
+ *
+ * 新位置在下一次刷新周期应用；未声明显示位置能力的 App 始终保持默认位置。
+ *
+ * @param[in] position 垂直显示位置。
+ * @return `true` 表示位置有效，`false` 表示参数无效。
+ */
+bool system_ui_set_display_position(system_display_position_t position);
+/**
+ * @brief 灭屏前同步写入黑底居中的 processing 提示帧。
+ *
+ * 函数内部临时创建提示遮罩，同步刷新后立即销毁对象；已提交的 framebuffer
+ * 内容由随后执行的平台灭屏操作保留。
+ *
+ * @return `true` 表示提示帧已完成刷新，`false` 表示 UI 尚未就绪。
+ */
+bool system_ui_render_screen_off_frame(void);
 /**
  * @brief 亮屏后统一补刷灭屏期间延迟的系统 UI 更新。
  * @return 无返回值。
@@ -169,11 +199,43 @@ void system_ui_flush_pending_after_screen_on(void);
  */
 lv_obj_t* system_get_status_bar(status_bar_widget_pos_t pos);
 /**
- * @brief 设置顶部状态栏显示模式。
- * @param[in] show_top `true` 表示显示顶部状态栏，`false` 表示隐藏。
+ * @brief 设置状态栏显示模式与位置。
+ * @param[in] visible `true` 表示显示状态栏，`false` 表示隐藏。
+ * @param[in] pos 状态栏目标位置。
  * @return 无返回值。
  */
-void system_status_bar_set_mode(bool show_top);
+void system_status_bar_set_mode_at(bool visible, status_bar_widget_pos_t pos);
+/**
+ * @brief 保持当前显隐状态，仅更新状态栏位置。
+ * @param[in] pos 状态栏目标位置。
+ * @return 无返回值。
+ */
+void system_status_bar_set_position(status_bar_widget_pos_t pos);
+/**
+ * @brief 设置默认底部状态栏显示模式。
+ * @param[in] show_bottom `true` 表示显示底部状态栏，`false` 表示隐藏。
+ * @return 无返回值。
+ */
+void system_status_bar_set_mode(bool show_bottom);
+/**
+ * @brief 设置状态栏是否叠加在全高页面内容之上。
+ * @param[in] overlay `true` 表示状态栏不占页面高度，`false` 表示状态栏保留页面占位。
+ * @return 无返回值。
+ */
+void system_status_bar_set_overlay(bool overlay);
+/**
+ * @brief 设置当前 App 状态栏的时间显示策略。
+ * @param[in] visible `true` 表示时间可靠时允许显示，`false` 表示始终隐藏。
+ * @return 无返回值。
+ */
+void system_status_bar_set_time_visible(bool visible);
+
+/**
+ * @brief 设置底部状态栏最左侧显示的当前 App 名称。
+ * @param[in] app_name 展示名称；传入 `NULL` 或空字符串时隐藏。
+ * @return 无返回值。
+ */
+void system_status_bar_set_app_name(const char* app_name);
 
 #ifdef __cplusplus
 }

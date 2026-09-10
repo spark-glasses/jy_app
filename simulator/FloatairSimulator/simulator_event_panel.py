@@ -16,10 +16,6 @@ GROUPS = [
         ("TWS Broken", "SET_TWS_LINK_BROKEN"),
         ("KWS Hit (Configured)", "SET_KWS_HIT"),
     ]),
-    ("Avatar", [
-        ("Normal", "SET_AVATAR_NORMAL"),
-        ("Listening", "SET_AVATAR_LISTENING"),
-    ]),
     ("Battery", [
         ("Low Battery", "SET_JYT_LOW_BATTERY_WARNING"),
         ("Charging", "SET_CHARGER_ON"),
@@ -45,6 +41,18 @@ GROUPS = [
     ]),
 ]
 
+ATTACHMENT_TYPES = [  # 与 JYT_ATTACHMENT_TYPE 的协议值保持一致。
+    ("Glasses Case", 1),
+    ("Charging Cable", 2),
+    ("Headset", 3),
+    ("Empty", 0),
+]
+
+ATTACHMENT_SIDES = [  # 当前硬件定义：从侧为左侧，主侧为右侧。
+    ("Left", 1),
+    ("Right", 0),
+]
+
 
 class EventPanel:
     def __init__(self, fifo_path: str) -> None:
@@ -53,6 +61,8 @@ class EventPanel:
         if sys.platform == "darwin":
             self.root.withdraw()
         self.root.title("Floatair OS Events")
+        self.root.geometry("760x760")
+        self.root.resizable(True, True)
         self.status_var = tk.StringVar(value=f"FIFO: {fifo_path}")
         self.battery_soc_value = tk.StringVar(value="80")
         self.time_text_value = tk.StringVar(value=dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
@@ -65,8 +75,36 @@ class EventPanel:
         except tk.TclError:
             pass
 
-        container = ttk.Frame(self.root, padding=12)
-        container.pack(fill="both", expand=True)
+        viewport = ttk.Frame(self.root)
+        viewport.pack(fill="both", expand=True)
+
+        canvas = tk.Canvas(
+            viewport,
+            borderwidth=0,
+            highlightthickness=0,
+            background=self.root.cget("background"),
+        )
+        scrollbar = ttk.Scrollbar(viewport, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        container = ttk.Frame(canvas, padding=12)
+        container_window = canvas.create_window((0, 0), window=container, anchor="nw")
+        container.bind(
+            "<Configure>",
+            lambda _event: canvas.configure(scrollregion=canvas.bbox("all")),
+        )
+        canvas.bind(
+            "<Configure>",
+            lambda event: canvas.itemconfigure(container_window, width=event.width),
+        )
+        self.root.bind(
+            "<MouseWheel>",
+            lambda event: canvas.yview_scroll(-1 if event.delta > 0 else 1, "units"),
+        )
+        self.root.bind("<Button-4>", lambda _event: canvas.yview_scroll(-1, "units"))
+        self.root.bind("<Button-5>", lambda _event: canvas.yview_scroll(1, "units"))
         container.columnconfigure(0, weight=1)
 
         title = ttk.Label(container, text="OS Event Pad")
@@ -103,6 +141,32 @@ class EventPanel:
                         width=6,
                     ).grid(row=0, column=col, padx=(0 if col == 0 else 6, 0))
 
+        attachment_frame = ttk.LabelFrame(groups_frame, text="Attachments", padding=8)
+        attachment_frame.grid(row=len(GROUPS), column=0, pady=(8, 0), sticky="ew")
+        for col in range(1, len(ATTACHMENT_TYPES) + 1):
+            attachment_frame.columnconfigure(col, weight=1)
+
+        for row, (side_label, side_value) in enumerate(ATTACHMENT_SIDES):
+            ttk.Label(attachment_frame, text=side_label, width=8).grid(
+                row=row,
+                column=0,
+                sticky="w",
+                pady=(0 if row == 0 else 8, 0),
+            )
+            for col, (type_label, type_value) in enumerate(ATTACHMENT_TYPES, start=1):
+                event_line = f"SET_JYT_ACC_TYPE_CHANGED {type_value} {side_value}"
+                ttk.Button(
+                    attachment_frame,
+                    text=type_label,
+                    command=lambda line=event_line: self._write_line(line),
+                ).grid(
+                    row=row,
+                    column=col,
+                    sticky="ew",
+                    padx=(8, 0),
+                    pady=(0 if row == 0 else 8, 0),
+                )
+
         tools_frame = ttk.LabelFrame(container, text="Tools", padding=8)
         tools_frame.pack(fill="x", expand=False, pady=(10, 0))
         tools_frame.columnconfigure(1, weight=1)
@@ -121,8 +185,9 @@ class EventPanel:
         phone_frame.columnconfigure(0, weight=1)
         ttk.Entry(phone_frame, textvariable=self.caller_value, width=18).grid(row=0, column=0, sticky="ew")
         ttk.Button(phone_frame, text="Ringing", command=lambda: self.send_call_event("SET_BT_CALL_RINGING")).grid(row=0, column=1, padx=(8, 0))
-        ttk.Button(phone_frame, text="Connected", command=lambda: self.send_call_event("SET_BT_CALL_CONNECTED")).grid(row=0, column=2, padx=(8, 0))
-        ttk.Button(phone_frame, text="Disconnected", command=lambda: self.send_call_event("SET_BT_CALL_DISCONNECTED")).grid(row=0, column=3, padx=(8, 0))
+        ttk.Button(phone_frame, text="Outgoing", command=lambda: self.send_call_event("SET_BT_CALL_OUTGOING")).grid(row=0, column=2, padx=(8, 0))
+        ttk.Button(phone_frame, text="Connected", command=lambda: self.send_call_event("SET_BT_CALL_CONNECTED")).grid(row=0, column=3, padx=(8, 0))
+        ttk.Button(phone_frame, text="Disconnected", command=lambda: self.send_call_event("SET_BT_CALL_DISCONNECTED")).grid(row=0, column=4, padx=(8, 0))
 
         ttk.Label(tools_frame, text="Spark Reply").grid(row=2, column=0, sticky="w", padx=(0, 8), pady=(10, 0))
         reply_frame = ttk.Frame(tools_frame)
@@ -136,8 +201,6 @@ class EventPanel:
         display_frame = ttk.Frame(tools_frame)
         display_frame.grid(row=3, column=1, sticky="ew", pady=(10, 0))
         display_frame.columnconfigure(tuple(range(7)), weight=1)
-
-        ttk.Label(display_frame, text="List").grid(row=0, column=0, sticky="w", padx=(0, 8))
         list_samples = (
             ("Mixed", "mixed_list"),
             ("Notes", "note_list"),
@@ -146,6 +209,7 @@ class EventPanel:
             ("Drafts", "draft_list"),
             ("Calendar", "calendar_list"),
         )
+        ttk.Label(display_frame, text="List").grid(row=0, column=0, sticky="w", padx=(0, 8))
         for col, (label, sample) in enumerate(list_samples, start=1):
             ttk.Button(
                 display_frame,
@@ -153,7 +217,6 @@ class EventPanel:
                 command=lambda name=sample: self.send_spark_display(name),
             ).grid(row=0, column=col, sticky="ew", padx=(0 if col == 1 else 6, 0))
 
-        ttk.Label(display_frame, text="Full").grid(row=1, column=0, sticky="w", padx=(0, 8), pady=(8, 0))
         full_samples = (
             ("Note", "note_full"),
             ("To-do", "todo_full"),
@@ -162,6 +225,7 @@ class EventPanel:
             ("Calendar", "calendar_full"),
             ("Clear", "clear"),
         )
+        ttk.Label(display_frame, text="Full").grid(row=1, column=0, sticky="w", padx=(0, 8), pady=(8, 0))
         for col, (label, sample) in enumerate(full_samples, start=1):
             ttk.Button(
                 display_frame,
@@ -175,29 +239,24 @@ class EventPanel:
         self.root.update_idletasks()
         if sys.platform == "darwin":
             self._show_away_from_pointer()
-        else:
-            self.root.minsize(max(760, self.root.winfo_reqwidth()), self.root.winfo_reqheight())
 
     def _show_away_from_pointer(self) -> None:
-        """Avoid a Tk 8.6 macOS defect that can disable pointer input at startup."""
+        """Show the window away from the pointer to avoid a Tk 8.6 macOS defect."""
         width = max(760, self.root.winfo_reqwidth())
-        height = self.root.winfo_reqheight()
+        height = max(760, self.root.winfo_reqheight())
         screen_width = self.root.winfo_screenwidth()
         screen_height = self.root.winfo_screenheight()
         pointer_x = self.root.winfo_pointerx()
         pointer_y = self.root.winfo_pointery()
         margin = 24
-
         safe_x = margin if pointer_x >= screen_width / 2 else screen_width - margin - 1
         safe_y = margin if pointer_y >= screen_height / 2 else screen_height - margin - 1
         self.root.geometry(f"1x1+{safe_x}+{safe_y}")
         self.root.deiconify()
         self.root.update()
-
         x = margin if pointer_x >= screen_width / 2 else max(margin, screen_width - width - margin)
         y = margin if pointer_y >= screen_height / 2 else max(margin, screen_height - height - margin)
         self.root.geometry(f"{width}x{height}+{x}+{y}")
-        self.root.minsize(width, height)
 
     def _write_line(self, line: str) -> None:
         try:

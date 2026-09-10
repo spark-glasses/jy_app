@@ -13,6 +13,14 @@
 #include <limits.h>
 #include "simulator_platform.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+const char* app_router_get_app(void);
+#ifdef __cplusplus
+}
+#endif
+
 /* ---- Logging levels ---- */
 #define FLOATAIR_DBG_LVL_ERR 0
 #define FLOATAIR_DBG_LVL_WARN 1
@@ -66,6 +74,7 @@ static inline void floatair_log_internal(int level, const char* tag, const char*
     char time_str[32];
     long time_msec = 0;
     const char* lvl_str = "DBG";
+    const char* current_app = NULL;
     FILE* log_fp = NULL;
 
     va_start(args, fmt);
@@ -77,13 +86,15 @@ static inline void floatair_log_internal(int level, const char* tag, const char*
     else if (level == FLOATAIR_DBG_LVL_WARN) lvl_str = "WRN";
     else if (level == FLOATAIR_DBG_LVL_INFO) lvl_str = "INF";
 
+    current_app = app_router_get_app();
     snprintf(line_buf,
              sizeof(line_buf),
-             "[%s.%03ld][%s][%s] %s (%s:%d)\n",
+             "[%s.%03ld][%s][%s] [%s] %s (%s:%d)\n",
              time_str,
              time_msec,
              lvl_str,
              tag ? tag : "",
+             current_app != NULL && current_app[0] != '\0' ? current_app : "N/A",
              msg,
              func,
              line);

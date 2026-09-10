@@ -1,0 +1,38 @@
+[
+    {
+        "biz": "Toast",
+        "cmd": "showToast",
+        "data": {
+            "duration": 3000,
+            "position": 1,
+            "text": "i'm toast"
+        },
+        "id": 0,
+        "name": "顶部提示",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "Toast",
+        "cmd": "showToast",
+        "data": {
+            "duration": 3000,
+            "position": 2,
+            "text": "i'm toast"
+        },
+        "id": 0,
+        "name": "居中提示",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "Toast",
+        "cmd": "showToast",
+        "data": {
+            "duration": 3000,
+            "position": 3,
+            "text": "i'm toast"
+        },
+        "id": 0,
+        "name": "底部提示",
+        "type": "DATA_RELIABLE"
+    }
+]

@@ -6,6 +6,7 @@ function(jy_app_find_latest_os_sdk_cache OUT_VAR)
     endif()
 
     file(GLOB _os_sdk_cache_candidates
+        CONFIGURE_DEPENDS
         LIST_DIRECTORIES true
         "${_os_sdk_cache_root}/*")
 
@@ -38,15 +39,20 @@ function(jy_app_find_latest_os_sdk_cache OUT_VAR)
 endfunction()
 
 function(jy_app_prepare_os_sdk)
-    set(JY_APP_OS_SDK_ARCHIVE "" CACHE FILEPATH "Path to jy_os_sdk 7z archive")
+    set(JY_APP_OS_SDK_ARCHIVE "" CACHE STRING "Path to jy_os_sdk 7z archive")
     set(JY_APP_OS_SDK_SEVEN_ZIP "7z" CACHE FILEPATH "7-Zip executable used to extract jy_os_sdk archives")
     set(JY_APP_OS_SDK_APP_TAG "FLA>" CACHE STRING "App log prefix used by floatair_dbg.h")
 
     if(JY_APP_OS_SDK_ARCHIVE)
+        file(TO_CMAKE_PATH "${JY_APP_OS_SDK_ARCHIVE}" JY_APP_OS_SDK_ARCHIVE_NORMALIZED)
+        if(IS_ABSOLUTE "${JY_APP_OS_SDK_ARCHIVE_NORMALIZED}")
+            set(JY_APP_OS_SDK_ARCHIVE_ABS "${JY_APP_OS_SDK_ARCHIVE_NORMALIZED}")
+        else()
+            set(JY_APP_OS_SDK_ARCHIVE_ABS "${PROJECT_ROOT}/${JY_APP_OS_SDK_ARCHIVE_NORMALIZED}")
+        endif()
         get_filename_component(JY_APP_OS_SDK_ARCHIVE_ABS
-            "${JY_APP_OS_SDK_ARCHIVE}"
-            ABSOLUTE
-            BASE_DIR "${PROJECT_ROOT}")
+            "${JY_APP_OS_SDK_ARCHIVE_ABS}"
+            ABSOLUTE)
 
         if(NOT EXISTS "${JY_APP_OS_SDK_ARCHIVE_ABS}")
             message(FATAL_ERROR "JY_APP_OS_SDK_ARCHIVE does not exist: ${JY_APP_OS_SDK_ARCHIVE_ABS}")
@@ -108,6 +114,33 @@ function(jy_app_prepare_os_sdk)
 
 #undef APP_TAG
 #define APP_TAG "@JY_APP_OS_SDK_APP_TAG@"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+const char* app_router_get_app(void);
+#ifdef __cplusplus
+}
+#endif
+
+#define JY_APP_FLOATAIR_LOG(priority, color, fmt, args...)                                               \
+    ({                                                                                                   \
+        const char* _floatair_current_app = app_router_get_app();                                        \
+        syslog(priority, color APP_TAG "[%s] " fmt " {%s:%d}" ANSI_COLOR_RESET,                        \
+               (_floatair_current_app != NULL && _floatair_current_app[0] != '\0')                       \
+                   ? _floatair_current_app                                                               \
+                   : "N/A",                                                                             \
+               ##args, __FUNCTION__, __LINE__);                                                          \
+    })
+
+#undef floatair_err
+#undef floatair_warn
+#undef floatair_info
+#undef floatair_dbg
+#define floatair_err(fmt, args...)  JY_APP_FLOATAIR_LOG(LOG_ERR, ANSI_COLOR_BRIGHT_RED, fmt, ##args)
+#define floatair_warn(fmt, args...) JY_APP_FLOATAIR_LOG(LOG_WARNING, ANSI_COLOR_RED, fmt, ##args)
+#define floatair_info(fmt, args...) JY_APP_FLOATAIR_LOG(LOG_INFO, ANSI_COLOR_BRIGHT_GREEN, fmt, ##args)
+#define floatair_dbg(fmt, args...)  JY_APP_FLOATAIR_LOG(LOG_DEBUG, ANSI_COLOR_BRIGHT_BLACK, fmt, ##args)
 ]=] _os_sdk_dbg_override_content @ONLY)
     file(WRITE
         "${JY_APP_OS_SDK_OVERRIDE_DIR}/floatair_dbg.h"

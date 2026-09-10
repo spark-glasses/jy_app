@@ -7,20 +7,15 @@
 #include "app_def.h"
 #include "common/app_framework/app_router.h"
 #include "floatair_fs.h"
+#include "product_app.h"
 #include "system/stt_common.h"
 #include "system/system.h"
-#include "system/system_config_json.h"
 
 #include <string.h>
 
 static bool s_assistant_service_ready = false;          ///< assistant STT 服务是否已初始化。
 static bool s_assistant_service_suspended = false;      ///< 是否已挂起底层 STT 服务状态。
 static stt_service_snapshot_t s_assistant_stt_snapshot; ///< assistant 打开前的底层 STT 状态快照。
-static bool s_assistant_factoryreset_registered = false;
-
-static bool assistant_config_reset_to_default(void);
-static bool assistant_config_ensure_by_path(const char* config_path);
-
 uint32_t assistant_get_close_event(void) {
     static uint32_t s_assistant_close_event_id = 0; ///< assistant 关闭事件 ID。
 
@@ -30,102 +25,14 @@ uint32_t assistant_get_close_event(void) {
     return s_assistant_close_event_id;
 }
 
-static bool assistant_config_is_valid_root(cJSON* root) {
-    if (!root || !cJSON_IsObject(root)) {
-        return false;
-    }
-    cJSON* fontinfo = cJSON_GetObjectItemCaseSensitive(root, "fontinfo");
-    if (!cJSON_IsObject(fontinfo)) {
-        return false;
-    }
-    cJSON* weight = cJSON_GetObjectItemCaseSensitive(fontinfo, "weight");
-    cJSON* word_space = cJSON_GetObjectItemCaseSensitive(fontinfo, "wordSpace");
-    cJSON* row_space = cJSON_GetObjectItemCaseSensitive(fontinfo, "rowSpace");
-    return cJSON_IsNumber(weight) && cJSON_IsNumber(word_space) && cJSON_IsNumber(row_space);
-}
-
-static cJSON* assistant_config_create_default_root(void) {
-    cJSON* root = cJSON_CreateObject();
-    if (!root) {
-        return NULL;
-    }
-    cJSON* fontinfo = cJSON_AddObjectToObject(root, "fontinfo");
-    if (!fontinfo) {
-        cJSON_Delete(root);
-        return NULL;
-    }
-    cJSON_AddItemToObject(fontinfo, "weight", cJSON_CreateNumber(32));
-    cJSON_AddItemToObject(fontinfo, "wordSpace", cJSON_CreateNumber(0));
-    cJSON_AddItemToObject(fontinfo, "rowSpace", cJSON_CreateNumber(0));
-    return root;
-}
-
-static bool assistant_config_write_default(const char* config_path) {
-    cJSON* root = assistant_config_create_default_root();
-    if (!root) {
-        return false;
-    }
-    int ret = save_json(config_path, root);
-    cJSON_Delete(root);
-    return ret == 0;
-}
-
-static bool assistant_config_reset_to_default(void) {
-    char config_path[SYSTEM_MAX_PATH_LEN] = {0};
-    if (!floatair_fs_get_app_config_file(APP_NAME_ASSISTANT, config_path, sizeof(config_path))) {
-        return false;
-    }
-    return assistant_config_write_default(config_path);
-}
-
-static bool assistant_config_ensure_by_path(const char* config_path) {
-    cJSON* root = load_json(config_path);
-    if (root) {
-        bool ok = assistant_config_is_valid_root(root);
-        cJSON_Delete(root);
-        if (ok) {
-            return true;
-        }
-    }
-    return assistant_config_write_default(config_path);
-}
-static const char* const s_assistant_open_ignore_apps[] = {
-    APP_NAME_TRANSCRIBE, ///< 转写页收到 assistant 打开请求时不触发 assistant。
-    APP_NAME_TRANSLATE,  ///< 翻译页收到 assistant 打开请求时不触发 assistant。
-    APP_NAME_PROMPTER,   ///< 提词页收到 assistant 打开请求时不触发 assistant。
-    APP_NAME_AI,         ///< AI 页收到 assistant 打开请求时不触发 assistant。
-};
-
 /**
- * @brief 判断当前应用是否命中指定应用列表。
- * @param[in] current_app 当前路由应用名称。
- * @param[in] apps 应用列表。
- * @param[in] app_count 应用数量。
- * @return `true` 表示命中，`false` 表示未命中。
- */
-static bool assistant_app_name_in_list(const char* current_app, const char* const apps[], size_t app_count) {
-    if (current_app == NULL || apps == NULL) {
-        return false;
-    }
-
-    for (size_t i = 0; i < app_count; i++) {
-        if (apps[i] != NULL && strcmp(current_app, apps[i]) == 0) {
-            return true;
-        }
-    }
-
-    return false;
-}
-
-/**
- * @brief 判断当前应用是否需要忽略 assistant 打开请求。
+ * @brief 判断当前应用是否需要忽略 Assistant 打开请求。
  * @return `true` 表示需要忽略，`false` 表示允许打开。
  */
 static bool assistant_should_ignore_open_request(void) {
-    return assistant_app_name_in_list(app_router_get_app(),
-                                      s_assistant_open_ignore_apps,
-                                      sizeof(s_assistant_open_ignore_apps) /
-                                          sizeof(s_assistant_open_ignore_apps[0]));
+    return product_app_name_has_capability(
+        app_router_get_app(),
+        PRODUCT_APP_CAP_ASSISTANT_OPEN_BLOCKED);
 }
 
 /**
@@ -152,22 +59,15 @@ static void assistant_release_service(void) {
  */
 static bool assistant_ensure_service(void) {
     char config_path[SYSTEM_MAX_PATH_LEN] = {0};
+    const char* assistant_name = product_app_role_name(PRODUCT_APP_ROLE_ASSISTANT);
 
     if (s_assistant_service_ready) {
         return true;
     }
 
-    if (!floatair_fs_get_app_config_file(APP_NAME_ASSISTANT, config_path, sizeof(config_path))) {
+    if (assistant_name == NULL ||
+        !floatair_fs_get_app_config_file(assistant_name, config_path, sizeof(config_path))) {
         floatair_err("get app config file failed");
-        return false;
-    }
-
-    if (!s_assistant_factoryreset_registered) {
-        s_assistant_factoryreset_registered =
-            system_factoryreset_register(APP_NAME_ASSISTANT, assistant_config_reset_to_default);
-    }
-
-    if (!assistant_config_ensure_by_path(config_path)) {
         return false;
     }
 
@@ -187,7 +87,7 @@ static bool assistant_ensure_service(void) {
  * @brief 打开 assistant 弹窗并初始化依赖资源。
  * @return `true` 表示打开成功，`false` 表示打开失败。
  */
-bool assistant_open(void) {
+bool assistant_open(bool report_open) {
     const char* current_app = app_router_get_app();
     bool was_open = assistant_is_open();
 
@@ -206,24 +106,21 @@ bool assistant_open(void) {
     }
 
     assistant_stt_clear();
-    if (!was_open && !system_report_assistant_open()) {
-        (void)assistant_close(false);
-        return false;
+    if (report_open && !was_open) {
+        (void)system_report_assistant_open();
     }
     return true;
 }
 
 /**
- * @brief Close the text popup and release its resources.
+ * @brief 关闭 assistant 弹窗并释放依赖资源。
  * @param[in] report_close 是否主动上报 assistant 已关闭。
- * @return `true` when close is accepted, `false` on failure.
+ * @return `true` 表示关闭成功，`false` 表示关闭失败。
  */
 bool assistant_close(bool report_close) {
-    bool result = assistant_popup_close(report_close);
-    if (!assistant_is_open()) {
-        assistant_release_service();
-    }
-    return result;
+    (void)assistant_popup_close(report_close);
+    assistant_release_service();
+    return true;
 }
 
 /**

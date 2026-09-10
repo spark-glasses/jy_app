@@ -690,7 +690,7 @@ void container_scroll_to_top(container_t* container, lv_anim_enable_t anim_en) {
 /**
  * @brief 将容器内容直接滚动到底部。
  *
- * 调用前会先刷新容器布局并清除旧的滚动偏移，再按最新内容定位到底部。
+ * 调用前会先清除旧的滚动偏移，再刷新容器布局并按最新内容定位到底部。
  *
  * @param container 目标容器句柄。
  * @param anim_en 是否启用滚动动画。
@@ -704,16 +704,17 @@ void container_scroll_to_bottom(container_t* container, lv_anim_enable_t anim_en
     }
 
     obj = container->base.obj;
-    container_refresh_layout_up(container);
-    lv_obj_update_layout(obj);
     lv_obj_scroll_to_y(obj, 0, LV_ANIM_OFF);
+    lv_obj_update_layout(obj);
+    container_refresh_layout_up(container);
     lv_obj_update_layout(obj);
     lv_obj_scroll_to_y(obj, lv_obj_get_scroll_bottom(obj), anim_en);
 }
 
 static void container_scroll_step(container_t* container,
                                   int32_t direction,
-                                  float step_ratio) {
+                                  float step_ratio,
+                                  lv_anim_enable_t anim_en) {
     lv_obj_t* obj = NULL;
     lv_coord_t step = 0;
     int32_t target = 0;
@@ -741,35 +742,39 @@ static void container_scroll_step(container_t* container,
         return;
     }
 
-    lv_obj_scroll_to_y(obj, target, LV_ANIM_OFF);
+    lv_obj_scroll_to_y(obj, target, anim_en);
 }
 
 /**
  * @brief 将容器内容按给定比例向上滚动。
  *
- * 调用前会先刷新容器布局；滚动步长为容器高度乘以 `step_ratio`，
- * 滚动带动画。
+ * 调用前会先刷新容器布局；滚动步长为容器高度乘以 `step_ratio`。
  *
  * @param container 目标容器句柄。
  * @param step_ratio 步长比例，传小于等于 0 时忽略本次滚动。
+ * @param anim_en 是否启用滚动动画。
  * @return 无返回值。
  */
-void container_scroll_up(container_t* container, float step_ratio) {
-    container_scroll_step(container, -1, step_ratio);
+void container_scroll_up(container_t* container,
+                         float step_ratio,
+                         lv_anim_enable_t anim_en) {
+    container_scroll_step(container, -1, step_ratio, anim_en);
 }
 
 /**
  * @brief 将容器内容按给定比例向下滚动。
  *
- * 调用前会先刷新容器布局；滚动步长为容器高度乘以 `step_ratio`，
- * 滚动带动画。
+ * 调用前会先刷新容器布局；滚动步长为容器高度乘以 `step_ratio`。
  *
  * @param container 目标容器句柄。
  * @param step_ratio 步长比例，传小于等于 0 时忽略本次滚动。
+ * @param anim_en 是否启用滚动动画。
  * @return 无返回值。
  */
-void container_scroll_down(container_t* container, float step_ratio) {
-    container_scroll_step(container, 1, step_ratio);
+void container_scroll_down(container_t* container,
+                           float step_ratio,
+                           lv_anim_enable_t anim_en) {
+    container_scroll_step(container, 1, step_ratio, anim_en);
 }
 
 /**

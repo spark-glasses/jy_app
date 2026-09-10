@@ -1,4 +1,4 @@
-# Datapath V3 协议说明
+# JYTek Datapath V3 协议说明
 
 英文版：[datapath_v3_protocol.md](datapath_v3_protocol.md)
 
@@ -9,12 +9,16 @@
 - `system/system_msg_dispatch.c`
 - `system/system_msg_*.c`
 - `system/system_notification.c`
+- `system/system_msg_draw.c`
 - `system/popups/assistant/assistant_msg.c`
 - `system/stt_common.c`
-- `apps/speech/speech_msg.c`
+- `apps/common/speech/speech_msg.c`
 - `apps/ai/ai_msg.c`
-- `apps/prompter_pro/prompter_msg.c`
+- `apps/prompter/prompter_msg.c`
 - `apps/gallery/gallery_msg.c`
+- `apps/navigation/navigation_msg.c`
+- `apps/recorder/recorder_msg.c`
+- `apps/imagefusion/imagefusion_msg.c`
 
 ## 1. 协议边界
 
@@ -135,11 +139,16 @@ map(2) {
 | id | 常量 | 模块 |
 | --- | --- | --- |
 | 0 | `APP_MSG_ID_SYSTEM` | System |
+| 1 | `APP_MSG_ID_HOME` | Home；无独立业务命令 |
 | 2 | `APP_MSG_ID_TRANSCRIBE` | Transcribe |
 | 3 | `APP_MSG_ID_TRANSLATE` | Translate |
+| 4 | `APP_MSG_ID_NAVIGATION` | Navigation |
 | 5 | `APP_MSG_ID_PROMPTER` | Prompter |
 | 7 | `APP_MSG_ID_GALLERY` | Gallery |
 | 8 | `APP_MSG_ID_AI` | AI |
+| 13 | `APP_MSG_ID_GUIDE` | Guide；由 `SystemControl` 控制 |
+| 1001 | `APP_MSG_ID_IMAGEFUSION` | ImageFusion |
+| 1002 | `APP_MSG_ID_RECORDER` | Recorder |
 
 公共处理流程：
 
@@ -167,7 +176,9 @@ System 使用 `id=0`，并按 `payload.biz` 二级路由。
 | `SystemInd` | `system_msg_sysind.c` | 接收远端心跳、保活、关键词响应 |
 | `Notification` | `system_notification.c` | 通知增删改 |
 | `Toast` | `system_msg_toast.c` | Toast 弹窗显示 |
+| `TapMsgbox` | `system_msg_tap_msgbox.c` | 确认框和下载进度 |
 | `File` | `system_msg_file.c` | 文件列表、写入、删除、存在性和清目录 |
+| `Draw` | `system_msg_draw.c` | 在设备屏幕绘制文字、图片和进度条 |
 
 未知 `biz` 或未知 `cmd` 都返回 `ErrCmdErr`。
 
@@ -192,7 +203,7 @@ System 使用 `id=0`，并按 `payload.biz` 二级路由。
 
 | cmd | 请求 `data` | ACK / NACK `data` |
 | --- | --- | --- |
-| `getAll` | `{}` | `{ "time": uint64, "timeConfig": { "time": string, "timestamp": uint64, "timezone": string, "userFormat": string }, "displayConfig": { "mode": uint8 }, "brightness": uint8, "autoBrightnessEnabled": uint8, "fontSize": uint8, "language": string, "inactivityTimeout": uint16, "poweroffTimeout": uint16, "wearDetectionEnabled": uint8, "headGestureConfig": { "upEnabled": uint8, "downEnabled": uint8, "upDeg": int32, "downDeg": int32, "baseDeg": int32 }, "touchpadEnabled": uint8, "idleDetectionEnabled": uint8, "displayDistanceLevel": uint32, "keywordSpottingEnabled": uint8, "notificationEnabled": uint8 }` |
+| `getAll` | `{}` | `{ "time": uint64, "timeConfig": { "time": string, "timestamp": uint64, "timezone": string, "userFormat": string }, "displayConfig": { "mode": uint8 }, "brightness": uint8, "autoBrightnessEnabled": uint8, "fontSize": uint8, "language": string, "homeunits": string[], "inactivityTimeout": uint16, "poweroffTimeout": uint16, "wearDetectionEnabled": uint8, "headGestureConfig": { "upEnabled": uint8, "downEnabled": uint8, "upDeg": int32, "downDeg": int32, "baseDeg": int32 }, "touchpadEnabled": uint8, "idleDetectionEnabled": uint8, "displayDistanceLevel": uint32, "keywordSpottingEnabled": uint8, "notificationEnabled": uint8 }` |
 | `setTime` | `{ "time": uint32 }` | NACK `{ "code": 12, "msg": string }` |
 | `getTimeConfig` | `{}` | NACK `{ "code": 12, "msg": string }` |
 | `setTimeConfig` | `{ "time": string, "timestamp": uint64, "timezone": string, "userFormat": string }`；`timezone` 可缺省 | `{}` |
@@ -204,6 +215,10 @@ System 使用 `id=0`，并按 `payload.biz` 二级路由。
 | `setRowSpace` | `{}` | NACK `{ "code": 12, "msg": string }` |
 | `getLanguage` | `{}` | `{ "language": string }` |
 | `setLanguage` | `{ "language": string }` | `{}` |
+| `getHomeUnits` | `{}` | `{ "homeunits": string[] }` |
+| `setHomeUnits` | `{ "homeunits": string[] }` | `{}` |
+| `getHomeMenuConfig` | `{}` | `{ "all": uint32[], "visible": uint32[], "selected": uint32 }` |
+| `setHomeMenuConfig` | `{ "visible": uint32[], "selected": uint32 }` | `{}`；`selected` 必须包含在 `visible` 中 |
 | `getDisplayConfig` | `{}` | NACK `{ "code": 12, "msg": string }` |
 | `setDisplayConfig` | `{}` | NACK `{ "code": 12, "msg": string }` |
 | `getDisplayDistanceLevel` | `{}` | `{ "displayDistanceLevel": uint32 }` |
@@ -233,21 +248,20 @@ System 使用 `id=0`，并按 `payload.biz` 二级路由。
 
 `setTimeConfig.time` 使用 `yyyy-MM-dd HH:mm:ss` 格式。开关字段用 `0/1` 表示关闭/打开。`autoBrightnessEnabled` 开启时，`setBrightness` 返回 NACK `ErrNotReady`，且不会修改 LCD 亮度。
 
+Jytek 首页协议单元为 `prompter(5)`、`translate(3)`、`transcribe(2)`、`ai(8)` 和 `navigation(4)`。
+
 ### 5.3 SystemStatus
 
 | cmd | 请求 `data` | 成功 ACK `data` |
 | --- | --- | --- |
-| `getAll` | `{}` | `{ "sysState": uint8, "chargeState": uint8, "battery": uint8, "listenState": uint8 }` |
+| `getAll` | `{}` | `{ "sysState": uint8, "chargeState": uint8, "battery": uint8 }` |
 | `getSysState` | `{}` | `{ "sysState": uint8 }` |
 | `setSysState` | `{ "sysState": uint8 }` | `{}` |
-| `setListenState` | `{ "listenState": uint8 }` | `{}` |
 | `getChargeState` | `{}` | `{ "chargeState": uint8 }` |
 | `getBattery` | `{}` | `{ "battery": uint8 }` |
 | `getRomUsage` | `{}` | `{ "total": uint32, "used": uint32, "remaining": uint32 }` |
 
-`listenState` 表示手机侧采集会话：眼镜音频开始上传后为 `1`，采集停止后为 `0`。
-大于 `1` 的取值返回 `ErrBadParam`。手机链路断开时眼镜将其重置为 `0`。
-底部 avatar 仅在亮屏、链路已连接且 `listenState` 为 `1` 时显示静态音频波形标记。
+`getRomUsage` 统计 `/jyt_d` 所在 LFSD 文件系统，三个容量字段的单位均为字节。
 
 ### 5.4 SystemControl
 
@@ -268,6 +282,10 @@ System 使用 `id=0`，并按 `payload.biz` 二级路由。
 | `sendHeartbeat` | `{}` | `{}` |
 | `sendKeepAlive` | `{}` | `{}` |
 | `sendHandshake` | `{}` | `{}` |
+| `setProgressVisible` | 显示：`{ "visible": 1, "text": string, "opa": 0..100 }`；隐藏：`{ "visible": 0 }` | `{}` |
+| `setUploadProgressVisible` | `{ "visible": bool/0/1 }` | 仅当前页面支持上传进度且文件正在传输时成功；Jytek 的 `prompter` 和 `gallery` 支持 |
+
+`factoryReset` 会在 `/jyt_d` 写入并同步清理标记，随后保留该标记并删除其余用户数据，不再从 ROMFS 回拷文件。无论本次清理成功或失败，设备都会先关闭屏幕再触发 assert 复位，不保证返回 ACK；失败时标记会保留。下次启动发现标记时，会在加载系统配置前继续清理；若仍然失败则继续 assert 复位并在后续启动时重试。全部用户数据删除成功后才移除标记，配置随后由 ROMFS 默认值与新的 LFSD 稀疏覆盖共同生成。
 
 `sendTouchEvent.event`：
 
@@ -304,13 +322,49 @@ Assistant 的文本字段见 [6.6 Assistant Popup](#66-assistant-popup)。
 | `onTouchEvent` | `DATA_UNRELIABLE` | `{ "event": uint8 }` |
 | `onViewChangedByName` | `DATA_UNRELIABLE` | `{ "viewName": string }` |
 | `onKeywordSpotting` | `DATA_RELIABLE` | `{}` |
+| `onAssistantOpen` | `DATA_UNRELIABLE` | `{}` |
 | `onAssistantClose` | `DATA_UNRELIABLE` | `{}` |
 | `onGuideOpen` | `DATA_UNRELIABLE` | `{}` |
 | `onGuideClose` | `DATA_UNRELIABLE` | `{}` |
-| `onSysStateChanged` | `DATA_RELIABLE` | `{ "sysState": uint8 }` |
+| `onSysStateChanged` | `DATA_UNRELIABLE` | `{ "sysState": uint8, "trigger": string }` |
 | `onChargeStateChanged` | `DATA_UNRELIABLE` | `{ "chargeState": uint8 }` |
 | `onBatteryChanged` | `DATA_UNRELIABLE` | `{ "battery": uint32 }` |
 | `onBrightnessChanged` | `DATA_UNRELIABLE` | `{ "brightness": uint8 }` |
+| `onAttachmentTypeChanged` | `DATA_UNRELIABLE` | `{ "attachmentType": uint8, "attachmentSide": uint8 }` |
+
+`onAttachmentTypeChanged.attachmentType`：
+
+| 值 | 说明 |
+| --- | --- |
+| `0` | 无附件 |
+| `1` | 眼镜盒 |
+| `2` | 外接电源 |
+| `3` | 扬声器 |
+
+`onAttachmentTypeChanged.attachmentSide`：
+
+| 值 | 说明 |
+| --- | --- |
+| `0` | 主侧（当前硬件对应右侧） |
+| `1` | 从侧（当前硬件对应左侧） |
+
+每条事件只更新 `attachmentSide` 指定的一侧。接收方应分别保存两侧的最新类型；`attachmentType` 为 `0` 仅表示该侧已摘除，不表示所有附件均已摘除。
+
+`onSysStateChanged.sysState`：`0` 表示灭屏，`1` 表示亮屏。`trigger` 表示本次亮灭屏状态变化的触发来源：
+
+| `trigger` | 说明 |
+| --- | --- |
+| `phoneSetView` | 手机下发 `SystemControl.setView` 时触发亮屏 |
+| `notification` | 通知到达时触发亮屏 |
+| `remoteDoubleClick` | 手机下发远程双击时触发亮屏 |
+| `forceDoubleClick` | 镜腿 Force 双击时触发亮屏 |
+| `imuDoubleTap` | IMU 双击触发亮屏或灭屏 |
+| `imuHeadUp` | IMU 抬头触发亮屏 |
+| `imuHeadDown` | IMU 低头触发灭屏 |
+| `wearOn` | 佩戴检测到戴上时触发亮屏 |
+| `keywordSpotting` | 关键词唤醒触发亮屏 |
+| `inactivityTimeout` | 无操作超时触发灭屏 |
+| `glassesCase` | 收到眼镜盒附件时触发灭屏 |
 
 ### 5.6 Notification
 
@@ -342,12 +396,11 @@ map(8) {
 | `title` | `string` | 否 | 通知标题 |
 | `msg` | `string` | 否 | 通知正文 |
 | `duration` | `uint32` 或非负 `int32` | 否 | 自动关闭时间，单位秒；缺省使用默认时长，来电通知不自动关闭 |
-| `iconBitmap` | `bin` | 否 | 32x32 L8 原始图标数据，长度为 1024 字节 |
-| `iconBytes` | `bin` | 否 | `iconBitmap` 的兼容字段；当 `iconBitmap` 缺省时使用 |
+| `iconBitmap` | `bin` | 否 | 32×32 L8 原始图标，长度必须为 1024 字节 |
+| `iconBytes` | `bin` | 否 | `iconBitmap` 的兼容字段；缺少 `iconBitmap` 时使用，产品行为相同 |
 | `level` | `uint8` | 否 | 通知等级 |
 | `action` | `uint8` | 否 | 通知动作类型 |
-
-`title`、`msg` 和图标至少要有一个可展示内容；没有传图标时会使用默认图标。
+眼镜优先显示手机下发图标，缺省时使用 ROMFS 内置兜底图标。
 
 `removeNotification`：
 
@@ -365,7 +418,22 @@ map(1) {
 
 `showToast.text` 必填。`position` 可缺省：`1` 顶部，`2` 中间，`3` 底部。为兼容示例里的拼写，也接受 `postion` 字段。`duration` 可缺省，单位毫秒；缺省、0、负数或非法值统一使用默认 `3000`。
 
-### 5.8 File
+### 5.8 TapMsgbox
+
+| cmd | 请求 `data` | 成功 ACK `data` |
+| --- | --- | --- |
+| `showTapMsgbox` | `{ "title": string, "hint": string }` | `{}` |
+| `showDownloadProgress` | `{ "title": string, "progress": 0..100 }` | `{}` |
+| `closeTapMsgbox` | `{}` | `{}` |
+| `closeDownloadProgress` | `{}` | `{}` |
+
+普通提示框和下载进度的显示、关闭均使用各自的协议入口，但在眼镜端复用同一个提示框组件和销毁逻辑，同一时刻只保留一个实例。`showDownloadProgress` 的进度完全由手机端提供，眼镜端不启动定时器，也不自行递增；手机应在进度变化时重复下发包含完整当前进度的命令，眼镜端原地刷新。
+
+仅 `product.json` 选择 `"msgbox": "compact"` 的产品支持本协议；选择 `classic` 的产品对上述四个命令均返回 `ErrNotReady`。
+
+提示框显示期间，眼镜会拦截底层页面输入。单击、双击分别通过 `SystemInd.onTouchEvent` 上报 `event=1`、`event=2`。普通提示框保持显示，直到手机下发 `closeTapMsgbox`；下载进度保持显示，直到手机下发 `closeDownloadProgress`。关闭会直接销毁组件并释放内存，重复关闭按成功处理。
+
+### 5.9 File
 
 文件类型：
 
@@ -416,6 +484,30 @@ map(6) {
 
 文件命令会做路径合法性、文件存在性和 CRC 校验，常见错误为 `ErrBadFilePath`、`ErrFileNotExistFailed`、`ErrBadCRC`。
 
+### 5.10 Draw
+
+`Draw` 最多管理 64 个绘制项。非零 `id` 用于标识绘制项；使用相同 `id` 再次发送绘制命令时，会更新或替换该绘制项。公共绘制字段如下：
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `id` | `uint32` | 是 | 非零绘制项 ID |
+| `x` / `y` | `int32` | 是 | 左上角显示坐标 |
+| `w` / `h` | `int32` | 是 | 绘制区域宽度和高度 |
+| `isfloat` | `bool` 或 `0/1` | 否 | 缺省为 `false`；为 true 时绘制到悬浮层 |
+
+| cmd | 请求 `data` | 成功 ACK `data` |
+| --- | --- | --- |
+| `drawText` | 公共字段，加 `{ "text": string, "align"?: 0..3, "font_size"?: uint8, "isbolder"?: bool/0/1 }` | `{}` |
+| `drawImage` | 公共字段，加 `{ "path": string }` | `{}` |
+| `drawProgress` | 公共字段，加 `{ "progress": uint32 }` | `{}`；大于 `100` 的值按 `100` 显示 |
+| `updateProgress` | `{ "id": uint32, "progress": uint32 }` | `{}`；ID 必须对应已有进度条，大于 `100` 的值按 `100` 显示 |
+| `clearDrawId` | `{ "id": uint32 }` | `{}`；清除未知 ID 也成功 |
+| `clearDrawAll` | `{}` | `{}` |
+
+`drawText.text` 必须为非空字符串。`align` 缺省为 `0`，支持 `0=自动`、`1=左对齐`、`2=居中`、`3=右对齐`。`font_size=0` 或不提供时使用系统字体；非零值必须是设备支持的字号。`isbolder` 缺省为 false，用于控制文字容器边框。`drawImage.path` 必须通过设备图片路径校验。
+
+字段缺失或格式错误返回 `ErrDataErr`；ID 为零或无效、绘制槽位不足、进度更新目标无效时返回 `ErrBadParam`。
+
 ## 6. STT / AI 文本协议
 
 STT、翻译、AI 文本和 Assistant popup 使用同一组文本字段。
@@ -448,16 +540,16 @@ map(10) {
 
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
-| `id` | `uint32` | 是 | 记录 ID |
-| `area` | `uint8` | 是 | 文本区域；Assistant 中 `0` 为回答、`1` 为提问、`2` 为引导提示 |
+| `id` | `uint32` | 否 | 记录 ID，缺省为 `0` |
+| `area` | `uint8` | 否 | 文本区域；`0` 为主要内容/回答、`1` 为提问、`2` 为居中引导提示 |
 | `msgId` | `string` | 否 | 消息唯一 ID，用于更新或删除同一条记录 |
 | `msgType` | `uint8` | 是 | 文本消息类型，会写入文本缓冲 |
 | `actionType` | `uint8` | 是 | 文本更新动作 |
-| `isFinal` | `uint8` | 是 | 是否最终结果 |
+| `isFinal` | `uint8` | 否 | 是否最终结果 |
 | `user` | `string` | 否 | 说话人或用户 |
 | `transcribe` | `string` | 否 | 原文 |
 | `translate` | `string` | 否 | 译文 |
-| `createdAt` | `uint64` | 是 | Unix 秒级创建时间戳 |
+| `createdAt` | `uint64` | 否 | Unix 秒级创建时间戳 |
 
 `actionType`：
 
@@ -545,6 +637,13 @@ map(1) {
 }
 ```
 
+| 值 | 说明 |
+| --- | --- |
+| `0` | 隐藏音轨状态图标 |
+| `1` | 显示音轨状态图标 |
+
+其他值返回 `ErrBadParam`。
+
 #### `setTransMode`
 
 ```msgpack
@@ -566,6 +665,19 @@ map(1) {
   "maxLine": uint32(3)
 }
 ```
+
+#### `setHeaderText`
+
+在 Speech 页面顶部显示由手机控制的提示或结果文本。该文本独立于正文页面状态，起始页、加载页和正文页均可显示：
+
+```msgpack
+map(2) {
+  "visible": uint8(1),
+  "text": str("提示或结果")
+}
+```
+
+`visible` 支持 `uint8` 或 `bool`。显示时 `text` 必填且不能为空；隐藏时仅传 `visible=0` 即可。顶部文本使用不透明背景覆盖正文，不参与正文布局，因此显隐不会改变正文位置。顶部文本会保留到再次调用本命令、调用 `clearView` 或退出当前 Speech 页面。`setHeaderText` 与 `setLanguageHint` 互斥：显示顶部文本会隐藏语言提示，之后下发 `setLanguageHint` 会隐藏顶部文本并显示新的语言提示。
 
 #### `setAudioSourceIndicator`
 
@@ -658,8 +770,11 @@ map(1) {
 | cmd | 请求 `data` | 成功 ACK `data` |
 | --- | --- | --- |
 | `clearView` | `{}` | `{}` |
+| `setFunctionMenu` | 见 6.4 `setFunctionMenu` 字段 | `{}` |
 | `setFontConfig` | 见 [6.2 setFontConfig](#setfontconfig) | `{}` |
 | `updateSttInfo` | 见 [6.1 文本记录](#61-文本记录) | `{}` |
+| `setState` | `{ "state": uint8 }`，只支持 `0`/`1` | `{}` |
+| `setHeaderText` | `{ "visible": uint8/bool, "text"?: string }` | `{}` |
 | `setTextMode` | `{ "textMode": uint8 }` | `{}` |
 | `setAudioTrackState` | `{ "audioTrack": uint8 }` 或 `{ "data": { "audioTrack": uint8 } }` | `{}` |
 | `setTransMode` | `{ "transMode": uint8 }` | `{}` |
@@ -671,11 +786,16 @@ map(1) {
 
 ### 6.4 Translate
 
+所有 Speech 入口的 `setLanguageHint` 均支持 `mode=0` 单语言提示和 `mode=1` 双语言提示，并复用同一套 Speech 页面实现。配置 `reportdoubleclick=true` 时，双击通过 `SystemInd.onTouchEvent` 上报 `event=2`，眼镜端不执行退出；需要确认时，可由手机通过现有 `TapMsgbox.showTapMsgbox` 协议显示提示框。配置 `reportdoubleclick=false` 时由眼镜端处理双击，`exitdoubleclick=true` 显示本地退出确认框，`exitdoubleclick=false` 直接退出。
+
 | cmd | 请求 `data` | 成功 ACK `data` |
 | --- | --- | --- |
 | `clearView` | `{}` | `{}` |
+| `setFunctionMenu` | 见本节 `setFunctionMenu` 字段 | `{}` |
 | `setFontConfig` | 见 [6.2 setFontConfig](#setfontconfig) | `{}` |
 | `updateSttInfo` | 见 [6.1 文本记录](#61-文本记录) | `{}` |
+| `setState` | `{ "state": uint8 }`，只支持 `0`/`1` | `{}` |
+| `setHeaderText` | `{ "visible": uint8/bool, "text"?: string }` | `{}` |
 | `setTextMode` | `{ "textMode": uint8 }` | `{}` |
 | `setAudioTrackState` | `{ "audioTrack": uint8 }` 或 `{ "data": { "audioTrack": uint8 } }` | `{}` |
 | `setTransMode` | `{ "transMode": uint8 }` | `{}` |
@@ -684,6 +804,31 @@ map(1) {
 | `setMicDirectional` | `{ "micDirectional": uint8 }` | `{}` |
 | `setLanguageHint` | 见 [6.2 setLanguageHint](#setlanguagehint) | `{}` |
 | `textDirection` | 见 [6.2 textDirection](#textdirection) | `{}` |
+
+`setFunctionMenu` 用于在 Speech 页面显示由手机控制的功能选择遮罩：
+
+```msgpack
+map(3) {
+  "menuId": uint32(1),
+  "selectedItemId": uint32(100),
+  "items": array(2) [
+    { "id": uint32(100), "label": str("模式一") },
+    { "id": uint32(101), "label": str("模式二") }
+  ]
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `menuId` | `uint32` | 是 | 手机侧定义的菜单实例或版本 ID |
+| `selectedItemId` | `uint32` | 是 | 当前高亮项 ID，必须匹配 `items[].id` |
+| `items` | `array` | 是 | 至少包含 1 项，ID 不可重复；实际数量受单包大小和设备内存限制 |
+| `items[].id` | `uint32` | 是 | 手机侧定义的选项 ID |
+| `items[].label` | `string` | 是 | 眼镜端直接显示的非空选项文案，最长 63 个 UTF-8 字节 |
+
+菜单显示期间，眼镜端不自行更改高亮项，也不发送专用的菜单选择消息。左滑、右滑、单击继续通过现有 `SystemInd.onTouchEvent` 上报，分别为 `event=6`、`event=7`、`event=1`；手机根据事件决定上一项、下一项或确认，并可重新下发 `setFunctionMenu` 刷新高亮项。
+
+Roller 复用“上一项、当前项、下一项”3 个显示槽位循环展示。收到任意其他 Speech 命令时会隐藏该菜单；收到 `SystemControl.setProgressVisible` 且 `visible=1` 时也会隐藏。后续由手机下发对应 Speech 协议更新页面。
 
 ### 6.5 AI
 
@@ -711,7 +856,7 @@ Assistant popup 挂在 `SystemControl` 下：
 
 ## 7. Prompter
 
-Prompter 使用 `id=5`，按 `cmd` 路由。
+Prompter 使用 `id=5`，按 `cmd` 路由。配置 `reportdoubleclick=true` 时，双击通过 `SystemInd.onTouchEvent` 上报 `event=2`；配置为 `false` 时由眼镜端处理，紧凑实现显示本地退出确认框并在确认后退出，通用实现直接退出提词器。
 
 | cmd | 请求 `data` | 成功 ACK `data` |
 | --- | --- | --- |
@@ -719,9 +864,11 @@ Prompter 使用 `id=5`，按 `cmd` 路由。
 | `setFontConfig` | 见 [6.2 setFontConfig](#setfontconfig) | `{}` |
 | `setFileListMenu` | 见本节 `setFileListMenu` 字段 | `{}` |
 | `setPrompterFile` | `{ "dir": string, "name": string, "size": uint32, "crc32": uint32 }` | `{}` |
-| `seekTo` | `{ "offset": uint32, "length": uint32, "topMaskHeight": uint32, "bottomMaskHeight": uint32 }` | `{}` |
+| `seekTo` | `{ "offset": uint32, "length": uint32, "topMaskHeight": uint32, "bottomMaskHeight": uint32, "duration"?: uint32 }` | `{}` |
 | `setTick` | `{ "tick": uint32 }` | `{}` |
 | `setState` | `{ "state": uint32 }`，`0` 暂停，`1` 运行 | `{}` |
+
+Prompter 实现支持可选的 `seekTo.duration`，单位毫秒。省略或传 `0` 时不播放滚动动画，直接跳转到目标文本位置；传入大于 `0` 的值时，相邻且可连续拼接的文本窗口按指定时长滚动，无法连续拼接时仍直接跳转。紧凑实现不使用该可选字段。
 
 `setFileListMenu`：
 
@@ -752,7 +899,18 @@ Prompter 会主动上报：
 | --- | --- | --- |
 | `onMenuSelected` | `DATA_RELIABLE` | `{ "menuId": uint, "selectedItemId": uint }` |
 
-## 8. Gallery
+## 8. Recorder
+
+Recorder 使用 `id=1002`、`biz=recorder`，按 `cmd` 路由。命令仅在 Recorder 为当前页面时处理，否则返回 `ErrNotReady`。
+
+| cmd | 请求 `data` | 成功 ACK `data` |
+| --- | --- | --- |
+| `setState` | `{ "state": uint32 }`，`0` 暂停并显示三角，`1` 运行、显示圆点并将时间重置为 `00:00:00` | `{}` |
+| `setTick` | `{ "tick": uint32 }`，单位为秒 | `{}` |
+
+`setTick` 将时间格式化为 `HH:MM:SS`；Running 状态下偶数 tick 显示圆点，奇数 tick 隐藏圆点。Pause 状态下始终显示三角。
+
+## 9. Gallery
 
 Gallery 使用 `id=7`，按 `cmd` 路由。
 
@@ -761,7 +919,41 @@ Gallery 使用 `id=7`，按 `cmd` 路由。
 | `clearView` | `{}` | `{}` |
 | `setGalleryFile` | `{ "dir": string, "name": string }` | `{}` |
 
-## 9. 维护规则
+## 10. Navigation
+
+Navigation 使用 `id=4`、`biz=navigation`。应先通过 `SystemControl.setView` 进入 `navigation` 页面。
+
+| cmd | 请求 `data` | 成功 ACK `data` |
+| --- | --- | --- |
+| `clearView` | `{}` | `{}`；清空导航数据并显示起始提示 |
+| `updateNav` | 导航对象，见下表 | `{}` |
+| `updateBpm` | `{ "bpm": string }` | `{}`；空字符串隐藏心率区域 |
+| `updateSpo` | `{ "spo": string }` | `{}`；空字符串隐藏血氧区域 |
+
+`updateNav` 字段：
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `navMode` | `int32` | 否 | `1=驾车`、`2=步行`、`3=骑行`；其它值使用驾车图标 |
+| `nextRoadName` | `string` | 否 | 下一道路名称 |
+| `curStepRetainDistance` | `string` | 否 | 当前步骤剩余距离 |
+| `remainDistance` | `string` | 否 | 全程剩余距离 |
+| `remainTime` | `string` | 否 | 全程剩余时间 |
+| `speed` | `string` | 否 | 当前速度；空字符串隐藏速度区域 |
+| `iconBytes` | `bin(2304)` | 否 | 48×48 L8 方向图；未提供时沿用当前方向图，长度不匹配时忽略该图标 |
+
+## 11. ImageFusion
+
+ImageFusion 使用 `id=1001`、`biz=imagefusion`、`viewName=imagefusion`，用于读取或设置双目显示融合偏移。
+
+| cmd | 请求 `data` | 成功 ACK `data` |
+| --- | --- | --- |
+| `getFusionParams` | `{}` | `{ "lX": int8, "lY": int8, "rX": int8, "rY": int8 }` |
+| `setFusionParams` | `{ "lX": int32, "lY": int32, "rX": int32, "rY": int32 }` | `nil` |
+
+四个偏移字段均必填，取值范围为 `-128..127`。参数缺失、类型错误或越界返回 `ErrBadParam`；底层读写失败返回 `ErrDataErr`。
+
+## 12. 维护规则
 
 新增或修改协议时，按以下顺序检查：
 

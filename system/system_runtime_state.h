@@ -16,6 +16,34 @@ extern "C" {
 #endif
 
 /**
+ * @brief KWS 命中事件的软件拦截原因。
+ */
+typedef enum {
+    SYSTEM_KWS_INTERCEPT_REASON_APP_POLICY = 1u << 0,    ///< 当前 App 策略禁止响应 KWS。
+    SYSTEM_KWS_INTERCEPT_REASON_SPEECH_ACTIVE = 1u << 1, ///< Speech 正在运行。
+    SYSTEM_KWS_INTERCEPT_REASON_PHONE_ACTIVE = 1u << 2,  ///< Phone 通话流程正在进行。
+    SYSTEM_KWS_INTERCEPT_REASON_PROMPTER_RUNNING = 1u << 3, ///< 题词正在运行。
+} system_kws_intercept_reason_t;
+
+/**
+ * @brief 设置或清除一项 KWS 软件拦截原因。
+ * @param[in] reason 拦截原因。
+ * @param[in] blocked `true` 表示设置，`false` 表示清除。
+ * @return 无返回值。
+ */
+void system_runtime_state_set_kws_intercept(system_kws_intercept_reason_t reason,
+                                            bool blocked);
+
+/**
+ * @brief 缓存 ANCS 提供的第三方来电联系人和来源，供随后的 HFP 状态使用。
+ * @param[in] caller_name 第三方来电联系人名称。
+ * @param[in] source_id iOS AppIdentifier。
+ * @return 无返回值。
+ */
+void system_runtime_state_set_ancs_call_info(const char* caller_name,
+                                             const char* source_id);
+
+/**
  * @brief 处理设备状态消息并同步时间，启动首次额外同步蓝牙连接态。
  * @param[in] msg 设备状态消息。
  * @return `true` 表示处理成功，`false` 表示处理失败。
@@ -38,7 +66,7 @@ bool system_runtime_state_apply_auto_brightness(void);
  */
 uint8_t system_runtime_state_get_lcd_resume_brightness(void);
 /**
- * @brief Wake the screen on a matching keyword hit when Bluetooth is connected.
+ * @brief 处理 KWS 命中事件，通过软件策略过滤后唤醒屏幕和上报命中。
  * @param[in] msg KWS 事件消息。
  * @return `true` 表示处理成功，`false` 表示处理失败。
  */
@@ -66,55 +94,26 @@ uint8_t system_get_charge_state(void);
  */
 uint8_t system_get_battery(void);
 /**
- * @brief Phone-declared capture session state.
- *
- * The phone owns audio capture. It reports `LISTENING` once glasses audio is
- * flowing and `IDLE` when capture stops. A lost link resets it to `IDLE`.
- */
-typedef enum {
-    SYSTEM_LISTEN_STATE_IDLE = 0,
-    SYSTEM_LISTEN_STATE_LISTENING = 1,
-} system_listen_state_t;
-
-/**
- * @brief 获取当前显示状态。
- * @return `true` 表示亮屏，`false` 表示灭屏。
- */
-bool system_runtime_state_get_display_on(void);
-/**
- * @brief Set the display state. Every screen transition goes through here.
- *
- * Turning an already lit screen on only restarts the sleep timer. A change
- * drives the LCD driver, OS sleep permission, pending UI flushes, the avatar,
- * the page screen event, and the phone report from one place.
- * @param[in] on `true` 表示亮屏，`false` 表示灭屏。
- * @param[in] source 触发来源，仅用于日志。
- * @return 无返回值。
- */
-void system_runtime_state_set_display_on(bool on, const char* source);
-/**
- * @brief 获取手机声明的采集会话状态。
- * @return 当前采集会话状态。
- */
-system_listen_state_t system_runtime_state_get_listen_state(void);
-/**
- * @brief Record the phone's capture session state and resync the avatar.
- * @param[in] state 手机声明的采集会话状态。
- * @param[in] source 触发来源，仅用于日志。
- * @return 无返回值。
- */
-void system_runtime_state_set_listen_state(system_listen_state_t state, const char* source);
-/**
  * @brief 获取当前蓝牙连接状态。
  * @return `true` 表示蓝牙已连接，`false` 表示蓝牙未连接。
  */
 bool system_get_btconn_state(void);
+/**
+ * @brief 获取蓝牙连接状态变化事件 ID。
+ * @return 返回 LVGL 自定义事件 ID，事件参数为指向 `uint8_t` 连接状态的指针。
+ */
+uint32_t system_runtime_state_get_btconn_event(void);
 /**
  * @brief 设置显式主机连接事件状态并刷新蓝牙连接态。
  * @param[in] connected `true` 表示显式事件为已连接，`false` 表示显式事件为未连接。
  * @return 无返回值。
  */
 void system_set_btconn_state(bool connected);
+/**
+ * @brief 亮屏后补做灭屏期间延迟的蓝牙状态 UI 同步。
+ * @return 无返回值。
+ */
+void system_runtime_state_flush_pending_after_screen_on(void);
 
 #ifdef __cplusplus
 }

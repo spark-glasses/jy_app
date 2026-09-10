@@ -6,8 +6,9 @@
 
 #include "assistant_popup_ui.h"
 #include "app_def.h"
-#include "stt_view_common.h"
+#include "common/stt/stt_view_common.h"
 #include "common/app_framework/app_layers.h"
+#include "common/app_framework/app_manager.h"
 #include "common/widgets/container.h"
 #include "common/widgets/label.h"
 #include "system/stt_common.h"
@@ -133,9 +134,6 @@ static void assistant_refresh_labels(void) {
         answer = stt_buffer_get_transcribe_by_index((size_t)answer_index);
     }
 
-    ui_widget_set_visible(UI_WIDGET(s_ui.frame), question != NULL && question[0] != '\0');
-    ui_widget_set_visible(UI_WIDGET(s_ui.speech_slot), answer != NULL && answer[0] != '\0');
-
     if (s_ui.question_label != NULL) {
         question_set_start_us = (uint32_t)GetTimeUs();
         stt_view_update_incremental_text(s_ui.question_label, next_question);
@@ -193,7 +191,7 @@ void assistant_stt_clear(void) {
 static void assistant_on_fontconfig_changed(void) {
     stt_style_init();
     assistant_apply_label_theme(s_ui.question_label, true);
-    // The short reply bubble has its own font and padding from the UI definition.
+    assistant_apply_label_theme(s_ui.answer_label, false);
 
     if (s_ui.scroll) {
         lv_obj_t* scroll_obj = container_get_obj(s_ui.scroll);
@@ -211,7 +209,6 @@ static void assistant_on_fontconfig_changed(void) {
 static void assistant_popup_delete_event_handle(lv_event_t* event) {
     (void)event;
     bool report_close = s_report_close_on_delete;
-    s_report_close_on_delete = true;
     memset(&s_ui, 0, sizeof(s_ui));
     s_last_update_role = ASSISTANT_TEXT_ROLE_NONE;
     assistant_on_popup_deleted(report_close);
@@ -250,22 +247,32 @@ bool assistant_handle_event(lv_event_code_t code) {
     if (!assistant_is_open()) {
         return false;
     }
+
     switch (code) {
         case LV_EVENT_CLICKED:
         case LV_EVENT_LONG_PRESSED:
             system_report_touch_event(code);
             return true;
-        case LV_EVENT_DCLICKED:
+        case LV_EVENT_DCLICKED: {
+            lv_obj_t* page_root = NULL;
+
             (void)assistant_close(true);
+            if (!system_config_is_userguide_finished()) {
+                page_root = app_manager_current_content_root();
+                if (page_root != NULL) {
+                    (void)lv_obj_send_event(page_root, assistant_get_close_event(), NULL);
+                }
+            }
             return true;
+        }
         case LV_EVENT_GESTURE_LEFT:
             if (s_ui.scroll) {
-                container_scroll_up(s_ui.scroll, 3.0f / 4.0f);
+                container_scroll_up(s_ui.scroll, 3.0f / 4.0f, LV_ANIM_ON);
             }
             return true;
         case LV_EVENT_GESTURE_RIGHT:
             if (s_ui.scroll) {
-                container_scroll_down(s_ui.scroll, 3.0f / 4.0f);
+                container_scroll_down(s_ui.scroll, 3.0f / 4.0f, LV_ANIM_ON);
             }
             return true;
         default:
@@ -296,26 +303,15 @@ bool assistant_popup_open(void) {
 
     lv_obj_add_event_cb(root, assistant_popup_delete_event_handle, LV_EVENT_DELETE, NULL);
 
-    // Keep the text popup above the permanent footer.
-    lv_obj_t* footer = system_ui_get_footer();
-    if (footer != NULL) {
-        lv_obj_update_layout(footer);
-        lv_obj_set_height(root, LV_MAX(0, (int32_t)config_lcd.ui_height - lv_obj_get_height(footer)));
-    }
-
-    // Let short replies fit their text and wrap longer replies inside the footer.
-    lv_obj_set_style_max_width(label_get_obj(s_ui.answer_label), LV_PCT(100), LV_PART_MAIN);
-    lv_obj_set_style_min_width(label_get_obj(s_ui.answer_label), 80, LV_PART_MAIN);
-
     assistant_on_fontconfig_changed();
     lv_obj_move_foreground(root);
     return true;
 }
 
 /**
- * @brief Delete the text popup while retaining the permanent avatar.
+ * @brief 销毁 assistant popup 视图。
  * @param[in] report_close 是否主动上报 assistant 已关闭。
- * @return `true` when close is accepted or the popup is already absent.
+ * @return `true` 表示销毁成功，`false` 表示销毁失败。
  */
 bool assistant_popup_close(bool report_close) {
     if (!assistant_is_open()) {
@@ -324,8 +320,8 @@ bool assistant_popup_close(bool report_close) {
         return true;
     }
 
-    lv_obj_t* root = container_get_obj(s_ui.root);
     s_report_close_on_delete = report_close;
-    lv_obj_delete(root);
+    lv_obj_delete(container_get_obj(s_ui.root));
+    s_report_close_on_delete = true;
     return true;
 }

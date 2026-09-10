@@ -1,0 +1,98 @@
+[
+    {
+        "biz": "DeviceInfo",
+        "cmd": "getAll",
+        "data": {},
+        "id": 0,
+        "name": "获取全部设备信息",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "DeviceInfo",
+        "cmd": "getManufacturer",
+        "data": {},
+        "id": 0,
+        "name": "获取厂商",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "DeviceInfo",
+        "cmd": "getModel",
+        "data": {},
+        "id": 0,
+        "name": "获取设备型号",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "DeviceInfo",
+        "cmd": "getEdition",
+        "data": {},
+        "id": 0,
+        "name": "获取设备版本",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "DeviceInfo",
+        "cmd": "getSn",
+        "data": {},
+        "id": 0,
+        "name": "获取序列号",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "DeviceInfo",
+        "cmd": "getBtMac",
+        "data": {},
+        "id": 0,
+        "name": "获取经典蓝牙地址",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "DeviceInfo",
+        "cmd": "getBtName",
+        "data": {},
+        "id": 0,
+        "name": "获取经典蓝牙名称",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "DeviceInfo",
+        "cmd": "getBleMac",
+        "data": {},
+        "id": 0,
+        "name": "获取低功耗蓝牙地址",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "DeviceInfo",
+        "cmd": "getBleName",
+        "data": {},
+        "id": 0,
+        "name": "获取低功耗蓝牙名称",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "DeviceInfo",
+        "cmd": "getFwVer",
+        "data": {},
+        "id": 0,
+        "name": "获取固件版本",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "DeviceInfo",
+        "cmd": "getBthVer",
+        "data": {},
+        "id": 0,
+        "name": "获取蓝牙版本",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "DeviceInfo",
+        "cmd": "getProtocolVer",
+        "data": {},
+        "id": 0,
+        "name": "获取协议版本",
+        "type": "DATA_RELIABLE"
+    }
+]

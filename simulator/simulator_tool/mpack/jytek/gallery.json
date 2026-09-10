@@ -1,0 +1,41 @@
+[
+    {
+        "biz": "SystemControl",
+        "cmd": "setView",
+        "data": {
+            "viewName": "gallery"
+        },
+        "id": 0,
+        "name": "进入",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemControl",
+        "cmd": "setView",
+        "data": {
+            "viewName": "home"
+        },
+        "id": 0,
+        "name": "退出",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "gallery",
+        "cmd": "setGalleryFile",
+        "data": {
+            "dir": "/jyt_d/apps/gallery",
+            "name": "demo.jpg"
+        },
+        "id": 7,
+        "name": "设置相册文件",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "gallery",
+        "cmd": "clearView",
+        "data": {},
+        "id": 7,
+        "name": "清空界面",
+        "type": "DATA_RELIABLE"
+    }
+]

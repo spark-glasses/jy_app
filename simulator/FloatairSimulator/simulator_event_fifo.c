@@ -21,7 +21,6 @@
 #include "simulator_platform.h"
 #include "sys_adapter.h"
 #include "system.h"
-#include "system/system_runtime_ui.h"
 
 /**
  * @brief 文本命令与系统事件类型映射表。
@@ -46,11 +45,13 @@ enum {
     SIM_FIFO_PARAM_DEVICE_STATE_NOW,
     SIM_FIFO_PARAM_DEVICE_STATE_EPOCH,
     SIM_FIFO_PARAM_CALL_STATE_TEXT,
+    SIM_FIFO_PARAM_ATTACHMENT_STATE, ///< 两参数附件状态：附件类型和主从侧身份。
 };
 
 #define SIM_CALL_EVENT_RINGING 0
 #define SIM_CALL_EVENT_CONNECTED 1
 #define SIM_CALL_EVENT_DISCONNECTED 2
+#define SIM_CALL_EVENT_OUTGOING 3
 
 static const simulator_fifo_event_map_t g_simulator_fifo_events[] = {
     {"SET_JYP_HOST_CONNECTED", SET_JYP_HOST_CONNECTED, SIM_FIFO_PARAM_NONE, 0},
@@ -79,8 +80,10 @@ static const simulator_fifo_event_map_t g_simulator_fifo_events[] = {
     {"SET_BT_CALL_RINGING", SET_BT_CALL_SETUP_EVENT, SIM_FIFO_PARAM_CALL_STATE_TEXT, SIM_CALL_EVENT_RINGING},
     {"SET_BT_CALL_CONNECTED", SET_BT_CALL_SETUP_EVENT, SIM_FIFO_PARAM_CALL_STATE_TEXT, SIM_CALL_EVENT_CONNECTED},
     {"SET_BT_CALL_DISCONNECTED", SET_BT_CALL_SETUP_EVENT, SIM_FIFO_PARAM_CALL_STATE_TEXT, SIM_CALL_EVENT_DISCONNECTED},
+    {"SET_BT_CALL_OUTGOING", SET_BT_CALL_SETUP_EVENT, SIM_FIFO_PARAM_CALL_STATE_TEXT, SIM_CALL_EVENT_OUTGOING},
     {"SET_JYT_BT_VISIBLE_CHANGED", SET_JYT_BT_VISIBLE_CHANGED, SIM_FIFO_PARAM_PAYLOAD_U8, 0},
     {"SET_JYT_TIMER_TRIGGER", SET_JYT_TIMER_TRIGGER, SIM_FIFO_PARAM_PAYLOAD_U32, 0},
+    {"SET_JYT_ACC_TYPE_CHANGED", SET_JYT_ACC_TYPE_CHANGED, SIM_FIFO_PARAM_ATTACHMENT_STATE, 0},
 };
 
 static pthread_t g_simulator_event_fifo_thread;
@@ -91,9 +94,14 @@ static uint8_t g_simulator_battery_soc = 80;
 static uint8_t g_simulator_charge_state = 0;
 static uint64_t g_simulator_spark_revision = 1;
 
-typedef enum { SPARK_DISPLAY_NOTE, SPARK_DISPLAY_TODO, SPARK_DISPLAY_EMAIL,
-               SPARK_DISPLAY_EMAIL_DRAFT, SPARK_DISPLAY_CALENDAR_EVENT,
-               SPARK_DISPLAY_TYPE_COUNT } simulator_spark_type_t;
+typedef enum {
+    SPARK_DISPLAY_NOTE,
+    SPARK_DISPLAY_TODO,
+    SPARK_DISPLAY_EMAIL,
+    SPARK_DISPLAY_EMAIL_DRAFT,
+    SPARK_DISPLAY_CALENDAR_EVENT,
+    SPARK_DISPLAY_TYPE_COUNT,
+} simulator_spark_type_t;
 
 typedef struct {
     const char* name;
@@ -119,11 +127,14 @@ static const simulator_spark_sample_t g_simulator_spark_samples[] = {
 };
 
 static void simulator_spark_write_row(mpack_writer_t* writer,
-                                      simulator_spark_type_t type, size_t index, bool detail) {
+                                      simulator_spark_type_t type,
+                                      size_t index,
+                                      bool detail) {
     char id[32];
-    snprintf(id, sizeof(id), "sim-%u-%u", (unsigned)type, (unsigned)index);
     const char* keys[] = {"id", "mark", "primary", "secondary", "meta"};
     const char* values[] = {id, "", "", "", ""};
+
+    snprintf(id, sizeof(id), "sim-%u-%u", (unsigned)type, (unsigned)index);
     switch (type) {
         case SPARK_DISPLAY_NOTE:
             values[1] = detail ? "NOTE" : "";
@@ -159,6 +170,7 @@ static void simulator_spark_write_row(mpack_writer_t* writer,
         case SPARK_DISPLAY_TYPE_COUNT:
             break;
     }
+
     bool email_list = !detail &&
         (type == SPARK_DISPLAY_EMAIL || type == SPARK_DISPLAY_EMAIL_DRAFT);
     mpack_start_map(writer, email_list ? 9 : detail ? 5 : 7);
@@ -168,9 +180,12 @@ static void simulator_spark_write_row(mpack_writer_t* writer,
     }
     if (!detail) {
         const char* layouts[] = {"note", "reminder", "email", "email", "event"};
-        mpack_write_cstr(writer, "layout"); mpack_write_cstr(writer, layouts[type]);
+        mpack_write_cstr(writer, "layout");
+        mpack_write_cstr(writer, layouts[type]);
         mpack_write_cstr(writer, "height");
-        mpack_write_u32(writer, type == SPARK_DISPLAY_TODO ? 40 : type == SPARK_DISPLAY_CALENDAR_EVENT ? 88 : 64);
+        mpack_write_u32(writer, type == SPARK_DISPLAY_TODO
+                                    ? 40
+                                    : type == SPARK_DISPLAY_CALENDAR_EVENT ? 88 : 64);
         if (email_list) {
             mpack_write_cstr(writer, "address");
             mpack_write_cstr(writer, type == SPARK_DISPLAY_EMAIL ? "dr@example.com" : "");
@@ -184,7 +199,7 @@ static void simulator_spark_write_row(mpack_writer_t* writer,
 static bool simulator_spark_show_sample(const simulator_spark_sample_t* sample) {
     static const char* list_titles[] = {"Notes", "Reminders", "Inbox", "Drafts", "Calendar"};
     static const char* detail_titles[] = {
-        "Weekend plans", "Reminder", "Scan results", "Project update", "Studio crit"
+        "Weekend plans", "Reminder", "Scan results", "Project update", "Studio crit",
     };
     char revision[21];
     char* bytes = NULL;
@@ -196,8 +211,10 @@ static bool simulator_spark_show_sample(const simulator_spark_sample_t* sample) 
              (unsigned long long)g_simulator_spark_revision++);
     mpack_writer_init_growable(&writer, &bytes, &size);
     mpack_start_map(&writer, 5);
-    mpack_write_cstr(&writer, "displayID"); mpack_write_cstr(&writer, revision);
-    mpack_write_cstr(&writer, "navigationSequence"); mpack_write_cstr(&writer, "0");
+    mpack_write_cstr(&writer, "displayID");
+    mpack_write_cstr(&writer, revision);
+    mpack_write_cstr(&writer, "navigationSequence");
+    mpack_write_cstr(&writer, "0");
     mpack_write_cstr(&writer, "revision");
     mpack_write_cstr(&writer, revision);
     mpack_write_cstr(&writer, "reply");
@@ -207,20 +224,24 @@ static bool simulator_spark_show_sample(const simulator_spark_sample_t* sample) 
     mpack_write_cstr(&writer, "kind");
     mpack_write_cstr(&writer, sample->is_list ? "list" : "item");
     mpack_write_cstr(&writer, "title");
-    mpack_write_cstr(&writer, sample->is_mixed ? "Items" :
-                     sample->is_list ? list_titles[sample->type] : detail_titles[sample->type]);
+    mpack_write_cstr(&writer, sample->is_mixed
+                                  ? "Items"
+                                  : sample->is_list ? list_titles[sample->type]
+                                                    : detail_titles[sample->type]);
     mpack_write_cstr(&writer, "hint");
     mpack_write_cstr(&writer, sample->is_list && !sample->is_clear ? "20 items" : "");
     mpack_write_cstr(&writer, "selected");
     mpack_write_u32(&writer, 0);
     if (sample->is_list && !sample->is_clear) {
-        mpack_write_cstr(&writer, "rowGap"); mpack_write_u32(&writer, SPARK_DISPLAY_ROW_GAP);
+        mpack_write_cstr(&writer, "rowGap");
+        mpack_write_u32(&writer, SPARK_DISPLAY_ROW_GAP);
     }
     mpack_write_cstr(&writer, "rows");
     mpack_start_array(&writer, (uint32_t)count);
     for (size_t i = 0; i < count; ++i) {
-        simulator_spark_type_t type = sample->is_mixed ?
-            (simulator_spark_type_t)(i % SPARK_DISPLAY_TYPE_COUNT) : sample->type;
+        simulator_spark_type_t type = sample->is_mixed
+                                          ? (simulator_spark_type_t)(i % SPARK_DISPLAY_TYPE_COUNT)
+                                          : sample->type;
         simulator_spark_write_row(&writer, type, i, !sample->is_list);
     }
     mpack_finish_array(&writer);
@@ -244,7 +265,6 @@ static bool simulator_spark_show_sample(const simulator_spark_sample_t* sample) 
     simulator_lvgl_enter_ui_critical();
     bool shown = spark_display_preview(mpack_tree_root(&tree));
     simulator_lvgl_leave_ui_critical();
-
     mpack_tree_destroy(&tree);
     free(bytes);
     return shown;
@@ -302,19 +322,20 @@ static void simulator_event_fifo_handle_line(char* line) {
         arg = NULL;
     }
 
-    /* Preview a Spark reply without a phone connection. */
     if (strcmp(line, "SET_SPARK_REPLY") == 0) {
         if (floatair_lcd_get_state() == LCD_OFF) {
             floatair_info("fifo Spark reply ignored: screen off");
             return;
         }
         simulator_lvgl_enter_ui_critical();
-        if (system_ui_set_reply(arg != NULL ? arg : "")) {
-            floatair_info("fifo Spark reply: %u bytes", (unsigned)(arg != NULL ? strlen(arg) : 0));
+        bool shown = spark_reply_set(arg != NULL ? arg : "");
+        simulator_lvgl_leave_ui_critical();
+        if (shown) {
+            floatair_info("fifo Spark reply: %u bytes",
+                          (unsigned)(arg != NULL ? strlen(arg) : 0));
         } else {
             floatair_warn("fifo Spark reply: UI not ready");
         }
-        simulator_lvgl_leave_ui_critical();
         return;
     }
 
@@ -327,7 +348,9 @@ static void simulator_event_fifo_handle_line(char* line) {
             floatair_warn("fifo Spark display missing sample");
             return;
         }
-        for (i = 0; i < sizeof(g_simulator_spark_samples) / sizeof(g_simulator_spark_samples[0]); ++i) {
+        for (i = 0; i < sizeof(g_simulator_spark_samples) /
+                            sizeof(g_simulator_spark_samples[0]);
+             ++i) {
             if (strcmp(arg, g_simulator_spark_samples[i].name) == 0) {
                 if (simulator_spark_show_sample(&g_simulator_spark_samples[i])) {
                     floatair_info("fifo Spark display: %s", arg);
@@ -338,23 +361,6 @@ static void simulator_event_fifo_handle_line(char* line) {
             }
         }
         floatair_warn("fifo Spark display unknown sample: %s", arg);
-        return;
-    }
-
-    /* Preview the persistent avatar without a microphone or host connection. */
-    if (strcmp(line, "SET_AVATAR_NORMAL") == 0 ||
-        strcmp(line, "SET_AVATAR_LISTENING") == 0) {
-        bool listening = strcmp(line, "SET_AVATAR_LISTENING") == 0;
-
-        simulator_lvgl_enter_ui_critical();
-        if (system_ui_get_footer() != NULL) {
-            system_set_sys_state(1);
-            system_ui_set_avatar_listening(listening);
-            floatair_info("fifo avatar state: %s", listening ? "listening" : "normal");
-        } else {
-            floatair_warn("fifo avatar preview: UI not ready");
-        }
-        simulator_lvgl_leave_ui_critical();
         return;
     }
 
@@ -465,7 +471,7 @@ static void simulator_event_fifo_handle_line(char* line) {
                 device_state.host_connected = sim_socket_get_connection_status() ? 1 : 0;
 
                 if (g_simulator_fifo_events[i].param_mode == SIM_FIFO_PARAM_DEVICE_STATE_NOW) {
-                    device_state.time_now = time(NULL);
+                    device_state.time_now = simulator_system_time_now();
                 } else {
                     if (!arg) {
                         floatair_warn("fifo device state missing epoch");
@@ -503,6 +509,55 @@ static void simulator_event_fifo_handle_line(char* line) {
                                                0,
                                                payload,
                                                (uint16_t)(1 + caller_len));
+                return;
+            }
+
+            if (g_simulator_fifo_events[i].param_mode == SIM_FIFO_PARAM_ATTACHMENT_STATE) {
+                char* side_arg = NULL;
+                unsigned long attachment_type = 0;
+                unsigned long attachment_side = 0;
+                uint8_t payload[2] = {0};
+
+                if (!arg) {
+                    floatair_warn("fifo attachment event missing args");
+                    return;
+                }
+
+                side_arg = arg;
+                while (*side_arg && *side_arg != ' ' && *side_arg != '\t') {
+                    side_arg++;
+                }
+                if (*side_arg == '\0') {
+                    floatair_warn("fifo attachment event missing side: %s", arg);
+                    return;
+                }
+                *side_arg++ = '\0';
+                while (*side_arg == ' ' || *side_arg == '\t') {
+                    side_arg++;
+                }
+                if (*side_arg == '\0') {
+                    floatair_warn("fifo attachment event missing side");
+                    return;
+                }
+
+                attachment_type = strtoul(arg, &end, 0);
+                if (end == arg || *end != '\0' || attachment_type > JYT_ACC_SPEAKER) {
+                    floatair_warn("fifo attachment event bad type: %s", arg);
+                    return;
+                }
+                attachment_side = strtoul(side_arg, &end, 0);
+                if (end == side_arg || *end != '\0' ||
+                    attachment_side >= SYSTEM_ATTACHMENT_SIDE_COUNT) {
+                    floatair_warn("fifo attachment event bad side: %s", side_arg);
+                    return;
+                }
+
+                payload[0] = (uint8_t)attachment_type;
+                payload[1] = (uint8_t)attachment_side;
+                simulator_post_system_event_ex(g_simulator_fifo_events[i].event_type,
+                                               0,
+                                               payload,
+                                               (uint16_t)sizeof(payload));
                 return;
             }
 
@@ -549,7 +604,6 @@ static void simulator_event_fifo_handle_line(char* line) {
  */
 static void* simulator_event_fifo_thread_main(void* arg) {
     char read_buf[256];
-    /* Reply previews can be screen-length; keep room for a few kilobytes. */
     char line_buf[4096];
     size_t line_len = 0;
 

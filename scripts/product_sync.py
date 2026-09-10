@@ -44,12 +44,13 @@ PRODUCT_FILE_OVERLAYS = (
     (Path("StringPool.csv"), Path("StringPool.csv")),
 )
 
-PRODUCT_TREE_OVERLAYS = (
+PRODUCT_TREE_SYNCS = (
     Path("lfsd"),
 )
 
 UI_RES_JSON = Path("ui.res.json")
 ROMFS_SYSTEM_IMAGES_DIR = "/romfs/system/images"
+ROMFS_SYSTEM_AUDIO_DIR = "/romfs/system/audio"
 
 
 def clear_directory_contents(directory: Path, preserve_names: set[str] | None = None) -> None:
@@ -105,64 +106,35 @@ def remove_file_if_exists(path: Path) -> bool:
     return True
 
 
-def prune_empty_dirs(directory: Path, stop_dir: Path) -> None:
-    current = directory
-    stop_dir = stop_dir.resolve()
-    while current.exists():
-        current_resolved = current.resolve()
-        if current_resolved == stop_dir:
-            break
-        try:
-            current_resolved.relative_to(stop_dir)
-        except ValueError:
-            break
-        try:
-            current.rmdir()
-        except OSError:
-            break
-        current = current.parent
-
-
-def remove_product_tree_overlay_files(repo_root: Path, products_dir: Path) -> int:
-    removed = 0
-    for product_name in list_products(products_dir):
-        product_dir = products_dir / product_name
-        for tree_rel in PRODUCT_TREE_OVERLAYS:
-            src_tree = product_dir / tree_rel
-            dst_tree = repo_root / tree_rel
-            if not src_tree.is_dir():
-                continue
-            for root, dirs, files in os.walk(src_tree):
-                dirs[:] = [d for d in dirs if d not in ("__pycache__", ".git", ".svn")]
-                rel_root = Path(root).relative_to(src_tree)
-                for filename in files:
-                    dst_file = dst_tree / rel_root / filename
-                    if remove_file_if_exists(dst_file):
-                        removed += 1
-                        prune_empty_dirs(dst_file.parent, dst_tree)
-    return removed
-
-
-def image_resource_id(image_file: Path) -> str:
-    resource_id = re.sub(r"[^0-9A-Za-z_]", "_", image_file.stem)
+def file_resource_id(file_path: Path, fallback_prefix: str) -> str:
+    resource_id = re.sub(r"[^0-9A-Za-z_]", "_", file_path.stem)
     resource_id = resource_id.strip("_")
     if not resource_id or resource_id[0].isdigit():
-        resource_id = f"img_{resource_id}"
+        resource_id = f"{fallback_prefix}_{resource_id}"
     return resource_id
 
 
-def generate_ui_res_json(images_dir: Path, output_file: Path) -> None:
+def generate_ui_res_json(images_dir: Path, audio_dir: Path, output_file: Path) -> None:
     images: dict[str, dict[str, str]] = {}
     for image_file in sorted((item for item in images_dir.iterdir() if item.is_file()), key=lambda p: p.name):
-        resource_id = image_resource_id(image_file)
+        resource_id = file_resource_id(image_file, "img")
         if resource_id in images:
             raise RuntimeError(f"duplicate image resource id: {resource_id}")
         images[resource_id] = {
             "path": f"{ROMFS_SYSTEM_IMAGES_DIR}/{image_file.name}",
         }
 
+    audio: dict[str, dict[str, str]] = {}
+    for audio_file in sorted((item for item in audio_dir.iterdir() if item.is_file()), key=lambda p: p.name):
+        resource_id = file_resource_id(audio_file, "audio")
+        if resource_id in audio:
+            raise RuntimeError(f"duplicate audio resource id: {resource_id}")
+        audio[resource_id] = {
+            "path": f"{ROMFS_SYSTEM_AUDIO_DIR}/{audio_file.name}",
+        }
+
     output_file.write_text(
-        json.dumps({"name": "ui", "images": images}, indent=2, ensure_ascii=False) + "\n",
+        json.dumps({"name": "ui", "images": images, "audio": audio}, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
 
@@ -170,18 +142,41 @@ def generate_ui_res_json(images_dir: Path, output_file: Path) -> None:
 def clean_product_overlay(repo_root: Path) -> None:
     overlay_files = {dst for _, dst in PRODUCT_FILE_OVERLAYS}
     overlay_files.add(UI_RES_JSON)
-    products_dir = repo_root / "products"
 
     images_dst = repo_root / "romfs" / "system" / "images"
     print_info(f"clearing romfs images: {images_dst}")
     clear_directory_contents(images_dst, preserve_names={".gitkeep"})
 
+    audio_dst = repo_root / "romfs" / "system" / "audio"
+    print_info(f"clearing romfs audio: {audio_dst}")
+    clear_directory_contents(audio_dst, preserve_names={".gitkeep"})
+
+    for tree_rel in PRODUCT_TREE_SYNCS:
+        dst_tree = repo_root / tree_rel
+        print_info(f"clearing product tree: {dst_tree}")
+        clear_directory_contents(dst_tree)
+
     removed = 0
-    removed += remove_product_tree_overlay_files(repo_root, products_dir)
     for rel_path in overlay_files:
         if remove_file_if_exists(repo_root / rel_path):
             removed += 1
-    print_success(f"product overlay cleaned: removed={removed}")
+    print_success(
+        f"product overlay cleaned: removed_files={removed}, "
+        f"trees_cleared={len(PRODUCT_TREE_SYNCS)}"
+    )
+
+
+def sync_product_trees(repo_root: Path, product_dir: Path) -> None:
+    for tree_rel in PRODUCT_TREE_SYNCS:
+        src_tree = product_dir / tree_rel
+        dst_tree = repo_root / tree_rel
+        if not src_tree.is_dir():
+            raise RuntimeError(f"product tree not found: {src_tree}")
+        print_info(f"clearing product tree: {dst_tree}")
+        clear_directory_contents(dst_tree)
+        print_info(f"copy tree: {src_tree} -> {dst_tree}")
+        tree_total, tree_copied = copy_tree(src_tree, dst_tree)
+        print_success(f"tree synced: {tree_rel.as_posix()} {tree_copied}/{tree_total}")
 
 
 def apply_product_overlay(repo_root: Path, product_name: str) -> None:
@@ -216,9 +211,19 @@ def apply_product_overlay(repo_root: Path, product_name: str) -> None:
     img_total, img_copied = copy_tree(images_src, images_dst)
     print_success(f"romfs images copied: {img_copied}/{img_total}")
 
+    audio_src = product_dir / "audio"
+    audio_dst = repo_root / "romfs" / "system" / "audio"
+    if not audio_src.is_dir():
+        raise RuntimeError(f"product audio resources not found: {audio_src}")
+    print_info(f"clearing romfs audio: {audio_dst}")
+    clear_directory_contents(audio_dst, preserve_names={".gitkeep"})
+    print_info(f"copy audio from: {audio_src} -> {audio_dst}")
+    audio_total, audio_copied = copy_tree(audio_src, audio_dst)
+    print_success(f"romfs audio copied: {audio_copied}/{audio_total}")
+
     ui_res_json = repo_root / UI_RES_JSON
     print_info(f"generate resource json: {ui_res_json}")
-    generate_ui_res_json(images_src, ui_res_json)
+    generate_ui_res_json(images_src, audio_src, ui_res_json)
     print_success(f"generated: {UI_RES_JSON.as_posix()}")
 
     for src_rel, dst_rel in PRODUCT_FILE_OVERLAYS:
@@ -228,14 +233,7 @@ def apply_product_overlay(repo_root: Path, product_name: str) -> None:
         copy_file(src, dst)
         print_success(f"overlaid: {dst_rel.as_posix()}")
 
-    for tree_rel in PRODUCT_TREE_OVERLAYS:
-        src_tree = product_dir / tree_rel
-        dst_tree = repo_root / tree_rel
-        if src_tree.is_dir():
-            print_info(f"copy tree: {src_tree} -> {dst_tree}")
-            tree_total, tree_copied = copy_tree(src_tree, dst_tree)
-            print_success(f"tree overlaid: {tree_rel.as_posix()} {tree_copied}/{tree_total}")
-
+    sync_product_trees(repo_root, product_dir)
 
 def main() -> int:
     parser = argparse.ArgumentParser()

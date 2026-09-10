@@ -47,8 +47,6 @@ const app_page_t* reader_page_get(void);
  */
 bool reader_route_cmd(mpack_node_t node, msg_pack_t* msg);
 
-bool reader_config_ensure(void);
-bool reader_config_reset_to_default(void);
 
 /**
  * @brief 清空 Reader 当前文本

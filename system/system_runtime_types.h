@@ -51,6 +51,15 @@ typedef struct {
 #define SYSTEM_LCD_STEREO_OUTPUT_WIDTH  (SYSTEM_LCD_EYE_FRAME_WIDTH) ///< 双眼输出画布宽度。
 #define SYSTEM_LCD_STEREO_OUTPUT_HEIGHT (SYSTEM_LCD_EYE_FRAME_HEIGHT * 2u) ///< 双眼输出画布高度。
 
+/**
+ * @brief 支持搬屏应用的垂直显示位置。
+ */
+typedef enum {
+    SYSTEM_DISPLAY_POSITION_TOP = 1,    ///< 顶部显示。
+    SYSTEM_DISPLAY_POSITION_MIDDLE = 2, ///< 中部显示。
+    SYSTEM_DISPLAY_POSITION_BOTTOM = 3, ///< 底部显示。
+} system_display_position_t;
+
 typedef struct {
     uint32_t ui_x_begin; ///< UI 起始 X
     uint32_t ui_y_begin; ///< UI 起始 Y

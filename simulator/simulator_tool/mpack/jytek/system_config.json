@@ -1,0 +1,486 @@
+[
+    {
+        "biz": "SystemConfig",
+        "cmd": "getAll",
+        "data": {},
+        "id": 0,
+        "name": "获取全部系统配置",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemConfig",
+        "cmd": "setTime",
+        "data": {
+            "time": 1776916800
+        },
+        "id": 0,
+        "name": "设置时间戳",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemConfig",
+        "cmd": "getTimeConfig",
+        "data": {},
+        "id": 0,
+        "name": "获取时间配置",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemConfig",
+        "cmd": "setTimeConfig",
+        "data": {
+            "time": "2026-06-18 20:00:00",
+            "timestamp": 1776916800000,
+            "timezone": "Asia/Shanghai",
+            "userFormat": "yyyy-MM-dd HH:mm:ss"
+        },
+        "id": 0,
+        "name": "设置时间配置",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemConfig",
+        "cmd": "getBrightness",
+        "data": {},
+        "id": 0,
+        "name": "获取亮度",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemConfig",
+        "cmd": "setBrightness",
+        "data": {
+            "brightness": 80
+        },
+        "id": 0,
+        "name": "设置亮度",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemConfig",
+        "cmd": "getFontSize",
+        "data": {},
+        "id": 0,
+        "name": "获取字号（未实现，预期NAK）",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemConfig",
+        "cmd": "setFontSize",
+        "data": {
+            "fontSize": 32
+        },
+        "id": 0,
+        "name": "设置字号（未实现，预期NAK）",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemConfig",
+        "cmd": "getRowSpace",
+        "data": {},
+        "id": 0,
+        "name": "获取行距（未实现，预期NAK）",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemConfig",
+        "cmd": "setRowSpace",
+        "data": {
+            "rowSpace": 0
+        },
+        "id": 0,
+        "name": "设置行距（未实现，预期NAK）",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemConfig",
+        "cmd": "getLanguage",
+        "data": {},
+        "id": 0,
+        "name": "获取语言",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemConfig",
+        "cmd": "setLanguage",
+        "data": {
+            "language": "zh-CN"
+        },
+        "id": 0,
+        "name": "设置中文",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemConfig",
+        "cmd": "setLanguage",
+        "data": {
+            "language": "en-US"
+        },
+        "id": 0,
+        "name": "设置英文",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemConfig",
+        "cmd": "getHomeUnits",
+        "data": {},
+        "id": 0,
+        "name": "获取主页单元",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemConfig",
+        "cmd": "setHomeUnits",
+        "data": {
+            "homeunits": [
+                "monitor",
+                "translate",
+                "prompter"
+            ]
+        },
+        "id": 0,
+        "name": "设置主页单元",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemConfig",
+        "cmd": "getHomeMenuConfig",
+        "data": {},
+        "id": 0,
+        "name": "获取主页菜单配置",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemConfig",
+        "cmd": "setHomeMenuConfig",
+        "data": {
+            "selected": 3,
+            "visible": [
+                5,
+                3,
+                2
+            ]
+        },
+        "id": 0,
+        "name": "设置主页菜单配置",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemConfig",
+        "cmd": "getDisplayConfig",
+        "data": {},
+        "id": 0,
+        "name": "获取显示配置（未实现，预期NAK）",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemConfig",
+        "cmd": "setDisplayConfig",
+        "data": {
+            "mode": 0
+        },
+        "id": 0,
+        "name": "设置显示配置（未实现，预期NAK）",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemConfig",
+        "cmd": "getDisplayDistanceLevel",
+        "data": {},
+        "id": 0,
+        "name": "获取显示距离等级",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemConfig",
+        "cmd": "setDisplayDistanceLevel",
+        "data": {
+            "displayDistanceLevel": 1
+        },
+        "id": 0,
+        "name": "设置显示距离等级1",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemConfig",
+        "cmd": "setDisplayDistanceLevel",
+        "data": {
+            "displayDistanceLevel": 2
+        },
+        "id": 0,
+        "name": "设置显示距离等级2",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemConfig",
+        "cmd": "setDisplayDistanceLevel",
+        "data": {
+            "displayDistanceLevel": 3
+        },
+        "id": 0,
+        "name": "设置显示距离等级3",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemConfig",
+        "cmd": "getDisplayDistance",
+        "data": {},
+        "id": 0,
+        "name": "获取显示距离（未实现，预期NAK）",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemConfig",
+        "cmd": "setDisplayDistance",
+        "data": {
+            "distance": 1
+        },
+        "id": 0,
+        "name": "接收显示距离参数（当前未应用）",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemConfig",
+        "cmd": "getDisplayPopupDepth",
+        "data": {},
+        "id": 0,
+        "name": "获取弹窗深度（未实现，预期NAK）",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemConfig",
+        "cmd": "setDisplayPopupDepth",
+        "data": {
+            "depth": 1
+        },
+        "id": 0,
+        "name": "接收弹窗深度参数（当前未应用）",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemConfig",
+        "cmd": "getInactivityTimeout",
+        "data": {},
+        "id": 0,
+        "name": "获取息屏超时",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemConfig",
+        "cmd": "setInactivityTimeout",
+        "data": {
+            "inactivityTimeout": 60
+        },
+        "id": 0,
+        "name": "设置息屏超时",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemConfig",
+        "cmd": "getPoweroffTimeout",
+        "data": {},
+        "id": 0,
+        "name": "获取关机超时",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemConfig",
+        "cmd": "setPoweroffTimeout",
+        "data": {
+            "poweroffTimeout": 300
+        },
+        "id": 0,
+        "name": "设置关机超时",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemConfig",
+        "cmd": "getHeadGestureConfig",
+        "data": {},
+        "id": 0,
+        "name": "获取头部手势配置",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemConfig",
+        "cmd": "setHeadGestureConfig",
+        "data": {
+            "baseDeg": 0,
+            "downDeg": -25,
+            "downEnabled": 1,
+            "upDeg": 25,
+            "upEnabled": 1
+        },
+        "id": 0,
+        "name": "设置头部手势配置",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemConfig",
+        "cmd": "getWearDetectionEnabled",
+        "data": {},
+        "id": 0,
+        "name": "获取佩戴检测状态",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemConfig",
+        "cmd": "setWearDetectionEnabled",
+        "data": {
+            "wearDetectionEnabled": 1
+        },
+        "id": 0,
+        "name": "开启佩戴检测",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemConfig",
+        "cmd": "setWearDetectionEnabled",
+        "data": {
+            "wearDetectionEnabled": 0
+        },
+        "id": 0,
+        "name": "关闭佩戴检测",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemConfig",
+        "cmd": "getAutoBrightnessEnabled",
+        "data": {},
+        "id": 0,
+        "name": "获取自动亮度状态",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemConfig",
+        "cmd": "setAutoBrightnessEnabled",
+        "data": {
+            "autoBrightnessEnabled": 1
+        },
+        "id": 0,
+        "name": "开启自动亮度",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemConfig",
+        "cmd": "setAutoBrightnessEnabled",
+        "data": {
+            "autoBrightnessEnabled": 0
+        },
+        "id": 0,
+        "name": "关闭自动亮度",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemConfig",
+        "cmd": "getTouchpadEnabled",
+        "data": {},
+        "id": 0,
+        "name": "获取触控板状态",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemConfig",
+        "cmd": "setTouchpadEnabled",
+        "data": {
+            "touchpadEnabled": 1
+        },
+        "id": 0,
+        "name": "开启触控板",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemConfig",
+        "cmd": "setTouchpadEnabled",
+        "data": {
+            "touchpadEnabled": 0
+        },
+        "id": 0,
+        "name": "关闭触控板",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemConfig",
+        "cmd": "getIdleDetectionEnabled",
+        "data": {},
+        "id": 0,
+        "name": "获取静止检测状态",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemConfig",
+        "cmd": "setIdleDetectionEnabled",
+        "data": {
+            "idleDetectionEnabled": 1
+        },
+        "id": 0,
+        "name": "开启静止检测",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemConfig",
+        "cmd": "setIdleDetectionEnabled",
+        "data": {
+            "idleDetectionEnabled": 0
+        },
+        "id": 0,
+        "name": "关闭静止检测",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemConfig",
+        "cmd": "getKeywordSpottingEnabled",
+        "data": {},
+        "id": 0,
+        "name": "获取关键词唤醒状态",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemConfig",
+        "cmd": "setKeywordSpottingEnabled",
+        "data": {
+            "keywordSpottingEnabled": 1
+        },
+        "id": 0,
+        "name": "开启关键词唤醒",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemConfig",
+        "cmd": "setKeywordSpottingEnabled",
+        "data": {
+            "keywordSpottingEnabled": 0
+        },
+        "id": 0,
+        "name": "关闭关键词唤醒",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemConfig",
+        "cmd": "getNotificationEnabled",
+        "data": {},
+        "id": 0,
+        "name": "获取通知状态",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemConfig",
+        "cmd": "setNotificationEnabled",
+        "data": {
+            "notificationEnabled": 1
+        },
+        "id": 0,
+        "name": "开启通知",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemConfig",
+        "cmd": "setNotificationEnabled",
+        "data": {
+            "notificationEnabled": 0
+        },
+        "id": 0,
+        "name": "关闭通知",
+        "type": "DATA_RELIABLE"
+    }
+]

@@ -1,0 +1,406 @@
+[
+    {
+        "biz": "SystemControl",
+        "cmd": "setView",
+        "data": {
+            "viewName": "transcribe"
+        },
+        "id": 0,
+        "name": "进入",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemControl",
+        "cmd": "setView",
+        "data": {
+            "viewName": "home"
+        },
+        "id": 0,
+        "name": "退出",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "transcribe",
+        "cmd": "clearView",
+        "data": {},
+        "id": 2,
+        "name": "清空界面",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "transcribe",
+        "cmd": "setFontConfig",
+        "data": {
+            "fontConfig": {
+                "rowSpace": 0,
+                "weight": 32,
+                "wordSpace": 0
+            }
+        },
+        "id": 2,
+        "name": "设置文字配置",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemControl",
+        "cmd": "setProgressVisible",
+        "data": {
+            "opa": 80,
+            "text": "转写中",
+            "visible": 1
+        },
+        "id": 0,
+        "name": "显示转写中遮罩",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "SystemControl",
+        "cmd": "setProgressVisible",
+        "data": {
+            "visible": 0
+        },
+        "id": 0,
+        "name": "隐藏转写中遮罩",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "transcribe",
+        "cmd": "updateSttInfo",
+        "data": {
+            "actionType": 1,
+            "area": 2,
+            "createdAt": 1776916799000,
+            "id": 100,
+            "isFinal": 1,
+            "msgId": "transcribe_notice",
+            "msgType": 0,
+            "transcribe": "点击开始转写",
+            "user": "System"
+        },
+        "id": 2,
+        "name": "显示转写提示",
+        "type": "DATA_UNRELIABLE"
+    },
+    {
+        "biz": "transcribe",
+        "cmd": "updateSttInfo",
+        "data": {
+            "actionType": 0,
+            "area": 0,
+            "createdAt": 1776916800000,
+            "id": 1,
+            "isFinal": 0,
+            "msgId": "transcribe_1",
+            "msgType": 0,
+            "transcribe": "Testing microphone input...",
+            "user": "User A"
+        },
+        "id": 2,
+        "name": "更新转写信息1-中间结果",
+        "type": "DATA_UNRELIABLE"
+    },
+    {
+        "biz": "transcribe",
+        "cmd": "updateSttInfo",
+        "data": {
+            "actionType": 1,
+            "area": 0,
+            "createdAt": 1776916801000,
+            "id": 1,
+            "isFinal": 1,
+            "msgId": "transcribe_1",
+            "msgType": 0,
+            "transcribe": "Testing microphone input is complete.",
+            "user": "User A"
+        },
+        "id": 2,
+        "name": "更新转写信息1-最终结果",
+        "type": "DATA_UNRELIABLE"
+    },
+    {
+        "biz": "transcribe",
+        "cmd": "updateSttInfo",
+        "data": {
+            "actionType": 1,
+            "area": 0,
+            "createdAt": 1776916802000,
+            "id": 2,
+            "isFinal": 1,
+            "msgId": "transcribe_2",
+            "msgType": 0,
+            "transcribe": "Short sentence.",
+            "user": "User A"
+        },
+        "id": 2,
+        "name": "更新转写信息2",
+        "type": "DATA_UNRELIABLE"
+    },
+    {
+        "biz": "transcribe",
+        "cmd": "updateSttInfo",
+        "data": {
+            "actionType": 1,
+            "area": 0,
+            "createdAt": 1776916803000,
+            "id": 3,
+            "isFinal": 1,
+            "msgId": "transcribe_3",
+            "msgType": 0,
+            "transcribe": "This is a longer transcribe message used to verify line wrapping and scrolling behavior on the glasses screen.",
+            "user": "User A"
+        },
+        "id": 2,
+        "name": "更新转写信息3",
+        "type": "DATA_UNRELIABLE"
+    },
+    {
+        "biz": "transcribe",
+        "cmd": "updateSttInfo",
+        "data": {
+            "actionType": 1,
+            "area": 0,
+            "createdAt": 1776916804000,
+            "id": 4,
+            "isFinal": 1,
+            "msgId": "transcribe_4",
+            "msgType": 0,
+            "transcribe": "Numbers and symbols: 12345, 67.89%, A/B, example.com/path?x=1&y=2.",
+            "user": "User A"
+        },
+        "id": 2,
+        "name": "更新转写信息4",
+        "type": "DATA_UNRELIABLE"
+    },
+    {
+        "biz": "transcribe",
+        "cmd": "updateSttInfo",
+        "data": {
+            "actionType": 1,
+            "area": 0,
+            "createdAt": 1776916805000,
+            "id": 5,
+            "isFinal": 1,
+            "msgId": "transcribe_5",
+            "msgType": 0,
+            "transcribe": "Another speaker joins the conversation.",
+            "user": "User B"
+        },
+        "id": 2,
+        "name": "更新转写信息5",
+        "type": "DATA_UNRELIABLE"
+    },
+    {
+        "biz": "transcribe",
+        "cmd": "setState",
+        "data": {
+            "state": 1
+        },
+        "id": 2,
+        "name": "开始转写",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "transcribe",
+        "cmd": "setState",
+        "data": {
+            "state": 0
+        },
+        "id": 2,
+        "name": "停止转写",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "transcribe",
+        "cmd": "setTextMode",
+        "data": {
+            "textMode": 0
+        },
+        "id": 2,
+        "name": "文本模式-默认（textMode=0）",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "transcribe",
+        "cmd": "setTextMode",
+        "data": {
+            "textMode": 1
+        },
+        "id": 2,
+        "name": "文本模式-历史（textMode=1）",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "transcribe",
+        "cmd": "setTextMode",
+        "data": {
+            "textMode": 2
+        },
+        "id": 2,
+        "name": "文本模式-会议（textMode=2）",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "transcribe",
+        "cmd": "setAudioTrackState",
+        "data": {
+            "audioTrack": 1
+        },
+        "id": 2,
+        "name": "下发音轨状态1（当前代码仅校验参数）",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "transcribe",
+        "cmd": "setAudioTrackState",
+        "data": {
+            "audioTrack": 0
+        },
+        "id": 2,
+        "name": "下发音轨状态0（当前代码仅校验参数）",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "transcribe",
+        "cmd": "setTransMode",
+        "data": {
+            "transMode": 0
+        },
+        "id": 2,
+        "name": "显示模式-仅译文（transMode=0）",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "transcribe",
+        "cmd": "setTransMode",
+        "data": {
+            "transMode": 1
+        },
+        "id": 2,
+        "name": "显示模式-原文译文双列（transMode=1）",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "transcribe",
+        "cmd": "setTransMode",
+        "data": {
+            "transMode": 2
+        },
+        "id": 2,
+        "name": "显示模式-仅原文（transMode=2）",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "transcribe",
+        "cmd": "setMaxLine",
+        "data": {
+            "maxLine": 3
+        },
+        "id": 2,
+        "name": "设置最大行数",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "transcribe",
+        "cmd": "setAudioSourceIndicator",
+        "data": {
+            "audioSourceIndicator": 0
+        },
+        "id": 2,
+        "name": "音源指示器-眼镜",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "transcribe",
+        "cmd": "setAudioSourceIndicator",
+        "data": {
+            "audioSourceIndicator": 1
+        },
+        "id": 2,
+        "name": "音源指示器-手机",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "transcribe",
+        "cmd": "setAudioSourceIndicator",
+        "data": {
+            "audioSourceIndicator": 2
+        },
+        "id": 2,
+        "name": "音源指示器-手表",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "transcribe",
+        "cmd": "setMicDirectional",
+        "data": {
+            "micDirectional": 0
+        },
+        "id": 2,
+        "name": "全向麦克风（micDirectional=0）",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "transcribe",
+        "cmd": "setMicDirectional",
+        "data": {
+            "micDirectional": 1
+        },
+        "id": 2,
+        "name": "定向麦克风（micDirectional=1）",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "transcribe",
+        "cmd": "setLanguageHint",
+        "data": {
+            "languageHint": {
+                "mode": 0,
+                "source": "en-US",
+                "target": ""
+            }
+        },
+        "id": 2,
+        "name": "语言提示-仅源语言（mode=0）",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "transcribe",
+        "cmd": "setLanguageHint",
+        "data": {
+            "languageHint": {
+                "mode": 1,
+                "source": "en-US",
+                "target": "zh-CN"
+            }
+        },
+        "id": 2,
+        "name": "语言提示-源语言和目标语言（mode=1）",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "transcribe",
+        "cmd": "textDirection",
+        "data": {
+            "textDirection": {
+                "source": 0,
+                "target": 0
+            }
+        },
+        "id": 2,
+        "name": "文字方向-源/目标从左到右",
+        "type": "DATA_RELIABLE"
+    },
+    {
+        "biz": "transcribe",
+        "cmd": "textDirection",
+        "data": {
+            "textDirection": {
+                "source": 1,
+                "target": 1
+            }
+        },
+        "id": 2,
+        "name": "文字方向-源/目标从右到左",
+        "type": "DATA_RELIABLE"
+    }
+]

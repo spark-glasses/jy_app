@@ -23,6 +23,7 @@ extern "C" {
 typedef struct {
     int32_t width;             ///< 页面场景宽度
     int32_t height;            ///< 页面场景高度
+    int32_t offset_y;          ///< 页面场景相对父层的纵向偏移
 } app_page_host_config_t;
 
 /**
@@ -51,13 +52,17 @@ app_page_host_config_t app_page_host_default_config(int32_t width, int32_t heigh
 bool app_page_host_create(lv_obj_t* parent, const app_page_host_config_t* cfg, app_page_view_t* view);
 
 /**
- * @brief 更新页面承载层视图尺寸。
+ * @brief 更新页面承载层视图尺寸与纵向偏移。
  * @param[in,out] view 页面视图对象集合。
  * @param[in] width 页面宽度。
  * @param[in] height 页面高度。
+ * @param[in] offset_y 页面相对父层的纵向偏移。
  * @return 无返回值。
  */
-void app_page_host_resize(app_page_view_t* view, int32_t width, int32_t height);
+void app_page_host_resize(app_page_view_t* view,
+                          int32_t width,
+                          int32_t height,
+                          int32_t offset_y);
 
 /**
  * @brief 销毁页面承载层视图。
