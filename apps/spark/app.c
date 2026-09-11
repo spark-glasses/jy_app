@@ -45,7 +45,15 @@ static bool spark_assistant_parse(
     else if (spark_node_is(state, "listening")) presentation->state = SPARK_ASSISTANT_LISTENING;
     else if (spark_node_is(state, "thinking")) presentation->state = SPARK_ASSISTANT_THINKING;
     else if (spark_node_is(state, "working")) presentation->state = SPARK_ASSISTANT_WORKING;
+    else if (spark_node_is(state, "notes")) presentation->state = SPARK_ASSISTANT_NOTES;
+    else if (spark_node_is(state, "todo")) presentation->state = SPARK_ASSISTANT_TODO;
+    else if (spark_node_is(state, "calendar")) presentation->state = SPARK_ASSISTANT_CALENDAR;
+    else if (spark_node_is(state, "email")) presentation->state = SPARK_ASSISTANT_EMAIL;
+    else if (spark_node_is(state, "contacts")) presentation->state = SPARK_ASSISTANT_CONTACTS;
+    else if (spark_node_is(state, "maps")) presentation->state = SPARK_ASSISTANT_MAPS;
+    else if (spark_node_is(state, "web")) presentation->state = SPARK_ASSISTANT_WEB;
     else if (spark_node_is(state, "error")) presentation->state = SPARK_ASSISTANT_ERROR;
+    else if (mpack_node_type(state) == mpack_type_str) presentation->state = SPARK_ASSISTANT_WORKING;
     else return false;
     presentation->detail[0] = '\0';
     if (mpack_node_map_contains_cstr(node, "detail")) {

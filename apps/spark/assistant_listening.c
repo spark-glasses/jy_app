@@ -2,7 +2,7 @@
 
 #define SPARK_LISTENING_BITMAP_COUNT 7
 #define SPARK_LISTENING_FRAME_COUNT 12
-#define SPARK_LISTENING_FRAME_PERIOD_MS 108
+#define SPARK_LISTENING_FRAME_PERIOD_MS 100
 
 /* Unique sizes for the former 100%-to-80%-to-100% breathing motion. */
 static const LV_ATTRIBUTE_MEM_ALIGN LV_ATTRIBUTE_LARGE_CONST uint8_t

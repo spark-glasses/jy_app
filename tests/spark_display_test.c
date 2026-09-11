@@ -391,13 +391,16 @@ int main(int argc, char** argv) {
     const spark_assistant_state_t expected_states[] = {
         SPARK_ASSISTANT_IDLE, SPARK_ASSISTANT_LISTENING, SPARK_ASSISTANT_THINKING,
         SPARK_ASSISTANT_WORKING, SPARK_ASSISTANT_ERROR};
+    const void* pen = NULL;
     for (size_t i = 0; i < 5; ++i) {
         char revision[4]; snprintf(revision, sizeof(revision), "%zu", i + 2);
         const void* previous_avatar_frame = lv_image_get_src(avatar_image);
+        unsigned refreshes = frames;
         test_assistant_state = assistant_states[i];
         test_assistant_detail = i == 3 ? "search_notes" : NULL;
         send_request(revision, -1, true, NULL, 0);
         assert(last_error == Dp_ErrNone && spark_assistant_current()->state == expected_states[i]);
+        assert(frames == refreshes);
         assert(strcmp(spark_assistant_current()->detail,
                       test_assistant_detail == NULL ? "" : test_assistant_detail) == 0);
         if (expected_states[i] == SPARK_ASSISTANT_LISTENING) {
@@ -413,8 +416,11 @@ int main(int argc, char** argv) {
             lv_tick_inc(300); lv_anim_refr_now();
             lv_obj_invalidate(lv_screen_active()); lv_refr_now(display);
             save_frame(argc > 1 ? argv[1] : NULL, "assistant-thinking");
+            flushed_pixels = 0;
+            lv_tick_inc(100); lv_anim_refr_now(); lv_refr_now(display);
+            assert(flushed_pixels == 0);
         } else if (expected_states[i] == SPARK_ASSISTANT_WORKING) {
-            const void* pen = lv_image_get_src(avatar_image);
+            pen = lv_image_get_src(avatar_image);
             assert(pen != previous_avatar_frame);
             lv_tick_inc(500); lv_anim_refr_now();
             assert(lv_image_get_src(avatar_image) == pen);
@@ -422,17 +428,42 @@ int main(int argc, char** argv) {
             save_frame(argc > 1 ? argv[1] : NULL, "assistant-working");
         }
     }
+    test_assistant_state = "notes";
+    test_assistant_detail = NULL;
+    send_request("7", -1, true, NULL, 0);
+    assert(last_error == Dp_ErrNone && spark_assistant_current()->state == SPARK_ASSISTANT_NOTES);
+    assert(pen != NULL && lv_image_get_src(avatar_image) == pen);
+    assert(!lv_obj_has_flag(avatar_image, LV_OBJ_FLAG_HIDDEN));
+    lv_obj_invalidate(lv_screen_active()); lv_refr_now(display);
+    save_frame(argc > 1 ? argv[1] : NULL, "assistant-notes");
+    const char* icon_states[] = {"todo", "calendar", "maps"};
+    const spark_assistant_state_t expected_icons[] = {
+        SPARK_ASSISTANT_TODO, SPARK_ASSISTANT_CALENDAR, SPARK_ASSISTANT_MAPS};
+    const char* icon_frames[] = {"assistant-todo", "assistant-calendar", "assistant-maps"};
+    for (size_t i = 0; i < 3; ++i) {
+        char revision[4]; snprintf(revision, sizeof(revision), "%zu", i + 8);
+        test_assistant_state = icon_states[i];
+        send_request(revision, -1, true, NULL, 0);
+        assert(last_error == Dp_ErrNone && spark_assistant_current()->state == expected_icons[i]);
+        assert(!lv_obj_has_flag(avatar_image, LV_OBJ_FLAG_HIDDEN));
+        assert(lv_obj_get_child_count(avatar) == 1);
+        assert(lv_image_get_src(avatar_image) != pen);
+        lv_obj_invalidate(lv_screen_active()); lv_refr_now(display);
+        save_frame(argc > 1 ? argv[1] : NULL, icon_frames[i]);
+    }
     test_assistant_state = "unknown";
     test_assistant_detail = NULL;
-    send_request("7", -1, true, NULL, 0); assert(last_error == ErrBadParam);
-    assert(spark_assistant_current()->state == SPARK_ASSISTANT_ERROR);
+    send_request("11", -1, true, NULL, 0);
+    assert(last_error == Dp_ErrNone && spark_assistant_current()->state == SPARK_ASSISTANT_WORKING);
+    assert(!lv_obj_has_flag(avatar_image, LV_OBJ_FLAG_HIDDEN));
+    assert(pen != NULL && lv_image_get_src(avatar_image) == pen);
     char oversized_detail[SPARK_ASSISTANT_MAX_DETAIL + 2];
     memset(oversized_detail, 'a', sizeof(oversized_detail) - 1);
     oversized_detail[sizeof(oversized_detail) - 1] = '\0';
     test_assistant_state = "working";
     test_assistant_detail = oversized_detail;
-    send_request("7", -1, true, NULL, 0); assert(last_error == ErrBadParam);
-    assert(spark_assistant_current()->state == SPARK_ASSISTANT_ERROR);
+    send_request("12", -1, true, NULL, 0); assert(last_error == ErrBadParam);
+    assert(spark_assistant_current()->state == SPARK_ASSISTANT_WORKING);
     test_assistant_state = NULL;
     test_assistant_detail = NULL;
     active_app = "prompter";

@@ -592,7 +592,5 @@ bool spark_reply_set(const char* text) {
 
 bool spark_assistant_apply(const spark_assistant_presentation_t* presentation) {
     if (!s_ready || s_avatar == NULL || presentation == NULL) return false;
-    bool applied = spark_assistant_avatar_set_state(s_avatar, presentation);
-    if (applied) system_ui_request_screen_refresh();
-    return applied;
+    return spark_assistant_avatar_set_state(s_avatar, presentation);
 }
