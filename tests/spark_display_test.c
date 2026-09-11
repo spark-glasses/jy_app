@@ -23,6 +23,8 @@ static const char* test_display_id = "";
 static uint64_t test_navigation_sequence, last_navigation_sequence;
 static char last_artifact_id[257], last_display_id[65];
 static bool drop_report;
+static const char* test_assistant_state;
+static const char* test_assistant_detail;
 
 bool app_manager_register(app_t* value) { app = value; return true; }
 const char* app_manager_current_name(void) { return active_app; }
@@ -94,12 +96,20 @@ static void send_request(const char* revision, int count, bool list, const char*
     char* bytes = NULL; size_t size = 0;
     mpack_writer_t writer;
     mpack_writer_init_growable(&writer, &bytes, &size);
-    mpack_start_map(&writer, 3 + (count >= 0) + (reply != NULL));
+    mpack_start_map(&writer, 3 + (count >= 0) + (reply != NULL) +
+                                 (test_assistant_state != NULL));
     text(&writer, "revision", revision);
     text(&writer, "displayID", test_display_id);
     char sequence[21]; snprintf(sequence, sizeof(sequence), "%llu", (unsigned long long)test_navigation_sequence);
     text(&writer, "navigationSequence", sequence);
     if (reply != NULL) text(&writer, "reply", reply);
+    if (test_assistant_state != NULL) {
+        mpack_write_cstr(&writer, "assistant");
+        mpack_start_map(&writer, 1 + (test_assistant_detail != NULL));
+        text(&writer, "state", test_assistant_state);
+        if (test_assistant_detail != NULL) text(&writer, "detail", test_assistant_detail);
+        mpack_finish_map(&writer);
+    }
     if (count >= 0) {
         mpack_write_cstr(&writer, "page"); mpack_start_map(&writer, list && count ? 6 : 5);
         text(&writer, "kind", list ? "list" : "item");
@@ -169,13 +179,25 @@ int main(int argc, char** argv) {
     lv_display_set_flush_cb(display, flush);
     lv_obj_set_style_bg_color(lv_screen_active(), lv_color_black(), 0);
     parent = lv_obj_create(lv_screen_active());
-    lv_obj_remove_style_all(parent); lv_obj_set_size(parent, 540, 320); lv_obj_set_pos(parent, 0, 32);
+    lv_obj_remove_style_all(parent); lv_obj_set_size(parent, 540, 390); lv_obj_set_pos(parent, 0, 50);
     assert(spark_app_register()); app->on_start();
+    lv_obj_t* footer = lv_obj_get_child(parent, 1);
+    lv_obj_t* avatar = lv_obj_get_child(footer, 0);
+    lv_obj_t* avatar_image = lv_obj_get_child(avatar, 0);
+    const void* first_avatar_frame = lv_image_get_src(avatar_image);
+    int32_t first_avatar_x = lv_obj_get_style_translate_x(avatar, LV_PART_MAIN);
+    lv_tick_inc(225); lv_anim_refr_now();
+    assert(lv_image_get_src(avatar_image) != first_avatar_frame);
+    assert(lv_obj_get_style_translate_x(avatar, LV_PART_MAIN) > first_avatar_x);
+    lv_tick_inc(275); lv_anim_refr_now();
+    assert(lv_obj_get_style_translate_x(avatar, LV_PART_MAIN) == 0);
     lv_obj_t* frame = lv_obj_get_child(parent, 0);
-    lv_obj_t* reply_panel = lv_obj_get_child(parent, 1);
+    lv_obj_t* reply_panel = lv_obj_get_child(footer, 1);
     lv_obj_t* reply_label = lv_obj_get_child(reply_panel, 0);
     lv_obj_t* content = lv_obj_get_child(frame, 1);
     assert(lv_obj_has_flag(frame, LV_OBJ_FLAG_HIDDEN));
+    assert(lv_obj_get_height(footer) == 72 && lv_obj_get_width(avatar) == 40);
+    assert(lv_obj_get_x(avatar) == 30);
 
     send_request("1", 5, true, "Done", 0);
     assert(last_error == Dp_ErrNone && strcmp(last_revision, "1") == 0);
@@ -187,6 +209,29 @@ int main(int argc, char** argv) {
     assert(lv_obj_get_y(last_row) + lv_obj_get_height(last_row) <= lv_obj_get_content_height(content));
     assert(lv_obj_get_child_count(content) == 8);
     assert(lv_obj_get_width(lv_obj_get_child(last_row, 1)) > 200);
+    assert(spark_reply_set("Okay."));
+    lv_obj_invalidate(lv_screen_active());
+    lv_refr_now(display); save_frame(argc > 1 ? argv[1] : NULL, "reply-short");
+    lv_coord_t short_width = lv_obj_get_width(reply_panel);
+    assert(lv_obj_get_height(reply_panel) == 56);
+    assert(lv_obj_get_style_align(reply_label, LV_PART_MAIN) == LV_ALIGN_LEFT_MID);
+    assert(lv_obj_get_style_text_align(reply_label, LV_PART_MAIN) == LV_TEXT_ALIGN_LEFT);
+    assert(spark_reply_set("I found three notes from yesterday."));
+    lv_obj_invalidate(lv_screen_active());
+    lv_refr_now(display); save_frame(argc > 1 ? argv[1] : NULL, "reply-medium");
+    lv_coord_t medium_width = lv_obj_get_width(reply_panel);
+    assert(medium_width > short_width && lv_obj_get_height(reply_panel) == 56);
+    assert(spark_reply_set("This is a longer assistant response that exceeds the fixed reply area and must end with an ellipsis instead of making the box taller, even when several more words arrive after the visible limit."));
+    lv_obj_invalidate(lv_screen_active());
+    lv_refr_now(display); save_frame(argc > 1 ? argv[1] : NULL, "reply-long");
+    assert(lv_obj_get_width(reply_panel) >= medium_width);
+    assert(lv_obj_get_height(reply_panel) == 56);
+    assert(lv_obj_get_height(reply_label) <=
+           lv_font_get_line_height(lv_obj_get_style_text_font(reply_label, LV_PART_MAIN)) * 2 + 2);
+    assert(lv_obj_get_x(reply_panel) + lv_obj_get_width(reply_panel) <=
+           lv_obj_get_content_width(footer) - 24);
+    assert(spark_reply_set("Done"));
+    lv_refr_now(display);
     const spark_display_t* previous = spark_display_current();
     unsigned before = frames;
     flushed_pixels = 0;
@@ -340,9 +385,58 @@ int main(int argc, char** argv) {
     }
     test_selected = 0;
     app->on_pause(); assert(spark_display_current() == NULL);
+    assert(spark_assistant_current()->state == SPARK_ASSISTANT_IDLE);
     send_request("1", 1, false, "Reconnected", 0); assert(last_error == Dp_ErrNone);
+    const char* assistant_states[] = {"idle", "listening", "thinking", "working", "error"};
+    const spark_assistant_state_t expected_states[] = {
+        SPARK_ASSISTANT_IDLE, SPARK_ASSISTANT_LISTENING, SPARK_ASSISTANT_THINKING,
+        SPARK_ASSISTANT_WORKING, SPARK_ASSISTANT_ERROR};
+    for (size_t i = 0; i < 5; ++i) {
+        char revision[4]; snprintf(revision, sizeof(revision), "%zu", i + 2);
+        const void* previous_avatar_frame = lv_image_get_src(avatar_image);
+        test_assistant_state = assistant_states[i];
+        test_assistant_detail = i == 3 ? "search_notes" : NULL;
+        send_request(revision, -1, true, NULL, 0);
+        assert(last_error == Dp_ErrNone && spark_assistant_current()->state == expected_states[i]);
+        assert(strcmp(spark_assistant_current()->detail,
+                      test_assistant_detail == NULL ? "" : test_assistant_detail) == 0);
+        if (expected_states[i] == SPARK_ASSISTANT_LISTENING) {
+            lv_tick_inc(540); lv_anim_refr_now();
+            assert(lv_image_get_src(avatar_image) != previous_avatar_frame);
+            lv_obj_invalidate(lv_screen_active()); lv_refr_now(display);
+            save_frame(argc > 1 ? argv[1] : NULL, "assistant-listening");
+        } else if (expected_states[i] == SPARK_ASSISTANT_THINKING) {
+            const void* morph_start = lv_image_get_src(avatar_image);
+            lv_tick_inc(180); lv_anim_refr_now();
+            assert(lv_image_get_src(avatar_image) != morph_start);
+            lv_tick_inc(180); lv_anim_refr_now();
+            lv_tick_inc(300); lv_anim_refr_now();
+            lv_obj_invalidate(lv_screen_active()); lv_refr_now(display);
+            save_frame(argc > 1 ? argv[1] : NULL, "assistant-thinking");
+        } else if (expected_states[i] == SPARK_ASSISTANT_WORKING) {
+            const void* pen = lv_image_get_src(avatar_image);
+            assert(pen != previous_avatar_frame);
+            lv_tick_inc(500); lv_anim_refr_now();
+            assert(lv_image_get_src(avatar_image) == pen);
+            lv_obj_invalidate(lv_screen_active()); lv_refr_now(display);
+            save_frame(argc > 1 ? argv[1] : NULL, "assistant-working");
+        }
+    }
+    test_assistant_state = "unknown";
+    test_assistant_detail = NULL;
+    send_request("7", -1, true, NULL, 0); assert(last_error == ErrBadParam);
+    assert(spark_assistant_current()->state == SPARK_ASSISTANT_ERROR);
+    char oversized_detail[SPARK_ASSISTANT_MAX_DETAIL + 2];
+    memset(oversized_detail, 'a', sizeof(oversized_detail) - 1);
+    oversized_detail[sizeof(oversized_detail) - 1] = '\0';
+    test_assistant_state = "working";
+    test_assistant_detail = oversized_detail;
+    send_request("7", -1, true, NULL, 0); assert(last_error == ErrBadParam);
+    assert(spark_assistant_current()->state == SPARK_ASSISTANT_ERROR);
+    test_assistant_state = NULL;
+    test_assistant_detail = NULL;
     active_app = "prompter";
-    send_request("2", 1, false, NULL, 0); assert(last_error == ErrNotReady);
+    send_request("7", 1, false, NULL, 0); assert(last_error == ErrNotReady);
     app->on_stop(); spark_page_get()->on_destroy(); lv_obj_delete(parent);
     lv_display_delete(display); lv_deinit();
     puts("Spark display: partial redraw, five-row fit, independent updates, retry ACK, validation, ownership, layout and reports passed.");

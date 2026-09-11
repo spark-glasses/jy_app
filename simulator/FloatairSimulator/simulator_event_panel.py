@@ -54,12 +54,19 @@ ATTACHMENT_SIDES = [  # 当前硬件定义：从侧为左侧，主侧为右侧�
 ]
 
 
+def _create_root() -> tk.Tk:
+    if sys.platform != "darwin":
+        return tk.Tk()
+    root = tk.Tk(useTk=False)
+    root.tk.eval("package require Tk; wm withdraw .")
+    root._loadtk()
+    return root
+
+
 class EventPanel:
     def __init__(self, fifo_path: str) -> None:
         self.fifo_path = fifo_path
-        self.root = tk.Tk()
-        if sys.platform == "darwin":
-            self.root.withdraw()
+        self.root = _create_root()
         self.root.title("Floatair OS Events")
         self.root.geometry("760x760")
         self.root.resizable(True, True)
@@ -236,27 +243,25 @@ class EventPanel:
         status = ttk.Label(container, textvariable=self.status_var, foreground="#445")
         status.pack(anchor="w", pady=(10, 0))
 
-        self.root.update_idletasks()
         if sys.platform == "darwin":
             self._show_away_from_pointer()
+        else:
+            self.root.update_idletasks()
 
     def _show_away_from_pointer(self) -> None:
         """Show the window away from the pointer to avoid a Tk 8.6 macOS defect."""
-        width = max(760, self.root.winfo_reqwidth())
-        height = max(760, self.root.winfo_reqheight())
         screen_width = self.root.winfo_screenwidth()
         screen_height = self.root.winfo_screenheight()
         pointer_x = self.root.winfo_pointerx()
         pointer_y = self.root.winfo_pointery()
-        margin = 24
-        safe_x = margin if pointer_x >= screen_width / 2 else screen_width - margin - 1
-        safe_y = margin if pointer_y >= screen_height / 2 else screen_height - margin - 1
-        self.root.geometry(f"1x1+{safe_x}+{safe_y}")
+        self.root.geometry("1x1+20000+20000")
         self.root.deiconify()
-        self.root.update()
+        width = max(760, self.root.winfo_reqwidth())
+        height = max(760, self.root.winfo_reqheight())
+        margin = 24
         x = margin if pointer_x >= screen_width / 2 else max(margin, screen_width - width - margin)
         y = margin if pointer_y >= screen_height / 2 else max(margin, screen_height - height - margin)
-        self.root.geometry(f"{width}x{height}+{x}+{y}")
+        self.root.after_idle(lambda: self.root.geometry(f"{width}x{height}+{x}+{y}"))
 
     def _write_line(self, line: str) -> None:
         try:

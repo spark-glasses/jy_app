@@ -125,29 +125,10 @@ static bool system_systemcontrol_sendtouchevent(mpack_node_t node, msg_pack_t* m
  */
 static bool system_systemcontrol_openguide(mpack_node_t node, msg_pack_t* msg) {
     (void)node;
-    char previous_progress[MSG_STR_MAX_LEN] = {0};
-    const char* guide_app = product_app_role_name(PRODUCT_APP_ROLE_GUIDE);
-    const char* progress = NULL;
-
     floatair_assert(msg != NULL, "msg is NULL");
-
-    if (guide_app == NULL || app_router_is_busy()) {
-        return app_mpack_send_ack(msg, ErrNotReady);
-    }
-    progress = system_config_get_userguide();
-    if (progress != NULL) {
-        strncpy(previous_progress, progress, sizeof(previous_progress));
-        previous_progress[sizeof(previous_progress) - 1] = '\0';
-    }
     guide_runtime_reset();
-    if (!system_config_set_userguide(SYSTEM_USERGUIDE_PROGRESS_FALSE)) {
+    if (!system_config_set_userguide(SYSTEM_USERGUIDE_PROGRESS_TRUE)) {
         return app_mpack_send_ack(msg, ErrBizErr);
-    }
-    if (!app_router_set_app(guide_app, APP_ROUTER_ENTRY_REMOTE)) {
-        if (previous_progress[0] != '\0' && !system_config_set_userguide(previous_progress)) {
-            floatair_warn("restore userguide progress failed: %s", previous_progress);
-        }
-        return app_mpack_send_ack(msg, app_router_is_busy() ? ErrNotReady : ErrBizErr);
     }
     return app_mpack_send_ack(msg, Dp_ErrNone);
 }

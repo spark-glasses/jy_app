@@ -1,4 +1,5 @@
 #include "spark.h"
+#include "assistant_avatar.h"
 
 #include "floatair_dbg.h"
 #include "lvgl/lvgl.h"
@@ -18,10 +19,21 @@
 #define SPARK_LIST_HEADER_HEIGHT 44
 #define SPARK_LINE_HEIGHT 24
 #define SPARK_CARD_PADDING 8
-#define SPARK_REPLY_MARGIN 8
-#define SPARK_REPLY_MIN_HEIGHT 56
+#define SPARK_FOOTER_HEIGHT 72
+#define SPARK_AVATAR_LEFT 30
+#define SPARK_AVATAR_SIZE 40
+#define SPARK_AVATAR_BOTTOM 16
+#define SPARK_REPLY_LEFT 91
+#define SPARK_REPLY_RIGHT 24
+#define SPARK_REPLY_HEIGHT 56
+#define SPARK_REPLY_BOTTOM 8
+#define SPARK_REPLY_PADDING_H 12
+#define SPARK_REPLY_PADDING_V 8
+#define SPARK_REPLY_BORDER_WIDTH 1
 #define SPARK_REPLY_LINE_SPACE 2
-#define SPARK_REPLY_FONT_PATH "A:/romfs/system/font/open_runde_14.bin"
+#define SPARK_REPLY_FONT_SIZE 12
+#define SPARK_REPLY_MAX_LINES 2
+#define SPARK_REPLY_FONT_PATH "A:/romfs/system/font/open_runde_12.bin"
 
 typedef struct {
     lv_obj_t* root;
@@ -44,6 +56,8 @@ static lv_obj_t* s_content;
 static lv_obj_t* s_lead;
 static lv_obj_t* s_body;
 static lv_obj_t* s_meta;
+static lv_obj_t* s_footer;
+static spark_assistant_avatar_t* s_avatar;
 static lv_obj_t* s_reply_panel;
 static lv_obj_t* s_reply_label;
 static lv_font_t* s_reply_font;
@@ -271,6 +285,7 @@ bool spark_display_ready(void) { return s_ready; }
 
 void spark_display_clear(void) {
     spark_display_reset_revision();
+    (void)spark_assistant_apply(spark_assistant_current());
     (void)spark_reply_set("");
     spark_render(NULL);
     spark_display_free(s_display);
@@ -321,41 +336,15 @@ static const lv_font_t* spark_reply_font(void) {
     if (s_reply_font == NULL) {
         s_reply_font = lv_binfont_create(SPARK_REPLY_FONT_PATH);
         if (s_reply_font != NULL) {
-            s_reply_font->fallback = get_font_by_size_near(14);
+            s_reply_font->fallback = get_font_by_size_near(SPARK_REPLY_FONT_SIZE);
         }
     }
-    return s_reply_font != NULL ? s_reply_font : get_font_by_size_near(14);
-}
-
-static bool spark_reply_scroll(lv_event_code_t code) {
-    if ((code != LV_EVENT_GESTURE_LEFT && code != LV_EVENT_GESTURE_RIGHT) ||
-        s_reply_panel == NULL || s_reply_label == NULL ||
-        lv_obj_has_flag(s_reply_panel, LV_OBJ_FLAG_HIDDEN)) {
-        return false;
-    }
-
-    lv_obj_update_layout(s_reply_panel);
-    lv_coord_t max_scroll = lv_obj_get_scroll_y(s_reply_panel) +
-                            lv_obj_get_scroll_bottom(s_reply_panel);
-    if (max_scroll <= 0) {
-        return false;
-    }
-
-    const lv_font_t* font = lv_obj_get_style_text_font(s_reply_label, LV_PART_MAIN);
-    lv_coord_t line_advance = (lv_coord_t)lv_font_get_line_height(font) +
-                              SPARK_REPLY_LINE_SPACE;
-    lv_coord_t step = LV_MAX(1, lv_obj_get_content_height(s_reply_panel) - line_advance);
-    lv_coord_t next = lv_obj_get_scroll_y(s_reply_panel) +
-                      (code == LV_EVENT_GESTURE_LEFT ? step : -step);
-    lv_obj_scroll_to_y(s_reply_panel, LV_CLAMP(0, next, max_scroll), LV_ANIM_OFF);
-    system_ui_request_screen_refresh();
-    return true;
+    return s_reply_font != NULL ? s_reply_font : get_font_by_size_near(SPARK_REPLY_FONT_SIZE);
 }
 
 static void spark_input(lv_event_t* event) {
     if (s_display == NULL || s_display->count == 0) return;
     lv_event_code_t code = lv_event_get_code(event);
-    if (spark_reply_scroll(code)) return;
     if (code == LV_EVENT_GESTURE_LEFT || code == LV_EVENT_GESTURE_RIGHT) {
         if (s_display->is_list) {
             size_t next = s_display->selected;
@@ -402,8 +391,9 @@ static void spark_page_create(lv_obj_t* parent, const app_page_data_t* data) {
     lv_obj_set_size(
         frame,
         LV_MAX(1, lv_obj_get_content_width(parent) - SPARK_FRAME_MARGIN_H * 2),
-        LV_MAX(1, lv_obj_get_content_height(parent) - SPARK_FRAME_MARGIN_V * 2));
-    lv_obj_center(frame);
+        LV_MAX(1, lv_obj_get_content_height(parent) - SPARK_FOOTER_HEIGHT -
+                      SPARK_FRAME_MARGIN_V * 2));
+    lv_obj_align(frame, LV_ALIGN_TOP_MID, 0, SPARK_FRAME_MARGIN_V);
     lv_obj_set_style_border_color(frame, lv_color_white(), LV_PART_MAIN);
     lv_obj_set_style_border_opa(frame, LV_OPA_60, LV_PART_MAIN);
     lv_obj_set_style_border_width(frame, 1, LV_PART_MAIN);
@@ -494,28 +484,42 @@ static void spark_page_create(lv_obj_t* parent, const app_page_data_t* data) {
         }
     }
 
-    s_reply_panel = lv_obj_create(parent);
+    s_footer = lv_obj_create(parent);
+    if (s_footer == NULL) return;
+    spark_prepare_static_obj(s_footer);
+    lv_obj_set_size(s_footer, LV_PCT(100), SPARK_FOOTER_HEIGHT);
+    lv_obj_align(s_footer, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+
+    s_avatar = spark_assistant_avatar_create(s_footer, SPARK_AVATAR_SIZE);
+    lv_obj_t* avatar_obj = spark_assistant_avatar_object(s_avatar);
+    if (s_avatar == NULL || avatar_obj == NULL) return;
+    lv_obj_align(avatar_obj, LV_ALIGN_BOTTOM_LEFT, SPARK_AVATAR_LEFT, -SPARK_AVATAR_BOTTOM);
+
+    s_reply_panel = lv_obj_create(s_footer);
     s_reply_label = s_reply_panel != NULL ? lv_label_create(s_reply_panel) : NULL;
     if (s_reply_panel == NULL || s_reply_label == NULL) return;
-    lv_obj_set_width(s_reply_panel, LV_MAX(1, lv_obj_get_content_width(parent) - SPARK_REPLY_MARGIN * 2));
-    lv_obj_set_height(s_reply_panel, SPARK_REPLY_MIN_HEIGHT);
-    lv_obj_align(s_reply_panel, LV_ALIGN_BOTTOM_MID, 0, -SPARK_REPLY_MARGIN);
+    lv_obj_set_size(s_reply_panel, 1, SPARK_REPLY_HEIGHT);
+    lv_obj_align(s_reply_panel, LV_ALIGN_BOTTOM_LEFT, SPARK_REPLY_LEFT, -SPARK_REPLY_BOTTOM);
     lv_obj_set_style_bg_color(s_reply_panel, lv_color_black(), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(s_reply_panel, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_border_color(s_reply_panel, lv_color_white(), LV_PART_MAIN);
     lv_obj_set_style_border_opa(s_reply_panel, LV_OPA_60, LV_PART_MAIN);
-    lv_obj_set_style_border_width(s_reply_panel, 1, LV_PART_MAIN);
+    lv_obj_set_style_border_width(s_reply_panel, SPARK_REPLY_BORDER_WIDTH, LV_PART_MAIN);
     lv_obj_set_style_radius(s_reply_panel, 12, LV_PART_MAIN);
-    lv_obj_set_style_pad_all(s_reply_panel, 12, LV_PART_MAIN);
-    lv_obj_set_scroll_dir(s_reply_panel, LV_DIR_VER);
-    lv_obj_set_scrollbar_mode(s_reply_panel, LV_SCROLLBAR_MODE_OFF);
+    lv_obj_set_style_pad_hor(s_reply_panel, SPARK_REPLY_PADDING_H, LV_PART_MAIN);
+    lv_obj_set_style_pad_ver(s_reply_panel, SPARK_REPLY_PADDING_V, LV_PART_MAIN);
+    lv_obj_remove_flag(s_reply_panel, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_SCROLL_ELASTIC |
+                                          LV_OBJ_FLAG_SCROLL_MOMENTUM | LV_OBJ_FLAG_SCROLL_CHAIN);
     lv_obj_set_style_text_line_space(s_reply_label, SPARK_REPLY_LINE_SPACE, LV_PART_MAIN);
-    lv_obj_set_width(s_reply_label, LV_PCT(100));
-    lv_obj_set_height(s_reply_label, LV_SIZE_CONTENT);
-    lv_label_set_long_mode(s_reply_label, LV_LABEL_LONG_WRAP);
+    lv_obj_set_size(s_reply_label, 1, 1);
+    lv_label_set_long_mode(s_reply_label, LV_LABEL_LONG_DOT);
     lv_obj_set_style_text_font(s_reply_label, spark_reply_font(), LV_PART_MAIN);
+    lv_obj_set_style_text_color(s_reply_label, lv_color_white(), LV_PART_MAIN);
+    lv_obj_set_style_text_opa(s_reply_label, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_text_align(s_reply_label, LV_TEXT_ALIGN_LEFT, LV_PART_MAIN);
     lv_label_set_text(s_reply_label, "");
     lv_obj_add_flag(s_reply_panel, LV_OBJ_FLAG_HIDDEN);
+    spark_assistant_avatar_roll_in(s_avatar);
 
     s_ready = true;
     spark_render(s_display);
@@ -524,6 +528,8 @@ static void spark_page_create(lv_obj_t* parent, const app_page_data_t* data) {
 static void spark_page_destroy(void) {
     s_ready = false;
     s_frame = s_header = s_title = s_hint = s_pages = s_content = s_lead = s_body = s_meta = NULL;
+    s_footer = NULL;
+    s_avatar = NULL;
     s_reply_panel = s_reply_label = NULL;
     memset(s_rows, 0, sizeof(s_rows));
 }
@@ -553,16 +559,40 @@ bool spark_reply_set(const char* text) {
     }
 
     lv_label_set_text(s_reply_label, text);
+    const lv_font_t* font = lv_obj_get_style_text_font(s_reply_label, LV_PART_MAIN);
+    lv_coord_t max_panel_width = LV_MAX(
+        1, lv_obj_get_content_width(s_footer) - SPARK_REPLY_LEFT - SPARK_REPLY_RIGHT);
+    lv_coord_t insets = 2 * (SPARK_REPLY_PADDING_H + SPARK_REPLY_BORDER_WIDTH);
+    lv_coord_t max_text_width = LV_MAX(1, max_panel_width - insets);
+    lv_point_t size = {0, 0};
+    lv_text_get_size(
+        &size, text, font, 0, SPARK_REPLY_LINE_SPACE,
+        max_text_width, LV_TEXT_FLAG_NONE);
+    lv_coord_t panel_width = LV_MIN(max_panel_width, LV_MAX(1, size.x) + insets);
+    lv_obj_set_width(s_reply_panel, panel_width);
+    lv_obj_set_height(s_reply_panel, SPARK_REPLY_HEIGHT);
+    lv_obj_update_layout(s_reply_panel);
+    lv_coord_t label_width = LV_MAX(1, lv_obj_get_content_width(s_reply_panel));
+    lv_coord_t content_height = LV_MAX(1, lv_obj_get_content_height(s_reply_panel));
+    lv_coord_t two_line_height =
+        (lv_coord_t)lv_font_get_line_height(font) * SPARK_REPLY_MAX_LINES +
+        SPARK_REPLY_LINE_SPACE * (SPARK_REPLY_MAX_LINES - 1);
+    lv_text_get_size(
+        &size, text, font, 0, SPARK_REPLY_LINE_SPACE,
+        label_width, LV_TEXT_FLAG_NONE);
+    lv_obj_set_size(
+        s_reply_label,
+        label_width,
+        LV_MIN(content_height, LV_MIN(two_line_height, LV_MAX(1, size.y))));
+    lv_obj_align(s_reply_label, LV_ALIGN_LEFT_MID, 0, 0);
     lv_obj_remove_flag(s_reply_panel, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_update_layout(s_reply_label);
-    lv_coord_t max_height = LV_MAX(SPARK_REPLY_MIN_HEIGHT,
-                                   lv_obj_get_content_height(lv_obj_get_parent(s_reply_panel)) -
-                                       SPARK_REPLY_MARGIN * 2);
-    lv_coord_t content_height = lv_obj_get_height(s_reply_label) + 24;
-    lv_obj_set_height(s_reply_panel,
-                      LV_CLAMP(SPARK_REPLY_MIN_HEIGHT, content_height, max_height));
-    lv_obj_scroll_to_y(s_reply_panel, 0, LV_ANIM_OFF);
-    lv_obj_move_foreground(s_reply_panel);
     system_ui_request_screen_refresh();
     return true;
+}
+
+bool spark_assistant_apply(const spark_assistant_presentation_t* presentation) {
+    if (!s_ready || s_avatar == NULL || presentation == NULL) return false;
+    bool applied = spark_assistant_avatar_set_state(s_avatar, presentation);
+    if (applied) system_ui_request_screen_refresh();
+    return applied;
 }

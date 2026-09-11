@@ -88,14 +88,8 @@ static bool system_cfgfile_is_valid_userguide(const char* progress) {
 }
 
 static void system_cfgfile_parse_userguide(cJSON* root) {
-    cJSON* item = cJSON_GetObjectItemCaseSensitive(root, "userguide");
-    const char* progress = SYSTEM_USERGUIDE_PROGRESS_FALSE;
-
-    if (cJSON_IsString(item) && item->valuestring != NULL &&
-        system_cfgfile_is_valid_userguide(item->valuestring)) {
-        progress = item->valuestring;
-    }
-    system_cfgfile_set_userguide_runtime(progress);
+    (void)root;
+    system_cfgfile_set_userguide_runtime(SYSTEM_USERGUIDE_PROGRESS_TRUE);
 }
 
 static bool system_cfgfile_copy_homeunits(const char* const* homeunits,
@@ -809,7 +803,7 @@ void system_cfgfile_dump(void) {
 
 const char* system_config_get_userguide(void) {
     if (user_guide == NULL) {
-        system_cfgfile_set_userguide_runtime(SYSTEM_USERGUIDE_PROGRESS_FALSE);
+        system_cfgfile_set_userguide_runtime(SYSTEM_USERGUIDE_PROGRESS_TRUE);
     }
     floatair_dbg("user_guide %s", user_guide);
     return user_guide;
@@ -820,7 +814,7 @@ bool system_config_set_userguide(const char* progress) {
         floatair_err("invalid userguide progress: %s", progress != NULL ? progress : "NULL");
         return false;
     }
-    system_cfgfile_set_userguide_runtime(progress);
+    system_cfgfile_set_userguide_runtime(SYSTEM_USERGUIDE_PROGRESS_TRUE);
     return system_cfgfile_update();
 }
 

@@ -144,8 +144,6 @@ static const char* app_router_resolve_home(void) {
         home = product_app_role_name(PRODUCT_APP_ROLE_HOME);
     } else if (g_router_app_platform == APP_ROUTER_APP_PLATFORM_WATCH) {
         home = product_app_role_name(PRODUCT_APP_ROLE_WATCH_HOME);
-    } else if (!system_config_is_userguide_finished()) {
-        home = product_app_role_name(PRODUCT_APP_ROLE_GUIDE);
     }
     return home;
 }

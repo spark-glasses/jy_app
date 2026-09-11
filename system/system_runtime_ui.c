@@ -26,7 +26,6 @@
 #include "system/popups/notify_list/notify_list.h"
 #include "app_lcd.h"
 #include "sys_adapter.h"
-#include "ui_res.h"
 
 #include <inttypes.h>
 #include <time.h>
@@ -580,16 +579,13 @@ bool system_ui_render_screen_off_frame(void) {
     lv_obj_align(frame, LV_ALIGN_TOP_LEFT, 0, 0);
     lv_obj_set_style_bg_color(frame, lv_color_black(), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(frame, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_bg_image_src(frame, UI_RES_IMAGE_PROCESSING, LV_PART_MAIN);
-    lv_obj_set_style_bg_image_opa(frame, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_bg_image_tiled(frame, false, LV_PART_MAIN);
     lv_obj_clear_flag(frame, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_move_foreground(frame);
     lv_obj_update_layout(frame);
 
     floatair_lcd_commit_frame(frame);
     lv_obj_delete(frame);
-    floatair_info("screen off processing frame committed");
+    floatair_info("screen off frame committed");
     return true;
 }
 

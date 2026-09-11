@@ -16,12 +16,44 @@ static uint32_t s_report_sequence;
 static uint64_t s_navigation_sequence;
 static char s_display_id[65];
 static bool s_last_page_skipped;
+static spark_assistant_presentation_t s_assistant = {
+    .state = SPARK_ASSISTANT_IDLE,
+};
 
 void spark_display_reset_revision(void) {
     s_has_revision = false;
     s_display_id[0] = '\0';
     s_navigation_sequence = 0;
     s_last_page_skipped = false;
+    s_assistant.state = SPARK_ASSISTANT_IDLE;
+    s_assistant.detail[0] = '\0';
+}
+
+const spark_assistant_presentation_t* spark_assistant_current(void) { return &s_assistant; }
+
+static bool spark_node_is(mpack_node_t node, const char* value) {
+    size_t length = strlen(value);
+    return mpack_node_type(node) == mpack_type_str && mpack_node_strlen(node) == length &&
+           memcmp(mpack_node_str(node), value, length) == 0;
+}
+
+static bool spark_assistant_parse(
+    mpack_node_t node, spark_assistant_presentation_t* presentation) {
+    if (presentation == NULL || mpack_node_type(node) != mpack_type_map) return false;
+    mpack_node_t state = mpack_node_map_cstr(node, "state");
+    if (spark_node_is(state, "idle")) presentation->state = SPARK_ASSISTANT_IDLE;
+    else if (spark_node_is(state, "listening")) presentation->state = SPARK_ASSISTANT_LISTENING;
+    else if (spark_node_is(state, "thinking")) presentation->state = SPARK_ASSISTANT_THINKING;
+    else if (spark_node_is(state, "working")) presentation->state = SPARK_ASSISTANT_WORKING;
+    else if (spark_node_is(state, "error")) presentation->state = SPARK_ASSISTANT_ERROR;
+    else return false;
+    presentation->detail[0] = '\0';
+    if (mpack_node_map_contains_cstr(node, "detail")) {
+        mpack_node_copy_utf8_cstr(
+            mpack_node_map_cstr(node, "detail"), presentation->detail,
+            sizeof(presentation->detail));
+    }
+    return mpack_node_error(node) == mpack_ok;
 }
 
 static void write_revision(mpack_writer_t* writer, uint64_t revision) {
@@ -99,13 +131,19 @@ static bool spark_message(mpack_node_t data, msg_pack_t* msg) {
     bool new_display = strcmp(display_id, s_display_id) != 0;
     mpack_node_t page = mpack_node_map_cstr_optional(data, "page");
     mpack_node_t reply = mpack_node_map_cstr_optional(data, "reply");
+    mpack_node_t assistant = mpack_node_map_cstr_optional(data, "assistant");
     bool has_page = !mpack_node_is_missing(page);
     bool has_reply = !mpack_node_is_missing(reply);
-    if (!has_page && !has_reply) return app_mpack_send_ack(msg, ErrBadParam);
+    bool has_assistant = !mpack_node_is_missing(assistant);
+    if (!has_page && !has_reply && !has_assistant)
+        return app_mpack_send_ack(msg, ErrBadParam);
     if (new_display && !has_page) return app_mpack_send_ack(msg, ErrBadParam);
     // A swipe or Back can overtake the phone's detail response. Never undo it.
     bool stale_navigation = has_page && !new_display && display_id[0] != '\0' &&
         navigation_sequence < s_navigation_sequence;
+    spark_assistant_presentation_t next_assistant = s_assistant;
+    if (has_assistant && !spark_assistant_parse(assistant, &next_assistant))
+        return app_mpack_send_ack(msg, ErrBadParam);
     spark_display_t* next = has_page ? spark_display_parse(page) : NULL;
     char* text = has_reply ? mpack_node_utf8_cstr_alloc(reply, SPARK_DISPLAY_MAX_REPLY + 1) : NULL;
     if ((has_page && next == NULL) || (has_reply && text == NULL) || mpack_node_error(data) != mpack_ok) {
@@ -123,9 +161,11 @@ static bool spark_message(mpack_node_t data, msg_pack_t* msg) {
     bool applied = !has_reply || spark_reply_set(text);
     if (applied && has_page && !stale_navigation)
         applied = spark_display_apply(next, new_display || display_id[0] == '\0');
+    if (applied && has_assistant) applied = spark_assistant_apply(&next_assistant);
     if (!applied || stale_navigation) spark_display_free(next);
     free(text);
     if (!applied) return app_mpack_send_ack(msg, ErrNotReady);
+    if (has_assistant) s_assistant = next_assistant;
     s_revision = revision;
     s_has_revision = true;
     s_last_page_skipped = stale_navigation;

@@ -43,7 +43,11 @@ if args.artifacts:
 with tempfile.TemporaryDirectory(prefix='spark-display-tests-') as temporary:
     temp = Path(temporary)
     sources = [root / file for file in ('tests/spark_display_test.c', 'apps/spark/display.c',
-                                       'apps/spark/app.c', 'apps/spark/view.c')]
+                                       'apps/spark/app.c', 'apps/spark/view.c',
+                                       'apps/spark/assistant_avatar.c',
+                                       'apps/spark/assistant_listening.c',
+                                       'apps/spark/assistant_thinking.c',
+                                       'apps/spark/assistant_working.c')]
     sources += sorted((root / 'thirdparty/mpack').glob('*.c'))
     compiled = []
     for index, source in enumerate(sources):
