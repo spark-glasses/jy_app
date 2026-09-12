@@ -1,6 +1,7 @@
 #include "apps/spark/spark.h"
 #include "system/system_runtime_ui.h"
 #include "system/system_res.h"
+#include "lvgl/src/libs/lodepng/lodepng.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -25,6 +26,10 @@ static char last_artifact_id[257], last_display_id[65];
 static bool drop_report;
 static const char* test_assistant_state;
 static const char* test_assistant_detail;
+static bool test_compact_item;
+static bool test_compressed_item;
+static bool test_bad_compressed_size;
+static unsigned reports;
 
 bool app_manager_register(app_t* value) { app = value; return true; }
 const char* app_manager_current_name(void) { return active_app; }
@@ -67,6 +72,7 @@ bool app_mpack_send_writer(msg_pack_writer_t* writer) {
         outgoing_type == MSG_TYPE_ACK ? "batch_id" : "revision");
     mpack_node_copy_utf8_cstr(revision, last_revision, sizeof(last_revision));
     if (outgoing_type != MSG_TYPE_ACK) {
+        ++reports;
         mpack_node_t root = mpack_tree_root(&tree);
         assert(spark_display_read_counter(root, "navigationSequence", &last_navigation_sequence));
         mpack_node_copy_utf8_cstr(mpack_node_map_cstr(root, "displayID"), last_display_id, sizeof(last_display_id));
@@ -111,41 +117,68 @@ static void send_request(const char* revision, int count, bool list, const char*
         mpack_finish_map(&writer);
     }
     if (count >= 0) {
-        mpack_write_cstr(&writer, "page"); mpack_start_map(&writer, list && count ? 6 : 5);
-        text(&writer, "kind", list ? "list" : "item");
-        text(&writer, "title", "Items"); text(&writer, "hint", "8 items");
-        if (list && count) {
-            mpack_write_cstr(&writer, "rowGap"); mpack_write_u32(&writer, invalid == 9 ? 0 : SPARK_DISPLAY_ROW_GAP);
-        }
-        mpack_write_cstr(&writer, "selected"); mpack_write_u32(&writer, invalid == 3 ? 10 : test_selected);
-        mpack_write_cstr(&writer, "rows"); mpack_start_array(&writer, count);
-        for (int i = 0; i < count; ++i) {
-            char id[32]; snprintf(id, sizeof(id), "item-%d", invalid == 1 ? 0 : i);
-            spark_row_layout_t layout = test_mixed ? SPARK_LAYOUT_NOTE + i : test_layout;
-            const char* names[] = {"detail", "reminder", "note", "email", "event"};
-            bool email = layout == SPARK_LAYOUT_EMAIL && list;
-            mpack_start_map(&writer, list ? (email ? 9 : 7) : 5);
-            if (list) {
-                text(&writer, "layout", invalid == 7 ? "bad" : names[layout]);
-                mpack_write_cstr(&writer, "height");
-                mpack_write_u32(&writer, invalid == 6 ? 500 : layout == SPARK_LAYOUT_REMINDER ? 40 : layout == SPARK_LAYOUT_EVENT ? 88 : 64);
-                if (email) {
-                    text(&writer, "address", "dr.okafor@example.com");
-                    text(&writer, "subject", invalid == 10 ? "Wrong prefix" : "Scan results");
-                }
+        if (test_compact_item) {
+            assert(!list && count == 1 && invalid == 0);
+            mpack_write_cstr(&writer, "item");
+            mpack_start_array(&writer, 6);
+            mpack_write_cstr(&writer, "item-0");
+            mpack_write_cstr(&writer, "Items");
+            mpack_write_cstr(&writer, "8 items");
+            mpack_write_cstr(&writer, "Compact lead");
+            if (test_compressed_item) {
+                const char* body = "Compact body content repeated. Compact body content repeated. Compact body content repeated.";
+                mpack_start_array(&writer, 2);
+                mpack_write_u32(
+                    &writer, (uint32_t)strlen(body) + (test_bad_compressed_size ? 1 : 0));
+                // Produced by Compression.COMPRESSION_ZLIB, then JSONEncoder Base64.
+                mpack_write_cstr(
+                    &writer, "c87PLUhMLlFIyk+pVEjOzytJzStRKEotSE0sSU3RU3CmRBoA");
+                mpack_finish_array(&writer);
+            } else {
+                mpack_write_cstr(&writer, "Compact body content");
             }
-            text(&writer, "id", id); text(&writer, "mark", "[ ]");
-            text(&writer, "primary", list ? (layout == SPARK_LAYOUT_EMAIL ? "Dr Okafor" : layout == SPARK_LAYOUT_EVENT ? "Studio crit" : layout == SPARK_LAYOUT_NOTE ? "Meeting notes" : "Call Kim back") : "A long lead that wraps across several lines on this display. A long lead that wraps across several lines on this display. A long lead that wraps across several lines on this display.");
-            mpack_write_cstr(&writer, "secondary");
-            if (invalid == 2) mpack_write_str(&writer, "bad\0text", 8);
-            else if (invalid == 4) mpack_write_str(&writer, "\xff", 1);
-            else if (invalid == 5 || invalid == 12) {
-                char huge[SPARK_DISPLAY_MAX_TEXT + 1]; memset(huge, 'a', sizeof(huge));
-                mpack_write_str(&writer, huge, invalid == 5 ? sizeof(huge) : SPARK_DISPLAY_MAX_LIST_TEXT + 1);
-            } else mpack_write_cstr(&writer, email ? "Scan results - Sending the MRI from Tuesday. Please review before Thursday." : layout == SPARK_LAYOUT_EVENT && list ? "Sep 5, 2026, 10:00 AM - 11:00 AM" : "Body content");
-            text(&writer, "meta", email ? "10:43" : layout == SPARK_LAYOUT_EVENT && list ? "Office, Room 3" : "Detail"); mpack_finish_map(&writer);
+            mpack_write_cstr(&writer, "Compact detail");
+            mpack_finish_array(&writer);
+        } else {
+            mpack_write_cstr(&writer, "page"); mpack_start_map(&writer, list && count ? 6 : 5);
+            text(&writer, "kind", list ? "list" : "item");
+            text(&writer, "title", "Items"); text(&writer, "hint", "8 items");
+            if (list && count) {
+                mpack_write_cstr(&writer, "rowGap"); mpack_write_u32(&writer, invalid == 9 ? 0 : SPARK_DISPLAY_ROW_GAP);
+            }
+            mpack_write_cstr(&writer, "selected"); mpack_write_u32(&writer, invalid == 3 ? 10 : test_selected);
+            mpack_write_cstr(&writer, "rows"); mpack_start_array(&writer, count);
+            for (int i = 0; i < count; ++i) {
+                char id[32]; snprintf(id, sizeof(id), "item-%d", invalid == 1 ? 0 : i);
+                spark_row_layout_t layout = test_mixed ? SPARK_LAYOUT_NOTE + i : test_layout;
+                const char* names[] = {"detail", "reminder", "note", "email", "event"};
+                bool email = layout == SPARK_LAYOUT_EMAIL && list;
+                mpack_start_map(&writer, list ? (email ? 9 : 7) : 5);
+                if (list) {
+                    text(&writer, "layout", invalid == 7 ? "bad" : names[layout]);
+                    mpack_write_cstr(&writer, "height");
+                    mpack_write_u32(&writer, invalid == 6 ? 500 :
+                        layout == SPARK_LAYOUT_REMINDER ? 40 :
+                        layout == SPARK_LAYOUT_NOTE ? 48 :
+                        60);
+                    if (email) {
+                        text(&writer, "address", "dr.okafor@example.com");
+                        text(&writer, "subject", invalid == 10 ? "Wrong prefix" : "Scan results");
+                    }
+                }
+                text(&writer, "id", id); text(&writer, "mark", "[ ]");
+                text(&writer, "primary", list ? (layout == SPARK_LAYOUT_EMAIL ? "Dr Okafor" : layout == SPARK_LAYOUT_EVENT ? "Studio crit" : layout == SPARK_LAYOUT_NOTE ? "Meeting notes" : "Call Kim back") : "A long lead that wraps across several lines on this display. A long lead that wraps across several lines on this display. A long lead that wraps across several lines on this display.");
+                mpack_write_cstr(&writer, "secondary");
+                if (invalid == 2) mpack_write_str(&writer, "bad\0text", 8);
+                else if (invalid == 4) mpack_write_str(&writer, "\xff", 1);
+                else if (invalid == 5 || invalid == 12) {
+                    char huge[SPARK_DISPLAY_MAX_TEXT + 1]; memset(huge, 'a', sizeof(huge));
+                    mpack_write_str(&writer, huge, invalid == 5 ? sizeof(huge) : SPARK_DISPLAY_MAX_LIST_TEXT + 1);
+                } else mpack_write_cstr(&writer, email ? "Scan results - Sending the MRI from Tuesday. Please review before Thursday." : layout == SPARK_LAYOUT_EVENT && list ? "Sep 5, 2026, 10:00 AM - 11:00 AM" : "Body content");
+                text(&writer, "meta", email ? "10:43" : layout == SPARK_LAYOUT_NOTE && list ? "Sep 5, 2026" : layout == SPARK_LAYOUT_EVENT && list ? "" : "Detail"); mpack_finish_map(&writer);
+            }
+            mpack_finish_array(&writer); mpack_finish_map(&writer);
         }
-        mpack_finish_array(&writer); mpack_finish_map(&writer);
     }
     mpack_finish_map(&writer); assert(mpack_writer_destroy(&writer) == mpack_ok);
     mpack_tree_t tree;
@@ -179,7 +212,7 @@ int main(int argc, char** argv) {
     lv_display_set_flush_cb(display, flush);
     lv_obj_set_style_bg_color(lv_screen_active(), lv_color_black(), 0);
     parent = lv_obj_create(lv_screen_active());
-    lv_obj_remove_style_all(parent); lv_obj_set_size(parent, 540, 390); lv_obj_set_pos(parent, 0, 50);
+    lv_obj_remove_style_all(parent); lv_obj_set_size(parent, 540, 415); lv_obj_set_pos(parent, 0, 25);
     assert(spark_app_register()); app->on_start();
     lv_obj_t* footer = lv_obj_get_child(parent, 1);
     lv_obj_t* avatar = lv_obj_get_child(footer, 0);
@@ -196,8 +229,10 @@ int main(int argc, char** argv) {
     lv_obj_t* reply_label = lv_obj_get_child(reply_panel, 0);
     lv_obj_t* content = lv_obj_get_child(frame, 1);
     assert(lv_obj_has_flag(frame, LV_OBJ_FLAG_HIDDEN));
-    assert(lv_obj_get_height(footer) == 72 && lv_obj_get_width(avatar) == 40);
+    assert(lv_obj_get_height(footer) == 84 && lv_obj_get_width(avatar) == 40);
     assert(lv_obj_get_x(avatar) == 30);
+    assert(lv_obj_get_y(avatar) + lv_obj_get_height(avatar) / 2 ==
+           lv_obj_get_y(reply_panel) + lv_obj_get_height(reply_panel) / 2);
 
     send_request("1", 5, true, "Done", 0);
     assert(last_error == Dp_ErrNone && strcmp(last_revision, "1") == 0);
@@ -213,23 +248,25 @@ int main(int argc, char** argv) {
     lv_obj_invalidate(lv_screen_active());
     lv_refr_now(display); save_frame(argc > 1 ? argv[1] : NULL, "reply-short");
     lv_coord_t short_width = lv_obj_get_width(reply_panel);
-    assert(lv_obj_get_height(reply_panel) == 56);
+    assert(lv_obj_get_height(reply_panel) == 68);
     assert(lv_obj_get_style_align(reply_label, LV_PART_MAIN) == LV_ALIGN_LEFT_MID);
     assert(lv_obj_get_style_text_align(reply_label, LV_PART_MAIN) == LV_TEXT_ALIGN_LEFT);
     assert(spark_reply_set("I found three notes from yesterday."));
     lv_obj_invalidate(lv_screen_active());
     lv_refr_now(display); save_frame(argc > 1 ? argv[1] : NULL, "reply-medium");
     lv_coord_t medium_width = lv_obj_get_width(reply_panel);
-    assert(medium_width > short_width && lv_obj_get_height(reply_panel) == 56);
+    assert(medium_width > short_width && lv_obj_get_height(reply_panel) == 68);
     assert(spark_reply_set("This is a longer assistant response that exceeds the fixed reply area and must end with an ellipsis instead of making the box taller, even when several more words arrive after the visible limit."));
     lv_obj_invalidate(lv_screen_active());
     lv_refr_now(display); save_frame(argc > 1 ? argv[1] : NULL, "reply-long");
     assert(lv_obj_get_width(reply_panel) >= medium_width);
-    assert(lv_obj_get_height(reply_panel) == 56);
+    assert(lv_obj_get_height(reply_panel) == 68);
     assert(lv_obj_get_height(reply_label) <=
-           lv_font_get_line_height(lv_obj_get_style_text_font(reply_label, LV_PART_MAIN)) * 2 + 2);
+           lv_font_get_line_height(lv_obj_get_style_text_font(reply_label, LV_PART_MAIN)) * 3 - 4);
+    assert(lv_obj_get_content_height(reply_panel) >=
+           lv_font_get_line_height(lv_obj_get_style_text_font(reply_label, LV_PART_MAIN)) * 3 - 4);
     assert(lv_obj_get_x(reply_panel) + lv_obj_get_width(reply_panel) <=
-           lv_obj_get_content_width(footer) - 24);
+           lv_obj_get_content_width(footer) - 8);
     assert(spark_reply_set("Done"));
     lv_refr_now(display);
     const spark_display_t* previous = spark_display_current();
@@ -272,6 +309,8 @@ int main(int argc, char** argv) {
     save_frame(argc > 1 ? argv[1] : NULL, "item");
     lv_obj_t* lead = lv_obj_get_child(content, 0);
     lv_obj_t* body = lv_obj_get_child(content, 1);
+    assert(lv_obj_get_style_text_font(body, LV_PART_MAIN) ==
+           lv_obj_get_style_text_font(reply_label, LV_PART_MAIN));
     assert(lv_obj_get_y(body) > lv_obj_get_y(lead) + lv_obj_get_height(lead));
     uint16_t* partial = malloc(sizeof(screen_pixels)); assert(partial);
     memcpy(partial, screen_pixels, sizeof(screen_pixels));
@@ -311,10 +350,12 @@ int main(int argc, char** argv) {
     send_request("6", 3, true, NULL, 0); assert(last_error == Dp_ErrNone);
     lv_refr_now(display); save_frame(argc > 1 ? argv[1] : NULL, "notes");
     test_layout = SPARK_LAYOUT_EMAIL;
-    send_request("7", 3, true, NULL, 0); assert(last_error == Dp_ErrNone);
+    send_request("7", 4, true, NULL, 0); assert(last_error == Dp_ErrNone);
+    assert(spark_display_current()->page_count == 1);
     lv_refr_now(display); save_frame(argc > 1 ? argv[1] : NULL, "email");
     test_layout = SPARK_LAYOUT_EVENT;
-    send_request("8", 2, true, NULL, 0); assert(last_error == Dp_ErrNone);
+    send_request("8", 4, true, NULL, 0); assert(last_error == Dp_ErrNone);
+    assert(spark_display_current()->page_count == 1);
     lv_refr_now(display); save_frame(argc > 1 ? argv[1] : NULL, "calendar");
     send_request("9", 0, true, "", 0);
     assert(lv_obj_has_flag(frame, LV_OBJ_FLAG_HIDDEN));
@@ -335,15 +376,55 @@ int main(int argc, char** argv) {
     for (unsigned i = 0; i < 30; ++i) lv_obj_send_event(parent, LV_EVENT_GESTURE_RIGHT, NULL);
     assert(spark_display_current()->selected == 0 && spark_display_current()->page_index == 1);
 
+    unsigned before_open = reports;
+    drop_report = true;
     lv_obj_send_event(parent, LV_EVENT_CLICKED, NULL);
-    assert(!spark_display_current()->is_list);
+    assert(reports == before_open);
+    drop_report = false;
+    lv_obj_send_event(parent, LV_EVENT_CLICKED, NULL);
+    assert(spark_display_current()->is_list);
     assert(strcmp(last_command, "open") == 0 && strcmp(last_artifact_id, "item-0") == 0);
+    assert(reports == before_open + 1);
+    lv_obj_send_event(parent, LV_EVENT_CLICKED, NULL);
+    assert(reports == before_open + 1); // The same list state has one open in flight.
+    lv_obj_send_event(parent, LV_EVENT_GESTURE_RIGHT, NULL);
+    assert(spark_display_current()->selected == 0);
+    before_open = reports;
+    lv_obj_send_event(parent, LV_EVENT_CLICKED, NULL);
+    assert(reports == before_open + 1); // A boundary gesture also cancels the open.
+    lv_obj_send_event(parent, LV_EVENT_GESTURE_LEFT, NULL);
+    assert(spark_display_current()->selected == 1);
+    before_open = reports;
+    lv_obj_send_event(parent, LV_EVENT_CLICKED, NULL);
+    assert(reports == before_open + 1 && strcmp(last_artifact_id, "item-1") == 0);
+    lv_obj_send_event(parent, LV_EVENT_GESTURE_RIGHT, NULL);
+    assert(spark_display_current()->selected == 0);
+    before_open = reports;
+    lv_obj_send_event(parent, LV_EVENT_CLICKED, NULL);
+    assert(reports == before_open + 1 && strcmp(last_artifact_id, "item-0") == 0);
     test_navigation_sequence = last_navigation_sequence;
+    test_compact_item = true;
+    test_compressed_item = true;
+    test_bad_compressed_size = true;
     send_request("11", 1, false, NULL, 0);
+    assert(last_error == ErrBadParam && spark_display_current()->is_list);
+    before_open = reports;
+    lv_obj_send_event(parent, LV_EVENT_CLICKED, NULL);
+    assert(reports == before_open); // A rejected response does not complete the open.
+    test_bad_compressed_size = false;
+    send_request("11", 1, false, NULL, 0);
+    test_compressed_item = false;
+    test_compact_item = false;
     assert(last_error == Dp_ErrNone && !spark_display_current()->is_list);
+    assert(strcmp(spark_display_current()->rows[0].primary, "Compact lead") == 0);
+    assert(strcmp(spark_display_current()->rows[0].secondary,
+                  "Compact body content repeated. Compact body content repeated. Compact body content repeated.") == 0);
     lv_obj_send_event(parent, LV_EVENT_DCLICKED, NULL);
     assert(spark_display_current()->is_list && spark_display_current()->count == 20);
     assert(strcmp(last_command, "selected") == 0 && strcmp(last_artifact_id, "item-0") == 0);
+    before_open = reports;
+    lv_obj_send_event(parent, LV_EVENT_CLICKED, NULL);
+    assert(reports == before_open + 1); // Back changed the navigation state.
     // A delayed detail response must not reverse a local Back.
     send_request("12", 1, false, NULL, 0);
     assert(spark_display_current()->is_list && strcmp(last_command, "selected") == 0);
@@ -369,6 +450,17 @@ int main(int argc, char** argv) {
     send_request("14", 1, false, NULL, 0); assert(last_error == Dp_ErrNone);
     lv_obj_send_event(parent, LV_EVENT_DCLICKED, NULL);
     assert(!spark_display_current()->is_list);
+    // A new phone/controller starts a new display and may restart its revision.
+    test_display_id = "restarted";
+    send_request("1", 2, true, NULL, 0);
+    assert(last_error == Dp_ErrNone && spark_display_current()->is_list &&
+           spark_display_current()->count == 2);
+    previous = spark_display_current();
+    send_request("0", 1, false, NULL, 0);
+    assert(last_error == ErrSeqErr && spark_display_current() == previous);
+    test_display_id = "same-revision-new-display";
+    send_request("1", 1, false, NULL, 0);
+    assert(last_error == Dp_ErrNone && !spark_display_current()->is_list);
     // Receiver-derived pages use the same fixed-height packing as the phone mirror.
     const char* ids[] = {"notes", "emails", "events"};
     for (unsigned i = 0; i < 3; ++i) {
@@ -379,9 +471,9 @@ int main(int argc, char** argv) {
         send_request(revision, 20, true, NULL, 0);
         const spark_display_t* packed = spark_display_current();
         assert(last_error == Dp_ErrNone && packed->selected == 19);
-        assert(packed->page_count == (i == 2 ? 10 : 7));
+        assert(packed->page_count == (i == 0 ? 4 : 5));
         assert(packed->page_index == packed->page_count);
-        assert(packed->page_starts[1] == (i == 2 ? 2 : 3));
+        assert(packed->page_starts[1] == (i == 0 ? 5 : 4));
     }
     test_selected = 0;
     app->on_pause(); assert(spark_display_current() == NULL);

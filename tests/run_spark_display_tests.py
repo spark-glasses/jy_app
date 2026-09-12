@@ -33,7 +33,9 @@ while i < len(command):
         i += 1
 
 objects = build / 'CMakeFiles/floatair_simulator.dir'
-lvgl = sorted((objects / 'lvgl/src').rglob('*.o'))
+lvgl = [object_file for object_file in sorted((objects / 'lvgl/src').rglob('*.o'))
+        if '/drivers/sdl/' not in object_file.as_posix()
+        and '/draw/sdl/' not in object_file.as_posix()]
 if not lvgl:
     parser.error('The configured native build has no LVGL objects.')
 if args.artifacts:
@@ -52,12 +54,13 @@ with tempfile.TemporaryDirectory(prefix='spark-display-tests-') as temporary:
     compiled = []
     for index, source in enumerate(sources):
         output = temp / f'{index}.o'
-        subprocess.run([command[0], *flags, '-g', '-O1', '-fsanitize=address,undefined',
+        subprocess.run([command[0], *flags, '-DLV_USE_LODEPNG=1',
+                        '-g', '-O1', '-fsanitize=address,undefined',
                         '-fno-omit-frame-pointer', '-c', str(source), '-o', str(output)], check=True)
         compiled.append(output)
     executable = temp / 'spark_display_test'
     subprocess.run([command[0], '-fsanitize=address,undefined', '-Wl,-dead_strip',
                     *map(str, compiled), *map(str, lvgl),
                     str(objects / 'simulator/FloatairSimulator/simulator_platform.c.o'),
-                    '-L/opt/homebrew/lib', '-lSDL2', '-o', str(executable)], check=True)
+                    '-o', str(executable)], check=True)
     subprocess.run([str(executable), *([str(args.artifacts)] if args.artifacts else [])], check=True)

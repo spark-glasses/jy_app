@@ -7,10 +7,11 @@
 
 #include "lvgl/lvgl.h"
 
-#define STATUS_BAR_HEIGHT 50
+#define STATUS_BAR_HEIGHT 25
 
-#define STATUS_BAR_IMG_W 32
-#define STATUS_BAR_IMG_H 32
+#define STATUS_BAR_FONT_SIZE 14
+#define STATUS_BAR_IMG_W 16
+#define STATUS_BAR_IMG_H 16
 
 #define STATUS_BAR_LABEL_SIDE_PADDING 1
 

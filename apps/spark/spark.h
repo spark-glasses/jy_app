@@ -39,6 +39,6 @@ bool spark_assistant_apply(const spark_assistant_presentation_t* presentation);
 bool spark_display_ready(void);
 void spark_display_reset_revision(void);
 const spark_assistant_presentation_t* spark_assistant_current(void);
-void spark_display_report(const char* command, const char* artifact_id);
+bool spark_display_report(const char* command, const char* artifact_id);
 // Simulator samples use the same request validation and revision state as the phone.
 bool spark_display_preview(mpack_node_t data);

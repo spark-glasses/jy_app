@@ -12,7 +12,7 @@
 #define SPARK_DISPLAY_MAX_TEXT 4096
 #define SPARK_DISPLAY_MAX_REPLY (UINT16_MAX - 1)
 #define SPARK_DISPLAY_CONTENT_HEIGHT 256
-#define SPARK_DISPLAY_ROW_GAP 8
+#define SPARK_DISPLAY_ROW_GAP 4
 
 typedef enum {
     SPARK_LAYOUT_DETAIL, SPARK_LAYOUT_REMINDER, SPARK_LAYOUT_NOTE,
@@ -46,6 +46,7 @@ typedef struct {
 
 // Owns copied strings; the message tree may be destroyed after parsing.
 spark_display_t* spark_display_parse(mpack_node_t page);
+spark_display_t* spark_display_parse_item(mpack_node_t item);
 void spark_display_free(spark_display_t* display);
 bool spark_display_read_revision(mpack_node_t data, uint64_t* revision);
 bool spark_display_read_counter(mpack_node_t data, const char* key, uint64_t* value);

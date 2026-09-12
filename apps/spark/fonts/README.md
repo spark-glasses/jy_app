@@ -1,4 +1,4 @@
-# Open Runde reply font
+# Open Runde text font
 
 `OpenRunde-Medium.otf` is from
 [`lauridskern/open-runde`](https://github.com/lauridskern/open-runde) commit
@@ -6,9 +6,9 @@
 of Inter. `OFL.txt` contains its SIL Open Font License 1.1.
 
 The generated LVGL bitmap files are in `../../../romfs/system/font/`. They use
-4-bit antialiasing, no bitmap compression, and fast-format kerning. The reply
-UI loads the 12 px default into SRAM during initialization. The 14 px and 16 px
-files are packaged for the other two reply sizes.
+4-bit antialiasing, no bitmap compression, and fast-format kerning. Spark loads
+the 14 px default into SRAM for detail body and reply text. The 12 px and 16 px
+files remain available for other text sizes.
 
 Generate the files from this directory:
 

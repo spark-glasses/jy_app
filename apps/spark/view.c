@@ -19,21 +19,21 @@
 #define SPARK_LIST_HEADER_HEIGHT 44
 #define SPARK_LINE_HEIGHT 24
 #define SPARK_CARD_PADDING 8
-#define SPARK_FOOTER_HEIGHT 72
+#define SPARK_FOOTER_HEIGHT 84
 #define SPARK_AVATAR_LEFT 30
 #define SPARK_AVATAR_SIZE 40
-#define SPARK_AVATAR_BOTTOM 16
-#define SPARK_REPLY_LEFT 91
-#define SPARK_REPLY_RIGHT 24
-#define SPARK_REPLY_HEIGHT 56
+#define SPARK_AVATAR_BOTTOM 22
+#define SPARK_REPLY_LEFT 76
+#define SPARK_REPLY_RIGHT 8
+#define SPARK_REPLY_HEIGHT 68
 #define SPARK_REPLY_BOTTOM 8
-#define SPARK_REPLY_PADDING_H 12
-#define SPARK_REPLY_PADDING_V 8
-#define SPARK_REPLY_BORDER_WIDTH 1
-#define SPARK_REPLY_LINE_SPACE 2
-#define SPARK_REPLY_FONT_SIZE 12
-#define SPARK_REPLY_MAX_LINES 2
-#define SPARK_REPLY_FONT_PATH "A:/romfs/system/font/open_runde_12.bin"
+#define SPARK_REPLY_PADDING_H 8
+#define SPARK_REPLY_PADDING_V 6
+#define SPARK_REPLY_BORDER_WIDTH 0
+#define SPARK_TEXT_LINE_SPACE (-2)
+#define SPARK_TEXT_FONT_SIZE 14
+#define SPARK_REPLY_MAX_LINES 3
+#define SPARK_TEXT_FONT_PATH "A:/romfs/system/font/open_runde_14.bin"
 
 typedef struct {
     lv_obj_t* root;
@@ -47,6 +47,7 @@ typedef struct {
 
 static spark_display_t* s_display;
 static spark_display_t* s_return_list;
+static bool s_open_pending;
 static lv_obj_t* s_frame;
 static lv_obj_t* s_header;
 static lv_obj_t* s_title;
@@ -60,7 +61,7 @@ static lv_obj_t* s_footer;
 static spark_assistant_avatar_t* s_avatar;
 static lv_obj_t* s_reply_panel;
 static lv_obj_t* s_reply_label;
-static lv_font_t* s_reply_font;
+static lv_font_t* s_text_font;
 static spark_row_t s_rows[SPARK_DISPLAY_VISIBLE_ROWS];
 static bool s_ready;
 static void set_header_height(int32_t height) {
@@ -102,16 +103,34 @@ static void select_row(spark_row_t* row, bool selected, bool done) {
 }
 
 static void render_list_item(spark_row_t* row, const spark_display_row_t* item, int32_t y, bool selected) {
+    bool note = item->layout == SPARK_LAYOUT_NOTE;
+    bool email = item->layout == SPARK_LAYOUT_EMAIL;
+    bool compact = email || item->layout == SPARK_LAYOUT_EVENT;
     lv_obj_remove_flag(row->root, LV_OBJ_FLAG_HIDDEN);
     lv_obj_set_size(row->root, LV_PCT(100), item->height);
+    lv_obj_set_style_pad_ver(row->root, note ? 4 : compact ? 6 : SPARK_CARD_PADDING, LV_PART_MAIN);
     lv_obj_set_y(row->root, y);
     lv_obj_update_layout(row->root);
+    lv_obj_set_style_text_font(row->primary, get_font_by_size_near(note ? 18 : 20), LV_PART_MAIN);
+    lv_obj_set_style_text_font(row->secondary, get_font_by_size_near(note ? 14 : 18), LV_PART_MAIN);
+    lv_obj_set_style_text_font(row->meta, get_font_by_size_near(note ? 14 : 16), LV_PART_MAIN);
     int32_t width = lv_obj_get_content_width(row->root);
     bool reminder = item->layout == SPARK_LAYOUT_REMINDER;
-    bool email = item->layout == SPARK_LAYOUT_EMAIL;
     bool done = reminder && strcmp(item->mark, "[x]") == 0;
     lv_obj_update_flag(row->mark, LV_OBJ_FLAG_HIDDEN, !reminder);
     lv_obj_set_style_bg_opa(row->mark, done ? LV_OPA_COVER : LV_OPA_TRANSP, LV_PART_MAIN);
+    if (note) {
+        int32_t date_width = item->meta[0] == '\0'
+            ? 0 : LV_MIN(text_width(row->meta, item->meta), width / 3);
+        int32_t preview_x = date_width == 0 ? 0 : date_width + 10;
+        line(row->primary, item->primary, 0, 0, width);
+        line(row->meta, item->meta, 0, 20, date_width);
+        line(row->secondary, item->secondary, preview_x, 20, width - preview_x);
+        line(row->address, NULL, 0, 0, 0);
+        line(row->subject, NULL, 0, 0, 0);
+        select_row(row, selected, false);
+        return;
+    }
     int32_t x = reminder ? 26 : 0;
     int32_t meta_width = (reminder || email) && item->meta[0] != '\0'
         ? LV_MIN(text_width(row->meta, item->meta), width / 3) : 0;
@@ -238,6 +257,7 @@ static bool same_list(const spark_display_t* a, const spark_display_t* b) {
 static void spark_select(size_t next) {
     size_t old = s_display->selected;
     if (old == next) return;
+    s_open_pending = false;
     size_t old_page = s_display->page_index - 1, page = 0;
     while (page + 1 < s_display->page_count && next >= s_display->page_starts[page + 1]) ++page;
     s_display->selected = next;
@@ -261,11 +281,13 @@ bool spark_display_is_selected(const char* id) {
 
 bool spark_display_apply(spark_display_t* display, bool new_display) {
     if (!s_ready || display == NULL) return false;
+    if (new_display) s_open_pending = false;
     if (same_list(s_display, display)) {
         spark_select(display->selected);
         spark_display_free(display);
         return true;
     }
+    s_open_pending = false;
     spark_display_t* old = s_display;
     if (new_display || display->is_list) {
         spark_display_free(s_return_list);
@@ -284,6 +306,7 @@ bool spark_display_apply(spark_display_t* display, bool new_display) {
 bool spark_display_ready(void) { return s_ready; }
 
 void spark_display_clear(void) {
+    s_open_pending = false;
     spark_display_reset_revision();
     (void)spark_assistant_apply(spark_assistant_current());
     (void)spark_reply_set("");
@@ -295,36 +318,6 @@ void spark_display_clear(void) {
     system_ui_request_screen_refresh();
 }
 
-static char* copy_text(const char* text) {
-    if (text == NULL) text = "";
-    size_t size = strlen(text) + 1;
-    char* copy = malloc(size);
-    if (copy != NULL) memcpy(copy, text, size);
-    return copy;
-}
-
-static spark_display_t* spark_item_from_selected(void) {
-    const spark_display_row_t* src = &s_display->rows[s_display->selected];
-    spark_display_t* item = calloc(1, sizeof(*item));
-    if (item == NULL) return NULL;
-    item->count = 1;
-    bool reminder = src->layout == SPARK_LAYOUT_REMINDER;
-    item->title = copy_text(reminder || src->primary[0] == '\0' ? s_display->title : src->primary);
-    item->hint = copy_text("");
-    spark_display_row_t* row = &item->rows[0];
-    row->id = copy_text(src->id);
-    row->mark = copy_text("");
-    row->primary = copy_text(reminder ? src->primary : "");
-    row->secondary = copy_text(src->secondary);
-    row->meta = copy_text(src->meta);
-    if (item->title == NULL || item->hint == NULL || row->id == NULL || row->id[0] == '\0' ||
-        row->mark == NULL || row->primary == NULL || row->secondary == NULL || row->meta == NULL) {
-        spark_display_free(item);
-        return NULL;
-    }
-    return item;
-}
-
 static void spark_prepare_static_obj(lv_obj_t* obj) {
     lv_obj_remove_style_all(obj);
     lv_obj_remove_flag(obj, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE |
@@ -332,14 +325,14 @@ static void spark_prepare_static_obj(lv_obj_t* obj) {
     lv_obj_set_style_bg_opa(obj, LV_OPA_TRANSP, LV_PART_MAIN);
 }
 
-static const lv_font_t* spark_reply_font(void) {
-    if (s_reply_font == NULL) {
-        s_reply_font = lv_binfont_create(SPARK_REPLY_FONT_PATH);
-        if (s_reply_font != NULL) {
-            s_reply_font->fallback = get_font_by_size_near(SPARK_REPLY_FONT_SIZE);
+static const lv_font_t* spark_text_font(void) {
+    if (s_text_font == NULL) {
+        s_text_font = lv_binfont_create(SPARK_TEXT_FONT_PATH);
+        if (s_text_font != NULL) {
+            s_text_font->fallback = get_font_by_size_near(SPARK_TEXT_FONT_SIZE);
         }
     }
-    return s_reply_font != NULL ? s_reply_font : get_font_by_size_near(SPARK_REPLY_FONT_SIZE);
+    return s_text_font != NULL ? s_text_font : get_font_by_size_near(SPARK_TEXT_FONT_SIZE);
 }
 
 static void spark_input(lv_event_t* event) {
@@ -347,6 +340,7 @@ static void spark_input(lv_event_t* event) {
     lv_event_code_t code = lv_event_get_code(event);
     if (code == LV_EVENT_GESTURE_LEFT || code == LV_EVENT_GESTURE_RIGHT) {
         if (s_display->is_list) {
+            s_open_pending = false;
             size_t next = s_display->selected;
             if (code == LV_EVENT_GESTURE_LEFT && next + 1 < s_display->count) ++next;
             if (code == LV_EVENT_GESTURE_RIGHT && next > 0) --next;
@@ -358,12 +352,12 @@ static void spark_input(lv_event_t* event) {
             system_ui_request_screen_refresh();
         }
     } else if (code == LV_EVENT_CLICKED && s_display->is_list) {
+        if (s_open_pending) return;
         const char* id = s_display->rows[s_display->selected].id;
-        spark_display_t* item = spark_item_from_selected();
-        spark_display_report("open", id);
-        if (item == NULL || !spark_display_apply(item, false)) spark_display_free(item);
+        s_open_pending = spark_display_report("open", id);
     } else if (code == LV_EVENT_DCLICKED && !s_display->is_list) {
         if (s_return_list == NULL) return;
+        s_open_pending = false;
         spark_display_t* old = s_display;
         s_display = s_return_list;
         s_return_list = NULL;
@@ -447,7 +441,8 @@ static void spark_page_create(lv_obj_t* parent, const app_page_data_t* data) {
     lv_label_set_long_mode(s_body, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(s_body, LV_PCT(100));
     lv_obj_set_y(s_body, 48);
-    lv_obj_set_style_text_line_space(s_body, 4, LV_PART_MAIN);
+    lv_obj_set_style_text_line_space(s_body, SPARK_TEXT_LINE_SPACE, LV_PART_MAIN);
+    lv_obj_set_style_text_font(s_body, spark_text_font(), LV_PART_MAIN);
     lv_label_set_long_mode(s_meta, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(s_meta, LV_PCT(100));
     lv_obj_set_style_text_font(s_meta, get_font_by_size_near(14), LV_PART_MAIN);
@@ -505,15 +500,15 @@ static void spark_page_create(lv_obj_t* parent, const app_page_data_t* data) {
     lv_obj_set_style_border_color(s_reply_panel, lv_color_white(), LV_PART_MAIN);
     lv_obj_set_style_border_opa(s_reply_panel, LV_OPA_60, LV_PART_MAIN);
     lv_obj_set_style_border_width(s_reply_panel, SPARK_REPLY_BORDER_WIDTH, LV_PART_MAIN);
-    lv_obj_set_style_radius(s_reply_panel, 12, LV_PART_MAIN);
+    lv_obj_set_style_radius(s_reply_panel, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_hor(s_reply_panel, SPARK_REPLY_PADDING_H, LV_PART_MAIN);
     lv_obj_set_style_pad_ver(s_reply_panel, SPARK_REPLY_PADDING_V, LV_PART_MAIN);
     lv_obj_remove_flag(s_reply_panel, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_SCROLL_ELASTIC |
                                           LV_OBJ_FLAG_SCROLL_MOMENTUM | LV_OBJ_FLAG_SCROLL_CHAIN);
-    lv_obj_set_style_text_line_space(s_reply_label, SPARK_REPLY_LINE_SPACE, LV_PART_MAIN);
+    lv_obj_set_style_text_line_space(s_reply_label, SPARK_TEXT_LINE_SPACE, LV_PART_MAIN);
     lv_obj_set_size(s_reply_label, 1, 1);
     lv_label_set_long_mode(s_reply_label, LV_LABEL_LONG_DOT);
-    lv_obj_set_style_text_font(s_reply_label, spark_reply_font(), LV_PART_MAIN);
+    lv_obj_set_style_text_font(s_reply_label, spark_text_font(), LV_PART_MAIN);
     lv_obj_set_style_text_color(s_reply_label, lv_color_white(), LV_PART_MAIN);
     lv_obj_set_style_text_opa(s_reply_label, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_text_align(s_reply_label, LV_TEXT_ALIGN_LEFT, LV_PART_MAIN);
@@ -566,7 +561,7 @@ bool spark_reply_set(const char* text) {
     lv_coord_t max_text_width = LV_MAX(1, max_panel_width - insets);
     lv_point_t size = {0, 0};
     lv_text_get_size(
-        &size, text, font, 0, SPARK_REPLY_LINE_SPACE,
+        &size, text, font, 0, SPARK_TEXT_LINE_SPACE,
         max_text_width, LV_TEXT_FLAG_NONE);
     lv_coord_t panel_width = LV_MIN(max_panel_width, LV_MAX(1, size.x) + insets);
     lv_obj_set_width(s_reply_panel, panel_width);
@@ -576,9 +571,9 @@ bool spark_reply_set(const char* text) {
     lv_coord_t content_height = LV_MAX(1, lv_obj_get_content_height(s_reply_panel));
     lv_coord_t two_line_height =
         (lv_coord_t)lv_font_get_line_height(font) * SPARK_REPLY_MAX_LINES +
-        SPARK_REPLY_LINE_SPACE * (SPARK_REPLY_MAX_LINES - 1);
+        SPARK_TEXT_LINE_SPACE * (SPARK_REPLY_MAX_LINES - 1);
     lv_text_get_size(
-        &size, text, font, 0, SPARK_REPLY_LINE_SPACE,
+        &size, text, font, 0, SPARK_TEXT_LINE_SPACE,
         label_width, LV_TEXT_FLAG_NONE);
     lv_obj_set_size(
         s_reply_label,

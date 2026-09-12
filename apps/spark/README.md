@@ -13,14 +13,15 @@ Head-up and head-down control load as disabled. Touchpad long press toggles the
 screen before page or popup input. Double-tap remains available to the active
 page while the screen is on and does not wake the screen. Screen state is reported
 to the phone, which starts glasses capture on screen on and stops it on screen
-off. Reply text is owned by Spark and is drawn in an app-local overlay with the
-Open Runde bitmap font. The page has no app launcher. Swipes scroll an
+off. Detail body and reply text use the resident Open Runde bitmap font. Reply
+text is owned by Spark and is drawn in an app-local overlay. The page has no app launcher. Swipes scroll an
 overflowing reply before they change page selection. Other
 app routes remain available to phone commands.
 
 The shared status bar is at the top, with the page content below it. The
-disconnect overlay also keeps its status bar at the top. Battery images and
-clock visibility follow the existing system behavior.
+disconnect overlay also keeps its status bar at the top. It reserves 25 pixels,
+uses 14-pixel text, and uses 16-pixel battery images. Clock visibility follows
+the existing system behavior.
 
 The first page uses the existing `jytek` resources. A custom product overlay is
 not needed until Spark has its own images or strings.
@@ -32,24 +33,29 @@ surviving item receives focus; a later explicit display call replaces the set
 and selects its first item. When no tool changes the display, the server omits
 it from the response. The phone prepares all compact cards. The glasses pack
 complete rows into a 256 px content area while parsing the list.
-Rows use 40 px (reminder), 64 px (note, email, event), or 88 px (event with location),
-with 8 px gaps and at most five visible rows. Dates and sender details are
+Rows use 40 px (reminder), 48 px (note), or 60 px (email and event), with
+4 px gaps and at most five visible rows. A note uses
+its title on line 1, then its edited date and a smaller preview on line 2. Dates and sender details are
 formatted on the phone. The glasses store the complete list (up to 20 rows) in
 RAM and calculate page boundaries from row heights. Only five row controls are allocated.
 The focused item determines the visible page. Artifact payloads stay on the phone.
 
 The phone sends reliable MessagePack on app ID `1`, business `Display`, command
-`update`. `revision` identifies an immutable request:
+`update`. `revision` identifies an immutable request within one `displayID`:
 
 ```json
-{"id":1,"payload":{"seq":7,"type":128,"biz":"Display","cmd":"update","data":{"revision":"7","displayID":"result-1","navigationSequence":"0","reply":"Done","page":{"kind":"list","title":"Notes","hint":"1 item","selected":0,"rowGap":8,"rows":[{"id":"note-1","mark":"","primary":"Plan","secondary":"Meet at 10:00","meta":"","layout":"note","height":64}]}}}}
+{"id":1,"payload":{"seq":7,"type":128,"biz":"Display","cmd":"update","data":{"revision":"7","displayID":"result-1","navigationSequence":"0","reply":"Done","page":{"kind":"list","title":"Notes","hint":"1 item","selected":0,"rowGap":4,"rows":[{"id":"note-1","mark":"","primary":"Plan","secondary":"Meet at 10:00","meta":"Sep 12, 2026","layout":"note","height":48}]}}}}
 ```
 
-`page` and `reply` are independent optional fields. Omission keeps the current
-value. An empty `rows` array in a list page clears the page. An empty reply
-clears the footer. At least one field must be present; explicit null is invalid.
-The phone compares prepared content against its last ACK and omits unchanged
-fields. After uncertain delivery, the next new request replaces both fields.
+`page`, `item`, and `reply` are independent optional fields. Lists use `page`.
+Details use the compact array `item`: `[id, title, hint, primary, body, meta]`.
+The body is either a UTF-8 string or `[uncompressedBytes, deflateBase64]`. The phone
+uses raw DEFLATE with Base64 only when the final JSON field is smaller. The receiver
+also accepts the older full item page. Omission keeps the current value. An empty `rows` array in
+a list page clears the page. An empty reply clears the footer. At least one
+field must be present; explicit null is invalid. The phone compares prepared
+content against its last ACK and omits unchanged fields. After uncertain
+delivery, the next new request replaces both fields.
 
 `kind` selects the fixed `list` or `item` template. A list accepts zero through
 20 rows. An item accepts exactly one row. Detail views use the page title and
@@ -63,12 +69,13 @@ list and header labels copy text because ellipsis can modify the label buffer.
 Replacing a display detaches old detail strings before releasing them.
 Reply-only updates do not replace page data or reset page scroll position.
 
-The ACK contains `data: {"batch_id":"7"}`. A retry uses the same revision and
-payload. The receiver ACKs the current revision without parsing the page or
+The ACK contains `data: {"batch_id":"7"}`. A retry uses the same `displayID`,
+revision, and payload. The receiver ACKs it without parsing the page or
 redrawing it; it does not compare payloads. Reusing a revision for a different
-request violates the sender contract. Older revisions receive `ErrSeqErr`.
-ACK confirms UI state, not physical display completion. Leaving Spark or
-losing the connection clears the page, reply, and accepted revision.
+request in the same display violates the sender contract. Older revisions in
+the same display receive `ErrSeqErr`. A different `displayID` starts a new
+revision sequence and must include a page. ACK confirms UI state, not physical
+display completion. Leaving Spark clears the page, reply, and accepted revision.
 
 Limits: canonical UInt64 decimal revisions; 20 stored rows; five visible rows; unique nonempty row IDs
 up to 256 UTF-8 bytes; each display text field up to 4096 bytes; replies up to
@@ -81,12 +88,12 @@ Selection is a zero-based index into the full list, or zero for an empty list. U
 rejected. Spark must already be active.
 
 List rows include `layout` (`reminder`, `note`, `email`, `event`) and `height`.
-Nonempty lists include `rowGap: 8`. Page offsets and counts are derived from
+Nonempty lists include `rowGap: 4`. Page offsets and counts are derived from
 the row heights and five-row limit, and are not sent. The phone uses the same
 packing rule to report the visible page to the server.
 Email rows can include `address` and `subject`; `subject` is the emphasized prefix
 of `secondary`. Name/address/time share line one. Subject/preview share line two.
-Calendar rows are independent cards: title, date/time range, optional location.
+Calendar list rows contain the title and date/time range. The detail view contains the location.
 No stars or time ruler are drawn. List text uses single-line ellipsis; the source
 strings stay unchanged. Selection dims the other rows without a white highlight.
 When only selection changes, the renderer updates the two affected rows and
@@ -100,8 +107,9 @@ list. Then `selected` reports the absolute `artifact_id`. A lost report does
 not block navigation; the next selection report restores the phone mirror.
 The phone updates its mirror without sending the list back.
 
-A click opens the selected row locally and reports `open`. A connected phone
-can replace that preview with fuller detail for the same display ID. The
+A click reports `open` once for the selected row. More clicks in the same list
+state are ignored until an item is applied or a list-navigation gesture occurs. A
+connected phone can send the detail for the same display ID. The
 glasses keep the list and restore it locally on double click, then report
 `selected`. A new display ID replaces the content and clears the stored return
 list. Detail swipes still scroll text.
@@ -140,9 +148,13 @@ Runde Medium at 14 pixels. Spark loads the bitmap font from ROMFS and uses the
 vendor system font as a fallback. Source, conversion instructions, and the OFL
 license are in `fonts/`.
 
-The reply panel is an opaque Spark page overlay. It grows upward from the bottom
-and stays below the status bar. At the screen limit, the reply scrolls. A new
-reply starts at the top. Empty text hides the panel.
+The reply panel is an opaque Spark page overlay without a border or corner
+radius. Its text starts close to the assistant avatar and has room for three full
+14-pixel-font lines. The reply and detail body use an 18-pixel row pitch. The
+reply reserves three rows and reduces the main widget height by the same space.
+The assistant avatar is vertically centered against those rows. The panel grows
+upward from the bottom and stays below the status bar. At the screen limit, the
+reply scrolls. A new reply starts at the top. Empty text hides the panel.
 
 After a build, check short, multiline, Unicode, and screen-length replies with
 a display replacement. Check forward/backward scrolling, repeated text, and

@@ -3,6 +3,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "lvgl/src/libs/lodepng/lodepng.h"
+
 static bool node_is(mpack_node_t node, const char* text) {
     return mpack_node_type(node) == mpack_type_str && mpack_node_strlen(node) == strlen(text) &&
            memcmp(mpack_node_str(node), text, strlen(text)) == 0;
@@ -11,6 +13,118 @@ static bool node_is(mpack_node_t node, const char* text) {
 static char* optional_text(mpack_node_t node, const char* key) {
     if (!mpack_node_map_contains_cstr(node, key)) return NULL;
     return mpack_node_utf8_cstr_alloc(mpack_node_map_cstr(node, key), SPARK_DISPLAY_MAX_LIST_TEXT + 1);
+}
+
+static bool text_is_utf8(const unsigned char* text, size_t size) {
+    while (size > 0) {
+        unsigned char lead = *text++;
+        --size;
+        if (lead == 0) return false;
+        if (lead < 0x80) continue;
+
+        size_t continuation_count;
+        uint32_t codepoint;
+        uint32_t minimum;
+        if ((lead & 0xE0) == 0xC0) {
+            continuation_count = 1; codepoint = lead & 0x1F; minimum = 0x80;
+        } else if ((lead & 0xF0) == 0xE0) {
+            continuation_count = 2; codepoint = lead & 0x0F; minimum = 0x800;
+        } else if ((lead & 0xF8) == 0xF0) {
+            continuation_count = 3; codepoint = lead & 0x07; minimum = 0x10000;
+        } else {
+            return false;
+        }
+        if (size < continuation_count) return false;
+        for (size_t i = 0; i < continuation_count; ++i) {
+            unsigned char continuation = *text++;
+            if ((continuation & 0xC0) != 0x80) return false;
+            codepoint = (codepoint << 6) | (continuation & 0x3F);
+        }
+        size -= continuation_count;
+        if (codepoint < minimum || codepoint > 0x10FFFF ||
+            (codepoint >= 0xD800 && codepoint <= 0xDFFF))
+            return false;
+    }
+    return true;
+}
+
+static int base64_value(unsigned char byte) {
+    if (byte >= 'A' && byte <= 'Z') return byte - 'A';
+    if (byte >= 'a' && byte <= 'z') return byte - 'a' + 26;
+    if (byte >= '0' && byte <= '9') return byte - '0' + 52;
+    if (byte == '+') return 62;
+    if (byte == '/') return 63;
+    return -1;
+}
+
+static unsigned char* base64_decode(mpack_node_t node, size_t* output_size) {
+    if (mpack_node_type(node) != mpack_type_str) return NULL;
+    const unsigned char* input = (const unsigned char*)mpack_node_str(node);
+    size_t input_size = mpack_node_strlen(node);
+    if (input_size == 0 || input_size % 4 != 0) return NULL;
+    size_t padding = input[input_size - 1] == '=' ? 1 : 0;
+    if (input[input_size - 2] == '=') ++padding;
+    size_t size = input_size / 4 * 3 - padding;
+    if (size == 0 || size > SPARK_DISPLAY_MAX_TEXT) return NULL;
+    unsigned char* output = malloc(size);
+    if (output == NULL) return NULL;
+    size_t offset = 0;
+    for (size_t i = 0; i < input_size; i += 4) {
+        int a = base64_value(input[i]);
+        int b = base64_value(input[i + 1]);
+        int c = input[i + 2] == '=' ? 0 : base64_value(input[i + 2]);
+        int d = input[i + 3] == '=' ? 0 : base64_value(input[i + 3]);
+        bool last = i + 4 == input_size;
+        if (a < 0 || b < 0 || c < 0 || d < 0 ||
+            (input[i + 2] == '=' && (!last || input[i + 3] != '=' || (b & 15) != 0)) ||
+            (input[i + 3] == '=' && (!last || (c & 3) != 0))) {
+            free(output);
+            return NULL;
+        }
+        output[offset++] = (unsigned char)((a << 2) | (b >> 4));
+        if (offset < size) output[offset++] = (unsigned char)((b << 4) | (c >> 2));
+        if (offset < size) output[offset++] = (unsigned char)((c << 6) | d);
+    }
+    *output_size = size;
+    return output;
+}
+
+static char* item_body(mpack_node_t node) {
+    if (mpack_node_type(node) == mpack_type_str)
+        return mpack_node_utf8_cstr_alloc(node, SPARK_DISPLAY_MAX_TEXT + 1);
+    if (mpack_node_type(node) != mpack_type_array || mpack_node_array_length(node) != 2)
+        return NULL;
+    uint32_t output_size = mpack_node_u32(mpack_node_array_at(node, 0));
+    mpack_node_t bytes = mpack_node_array_at(node, 1);
+    if (output_size == 0 || output_size > SPARK_DISPLAY_MAX_TEXT) return NULL;
+    size_t input_size = 0;
+    unsigned char* input = base64_decode(bytes, &input_size);
+    if (input == NULL) return NULL;
+    if (mpack_node_error(node) != mpack_ok) {
+        free(input);
+        return NULL;
+    }
+    unsigned char* inflated = NULL;
+    size_t inflated_size = 0;
+    LodePNGDecompressSettings settings;
+    lodepng_decompress_settings_init(&settings);
+    settings.max_output_size = output_size;
+    unsigned error = lodepng_inflate(
+        &inflated, &inflated_size, input, input_size, &settings);
+    free(input);
+    if (error != 0 || inflated_size != output_size || !text_is_utf8(inflated, output_size)) {
+        lv_free(inflated);
+        return NULL;
+    }
+    char* text = malloc(output_size + 1);
+    if (text == NULL) {
+        lv_free(inflated);
+        return NULL;
+    }
+    memcpy(text, inflated, output_size);
+    text[output_size] = '\0';
+    lv_free(inflated);
+    return text;
 }
 
 bool spark_display_read_counter(mpack_node_t data, const char* key, uint64_t* revision) {
@@ -81,8 +195,10 @@ spark_display_t* spark_display_parse(mpack_node_t page) {
             else goto invalid;
             row->height = mpack_node_u32(mpack_node_map_cstr(node, "height"));
             uint32_t expected = row->layout == SPARK_LAYOUT_REMINDER ? 40 :
-                row->layout == SPARK_LAYOUT_EVENT && row->meta[0] != '\0' ? 88 : 64;
-            if (row->height != expected) goto invalid;
+                row->layout == SPARK_LAYOUT_NOTE ? 48 :
+                60;
+            if (row->height != expected ||
+                (row->layout == SPARK_LAYOUT_EVENT && row->meta[0] != '\0')) goto invalid;
             if (page_rows && (page_rows == SPARK_DISPLAY_VISIBLE_ROWS ||
                              used + display->row_gap + row->height > SPARK_DISPLAY_CONTENT_HEIGHT)) {
                 display->page_starts[display->page_count++] = i;
@@ -110,6 +226,34 @@ spark_display_t* spark_display_parse(mpack_node_t page) {
 invalid:
     spark_display_free(display);
     return NULL;
+}
+
+spark_display_t* spark_display_parse_item(mpack_node_t item) {
+    if (mpack_node_type(item) != mpack_type_array || mpack_node_array_length(item) != 6)
+        return NULL;
+    spark_display_t* display = calloc(1, sizeof(*display));
+    if (display == NULL) return NULL;
+    display->count = 1;
+    display->rows[0].layout = SPARK_LAYOUT_DETAIL;
+    display->rows[0].id = mpack_node_utf8_cstr_alloc(mpack_node_array_at(item, 0), 257);
+    display->title = mpack_node_utf8_cstr_alloc(
+        mpack_node_array_at(item, 1), SPARK_DISPLAY_MAX_TEXT + 1);
+    display->hint = mpack_node_utf8_cstr_alloc(
+        mpack_node_array_at(item, 2), SPARK_DISPLAY_MAX_TEXT + 1);
+    display->rows[0].primary = mpack_node_utf8_cstr_alloc(
+        mpack_node_array_at(item, 3), SPARK_DISPLAY_MAX_TEXT + 1);
+    display->rows[0].secondary = item_body(mpack_node_array_at(item, 4));
+    display->rows[0].meta = mpack_node_utf8_cstr_alloc(
+        mpack_node_array_at(item, 5), SPARK_DISPLAY_MAX_TEXT + 1);
+    display->rows[0].mark = calloc(1, 1);
+    if (display->rows[0].id == NULL || display->rows[0].id[0] == '\0' ||
+        display->title == NULL || display->hint == NULL || display->rows[0].mark == NULL ||
+        display->rows[0].primary == NULL || display->rows[0].secondary == NULL ||
+        display->rows[0].meta == NULL || mpack_node_error(item) != mpack_ok) {
+        spark_display_free(display);
+        return NULL;
+    }
+    return display;
 }
 
 void spark_display_free(spark_display_t* display) {

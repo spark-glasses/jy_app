@@ -13,6 +13,11 @@
 #include "ui_res.h"
 
 #define MAX_WIDGETS 10
+#define BATTERY_BODY_W 13
+#define BATTERY_BODY_H 8
+#define BATTERY_TIP_W 2
+#define BATTERY_TIP_H 4
+#define BATTERY_FILL_MAX_W 9
 
 /**
  * @brief Status bar data structure
@@ -24,6 +29,7 @@ typedef struct {
     lv_obj_t* time_label;
     lv_obj_t* battery_label;
     lv_obj_t* battery_icon;
+    lv_obj_t* battery_fill;
     lv_obj_t* headset_icon; ///< 产品可选的左右耳机附件三态图标。
     uint8_t battery_level;
     uint8_t charge_state;
@@ -100,7 +106,7 @@ static void status_bar_align_right_widgets(status_bar_data_t* data) {
         return;
     }
 
-    lv_obj_align(data->battery_icon, LV_ALIGN_RIGHT_MID, 0, 0);
+    lv_obj_align(data->battery_icon, LV_ALIGN_RIGHT_MID, 0, -1);
 
     if (data->battery_label != NULL) {
         lv_obj_align_to(data->battery_label,
@@ -225,7 +231,7 @@ lv_obj_t* status_bar_create_with_pos(lv_obj_t* parent, int32_t width, const lv_f
         return NULL;
     }
     if (font == NULL) {
-        font = get_system_font();
+        font = get_font_by_size_near(STATUS_BAR_FONT_SIZE);
     }
     lv_obj_t* status_bar = lv_obj_create(parent);
     if (status_bar == NULL) {
@@ -251,6 +257,7 @@ lv_obj_t* status_bar_create_with_pos(lv_obj_t* parent, int32_t width, const lv_f
     lv_obj_set_style_pad_all(container, 0, 0);
     lv_obj_t* time_label = NULL;
     lv_obj_t* battery_icon = NULL;
+    lv_obj_t* battery_fill = NULL;
     lv_obj_t* battery_label = NULL;
     lv_obj_t* headset_icon = NULL;
     if (pos == STATUS_BAR_POS_BOTTOM) {
@@ -283,16 +290,40 @@ lv_obj_t* status_bar_create_with_pos(lv_obj_t* parent, int32_t width, const lv_f
         }
         lv_obj_remove_style_all(headset_icon);
         lv_obj_set_size(headset_icon, STATUS_BAR_IMG_W, STATUS_BAR_IMG_H);
+        lv_image_set_inner_align(headset_icon, LV_IMAGE_ALIGN_STRETCH);
         lv_obj_set_style_bg_color(headset_icon, lv_color_black(), LV_PART_MAIN);
         lv_obj_set_style_bg_opa(headset_icon, LV_OPA_TRANSP, LV_PART_MAIN);
         lv_obj_add_flag(headset_icon, LV_OBJ_FLAG_HIDDEN);
 #endif
-        battery_icon = lv_image_create(status_bar);
+        battery_icon = lv_obj_create(status_bar);
         lv_obj_remove_style_all(battery_icon);
         lv_obj_set_size(battery_icon, STATUS_BAR_IMG_W, STATUS_BAR_IMG_H);
-        lv_obj_align(battery_icon, LV_ALIGN_RIGHT_MID, 0, 0);
-        lv_obj_set_style_bg_color(battery_icon, lv_color_black(), LV_PART_MAIN);
+        lv_obj_align(battery_icon, LV_ALIGN_RIGHT_MID, 0, -1);
         lv_obj_set_style_bg_opa(battery_icon, LV_OPA_TRANSP, LV_PART_MAIN);
+
+        lv_obj_t* battery_body = lv_obj_create(battery_icon);
+        lv_obj_remove_style_all(battery_body);
+        lv_obj_set_size(battery_body, BATTERY_BODY_W, BATTERY_BODY_H);
+        lv_obj_align(battery_body, LV_ALIGN_LEFT_MID, 0, 0);
+        lv_obj_set_style_bg_opa(battery_body, LV_OPA_TRANSP, LV_PART_MAIN);
+        lv_obj_set_style_border_color(battery_body, lv_color_white(), LV_PART_MAIN);
+        lv_obj_set_style_border_width(battery_body, 1, LV_PART_MAIN);
+        lv_obj_set_style_radius(battery_body, 1, LV_PART_MAIN);
+
+        lv_obj_t* battery_tip = lv_obj_create(battery_icon);
+        lv_obj_remove_style_all(battery_tip);
+        lv_obj_set_size(battery_tip, BATTERY_TIP_W, BATTERY_TIP_H);
+        lv_obj_align(battery_tip, LV_ALIGN_RIGHT_MID, -1, 0);
+        lv_obj_set_style_bg_color(battery_tip, lv_color_white(), LV_PART_MAIN);
+        lv_obj_set_style_bg_opa(battery_tip, LV_OPA_COVER, LV_PART_MAIN);
+
+        battery_fill = lv_obj_create(battery_icon);
+        lv_obj_remove_style_all(battery_fill);
+        lv_obj_set_size(battery_fill, 1, 4);
+        lv_obj_set_pos(battery_fill, 2, 6);
+        lv_obj_set_style_bg_color(battery_fill, lv_color_white(), LV_PART_MAIN);
+        lv_obj_set_style_bg_opa(battery_fill, LV_OPA_COVER, LV_PART_MAIN);
+        lv_obj_add_flag(battery_fill, LV_OBJ_FLAG_HIDDEN);
         battery_label = lv_label_create(status_bar);
         lv_obj_remove_style_all(battery_label);
         lv_obj_set_style_text_color(battery_label, lv_color_white(), 0);
@@ -318,6 +349,7 @@ lv_obj_t* status_bar_create_with_pos(lv_obj_t* parent, int32_t width, const lv_f
     data->time_label = time_label;
     data->battery_label = battery_label;
     data->battery_icon = battery_icon;
+    data->battery_fill = battery_fill;
     data->headset_icon = headset_icon;
     data->battery_level = DEFAULT_BATTERY_LEVEL;
     data->charge_state = 0;
@@ -505,7 +537,7 @@ void status_bar_update_battery(lv_obj_t* status_bar, uint8_t level) {
         lv_obj_set_width(data->battery_label, battery_text_width);
         status_bar_align_right_widgets(data);
     }
-    if (level_changed || lv_image_get_src(data->battery_icon) == NULL) {
+    if (level_changed) {
         status_bar_update_charge_state(status_bar, data->charge_state);
     }
 }
@@ -516,44 +548,20 @@ void status_bar_update_charge_state(lv_obj_t* status_bar, uint8_t state) {
         return;
     }
     status_bar_data_t* data = (status_bar_data_t*)lv_obj_get_user_data(status_bar);
-    if (data == NULL || data->battery_icon == NULL) {
+    if (data == NULL || data->battery_icon == NULL || data->battery_fill == NULL) {
         floatair_err("battery_icon is NULL");
         return;
     }
 
-    const char* src = NULL;
-    if (state == 1) {
-        src = UI_RES_IMAGE_POWING;
+    uint8_t level = data->battery_level;
+    lv_coord_t fill_width = (lv_coord_t)((level * BATTERY_FILL_MAX_W + 99) / 100);
+    if (fill_width > 0) {
+        lv_obj_set_width(data->battery_fill, fill_width);
+        lv_obj_remove_flag(data->battery_fill, LV_OBJ_FLAG_HIDDEN);
     } else {
-        uint8_t level = data->battery_level;
-        if (level < 10) {
-            src = UI_RES_IMAGE_POW_0;
-        } else if (level < 30) {
-            src = UI_RES_IMAGE_POW_1;
-        } else if (level < 45) {
-            src = UI_RES_IMAGE_POW_2;
-        } else if (level < 75) {
-            src = UI_RES_IMAGE_POW_3;
-        } else if (level < 90) {
-            src = UI_RES_IMAGE_POW_4;
-        } else {
-            src = UI_RES_IMAGE_POW_5;
-        }
+        lv_obj_add_flag(data->battery_fill, LV_OBJ_FLAG_HIDDEN);
     }
-
-    if (src != NULL) {
-        const void* current_src = lv_image_get_src(data->battery_icon);
-        bool same_src = false;
-        if (current_src != NULL && lv_image_src_get_type(current_src) == LV_IMAGE_SRC_FILE) {
-            same_src = (strcmp((const char*)current_src, src) == 0);
-        }
-        if (!same_src) {
-            lv_image_set_src(data->battery_icon, src);
-        }
-        lv_obj_remove_flag(data->battery_icon, LV_OBJ_FLAG_HIDDEN);
-    } else {
-        lv_obj_add_flag(data->battery_icon, LV_OBJ_FLAG_HIDDEN);
-    }
+    lv_obj_remove_flag(data->battery_icon, LV_OBJ_FLAG_HIDDEN);
     data->charge_state = state;
 }
 

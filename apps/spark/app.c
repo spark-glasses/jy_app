@@ -80,15 +80,15 @@ static bool spark_ack_revision(msg_pack_t* msg) {
     return app_mpack_send_writer(writer);
 }
 
-void spark_display_report(const char* command, const char* artifact_id) {
-    if (!s_has_revision) return;
+bool spark_display_report(const char* command, const char* artifact_id) {
+    if (!s_has_revision) return false;
     ++s_navigation_sequence;
     // Matches VenusDisplayReportRoute.appID in the phone SDK adapter.
     msg_pack_t msg = {.id = 30003, .sequence = ++s_report_sequence};
     snprintf(msg.biz, sizeof(msg.biz), "Display");
     snprintf(msg.cmd, sizeof(msg.cmd), "%s", command);
     msg_pack_writer_t* writer = app_mpack_create_writer(&msg, MSG_TYPE_DATA_UNRELIABLE);
-    if (writer == NULL) return;
+    if (writer == NULL) return false;
     mpack_start_map(&writer->writer, artifact_id == NULL ? 3 : 4);
     mpack_write_cstr(&writer->writer, "revision");
     write_revision(&writer->writer, s_revision);
@@ -101,7 +101,7 @@ void spark_display_report(const char* command, const char* artifact_id) {
         mpack_write_cstr(&writer->writer, artifact_id);
     }
     mpack_finish_map(&writer->writer);
-    (void)app_mpack_send_writer(writer);
+    return app_mpack_send_writer(writer);
 }
 
 static bool ack_current(msg_pack_t* msg) {
@@ -124,25 +124,32 @@ static bool spark_message(mpack_node_t data, msg_pack_t* msg) {
     if (strcmp(msg->cmd, "update") != 0) return app_mpack_send_ack(msg, ErrCmdErr);
     uint64_t revision;
     if (!spark_display_read_revision(data, &revision)) return app_mpack_send_ack(msg, ErrBadParam);
-    // Revisions identify immutable requests. Retries do not parse, allocate, or draw again.
-    if (s_has_revision && revision == s_revision) return ack_current(msg);
-    if (s_has_revision && revision < s_revision) return app_mpack_send_ack(msg, ErrSeqErr);
     if (mpack_tree_size(data.tree) > SPARK_DISPLAY_MAX_REQUEST_BYTES)
         return app_mpack_send_ack(msg, ErrBadParam);
     char display_id[65] = "";
     if (mpack_node_map_contains_cstr(data, "displayID"))
         mpack_node_copy_utf8_cstr(mpack_node_map_cstr(data, "displayID"), display_id, sizeof(display_id));
+    if (mpack_node_error(data) != mpack_ok) return app_mpack_send_ack(msg, ErrBadParam);
+    bool new_display = strcmp(display_id, s_display_id) != 0;
+    // Revisions identify immutable requests within one display. A new display
+    // starts a new revision sequence, including after the phone restarts.
+    if (s_has_revision && !new_display && revision == s_revision) return ack_current(msg);
+    if (s_has_revision && !new_display && revision < s_revision)
+        return app_mpack_send_ack(msg, ErrSeqErr);
     uint64_t navigation_sequence = 0;
     if (mpack_node_map_contains_cstr(data, "navigationSequence") &&
         !spark_display_read_counter(data, "navigationSequence", &navigation_sequence))
         return app_mpack_send_ack(msg, ErrBadParam);
-    bool new_display = strcmp(display_id, s_display_id) != 0;
     mpack_node_t page = mpack_node_map_cstr_optional(data, "page");
+    mpack_node_t item = mpack_node_map_cstr_optional(data, "item");
     mpack_node_t reply = mpack_node_map_cstr_optional(data, "reply");
     mpack_node_t assistant = mpack_node_map_cstr_optional(data, "assistant");
-    bool has_page = !mpack_node_is_missing(page);
+    bool has_full_page = !mpack_node_is_missing(page);
+    bool has_item = !mpack_node_is_missing(item);
+    bool has_page = has_full_page || has_item;
     bool has_reply = !mpack_node_is_missing(reply);
     bool has_assistant = !mpack_node_is_missing(assistant);
+    if (has_full_page && has_item) return app_mpack_send_ack(msg, ErrBadParam);
     if (!has_page && !has_reply && !has_assistant)
         return app_mpack_send_ack(msg, ErrBadParam);
     if (new_display && !has_page) return app_mpack_send_ack(msg, ErrBadParam);
@@ -152,7 +159,8 @@ static bool spark_message(mpack_node_t data, msg_pack_t* msg) {
     spark_assistant_presentation_t next_assistant = s_assistant;
     if (has_assistant && !spark_assistant_parse(assistant, &next_assistant))
         return app_mpack_send_ack(msg, ErrBadParam);
-    spark_display_t* next = has_page ? spark_display_parse(page) : NULL;
+    spark_display_t* next = has_item ? spark_display_parse_item(item) :
+        has_full_page ? spark_display_parse(page) : NULL;
     char* text = has_reply ? mpack_node_utf8_cstr_alloc(reply, SPARK_DISPLAY_MAX_REPLY + 1) : NULL;
     if ((has_page && next == NULL) || (has_reply && text == NULL) || mpack_node_error(data) != mpack_ok) {
         spark_display_free(next);

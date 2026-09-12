@@ -39,6 +39,7 @@ function(jy_app_prepare_simulator_common)
         LV_TINY_TTF_FILE_SUPPORT=1
         LV_TINY_TTF_CACHE_GLYPH_CNT=1
         LV_USE_TJPGD=1
+        LV_USE_LODEPNG=1
         LV_FONT_UNSCII_8=1
         LV_FONT_MONTSERRAT_18=1
         LV_FONT_MONTSERRAT_24=1

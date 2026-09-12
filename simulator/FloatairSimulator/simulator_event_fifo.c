@@ -140,6 +140,7 @@ static void simulator_spark_write_row(mpack_writer_t* writer,
             values[1] = detail ? "NOTE" : "";
             values[2] = detail ? "" : "Weekend plans";
             values[3] = "Meet at the station at 10:00. Bring lunch and water.";
+            values[4] = detail ? "" : "Sep 12, 2026";
             break;
         case SPARK_DISPLAY_TODO:
             values[1] = "[ ]";
@@ -165,7 +166,7 @@ static void simulator_spark_write_row(mpack_writer_t* writer,
             values[1] = detail ? "Sep 5, 2026 at 1:45 PM" : "";
             values[2] = detail ? "Sep 5, 2026, 1:45 PM - 2:30 PM" : "Studio crit";
             values[3] = detail ? "Room 2" : "Sep 5, 2026, 1:45 PM - 2:30 PM";
-            values[4] = detail ? "Accepted" : "Room 2";
+            values[4] = detail ? "Accepted" : "";
             break;
         case SPARK_DISPLAY_TYPE_COUNT:
             break;
@@ -184,8 +185,10 @@ static void simulator_spark_write_row(mpack_writer_t* writer,
         mpack_write_cstr(writer, layouts[type]);
         mpack_write_cstr(writer, "height");
         mpack_write_u32(writer, type == SPARK_DISPLAY_TODO
-                                    ? 40
-                                    : type == SPARK_DISPLAY_CALENDAR_EVENT ? 88 : 64);
+                            ? 40
+                            : type == SPARK_DISPLAY_NOTE
+                                  ? 48
+                                  : 60);
         if (email_list) {
             mpack_write_cstr(writer, "address");
             mpack_write_cstr(writer, type == SPARK_DISPLAY_EMAIL ? "dr@example.com" : "");
