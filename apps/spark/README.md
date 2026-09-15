@@ -1,9 +1,13 @@
 # Spark home
 
 Spark uses the internal app name `home`. The router registers this app in place
-of the vendor Home menu. `app.c` opens the root page. `view.c` keeps a frame,
-header, item label, and list labels for display requests. The frame starts hidden.
-The framework owns and destroys the page objects.
+of the vendor Home menu. `app.c` opens the root page. `view.c` keeps the frame,
+header, content, and footer and dispatches to one body module per page kind
+(`body_list.c`, `body_detail.c`, `body_grid.c`, `body_doc.c`), each of which
+owns its labels and lays them out from measured text heights. `navigation.c`
+holds the current and return-list displays, selection, open, and Back.
+`reply.c` owns the footer reply panel and `fonts.c` the bitmap font cache. The
+frame starts hidden. The framework owns and destroys the page objects.
 
 Startup selects English (`en-US`) and opens Spark. The language selection and
 guide apps are not registered, and guide commands are not handled. Saved setup
@@ -13,7 +17,8 @@ Head-up and head-down control load as disabled. Touchpad long press toggles the
 screen before page or popup input. Double-tap remains available to the active
 page while the screen is on and does not wake the screen. Screen state is reported
 to the phone, which starts glasses capture on screen on and stops it on screen
-off. Detail body and reply text use the resident Open Runde bitmap font. Reply
+off. All Spark text uses the resident Open Runde bitmap fonts (12, 14, 16, and
+18 px); the vendor TTF font only fills in missing glyphs. Reply
 text is owned by Spark and is drawn in an app-local overlay. The page has no app launcher. Swipes scroll an
 overflowing reply before they change page selection. Other
 app routes remain available to phone commands.
@@ -47,26 +52,47 @@ The phone sends reliable MessagePack on app ID `1`, business `Display`, command
 {"id":1,"payload":{"seq":7,"type":128,"biz":"Display","cmd":"update","data":{"revision":"7","displayID":"result-1","navigationSequence":"0","reply":"Done","page":{"kind":"list","title":"Notes","hint":"1 item","selected":0,"rowGap":4,"rows":[{"id":"note-1","mark":"","primary":"Plan","secondary":"Meet at 10:00","meta":"Sep 12, 2026","layout":"note","height":48}]}}}}
 ```
 
-`page`, `item`, and `reply` are independent optional fields. Lists use `page`.
+`page`, `item`, `grid`, `doc`, and `reply` are independent optional fields; a
+request carries at most one of `page`, `item`, `grid`, and `doc`. Lists use `page`.
 Details use the compact array `item`: `[id, title, hint, primary, body, meta]`.
 The body is either a UTF-8 string or `[uncompressedBytes, deflateBase64]`. The phone
 uses raw DEFLATE with Base64 only when the final JSON field is smaller. The receiver
-also accepts the older full item page. Omission keeps the current value. An empty `rows` array in
-a list page clears the page. An empty reply clears the footer. At least one
-field must be present; explicit null is invalid. The phone compares prepared
-content against its last ACK and omits unchanged fields. After uncertain
-delivery, the next new request replaces both fields.
+also accepts the older full item page. A grid is `[id, headers, rows]`: two or
+three heading strings (empty strings allowed) and one through twenty rows, each
+an array with exactly one string cell per heading. A doc is
+`[id, [[tag, text], ...]]`: one through 24 blocks whose tag is `h` (heading) or
+`p` (paragraph) with non-empty text. Omission keeps the current value. An empty `rows` array in a list page clears the page. An empty reply
+clears the footer. At least one field must be present; explicit null is
+invalid. The phone compares prepared content against its last ACK and omits
+unchanged fields. After uncertain delivery, the next new request replaces both
+fields.
+
+The receiver renders an accepted update before it ACKs, so the ACK means the
+change is on screen. Swipes and Back paint the same way. Painting goes through
+`system_ui_paint_now`, which draws nothing while the screen is off and hands the
+request to the SDL main thread on the simulator. Spark never asks the system
+shell for a full-screen refresh while it is active.
 
 `kind` selects the fixed `list` or `item` template. A list accepts zero through
 20 rows. An item accepts exactly one row. Detail views use the page title and
 hint, followed by the row's primary, secondary, and meta text. Wrapped fields
-are positioned from their measured height. List pages use a short header so
-all five rows fit. LVGL objects remain allocated across replacements.
+are positioned from their measured height. A detail or grid whose title and
+hint are both empty has no header band, and its body starts at the frame top.
+A grid divides the content width into equal columns with a 16 px gap; headings
+use the 18 px font over a rule, cells use the body font and wrap inside their
+column, and each row is as tall as its tallest cell. Headings and cells are
+both Open Runde, at 18 and 14 px. A doc stacks one full-width wrapped label
+per block: headings in 16 px with 10 px above, paragraphs in 14 px with 6 px
+between blocks. Docs scroll like a detail body. Grids scroll like a
+detail body. List pages use a short header so all five rows fit. LVGL objects
+remain allocated across replacements, including the 3 heading and 60 cell
+labels of the grid and the 24 block labels of the doc.
 
 The receiver validates all supplied fields before applying either update.
-Only the three detail labels borrow strings owned by the current display;
-list and header labels copy text because ellipsis can modify the label buffer.
-Replacing a display detaches old detail strings before releasing them.
+Only the three detail labels, the grid cells, and the doc blocks borrow strings
+owned by the current display; list, header, and grid heading labels copy text because
+ellipsis can modify the label buffer. Replacing a display detaches old detail
+and cell strings before releasing them.
 Reply-only updates do not replace page data or reset page scroll position.
 
 The ACK contains `data: {"batch_id":"7"}`. A retry uses the same `displayID`,
@@ -144,8 +170,8 @@ The optional artifact directory receives `list.ppm` and `item.ppm`.
 ## Reply overlay
 
 `Display.update` can set the reply without replacing the page. Replies use Open
-Runde Medium at 14 pixels. Spark loads the bitmap font from ROMFS and uses the
-vendor system font as a fallback. Source, conversion instructions, and the OFL
+Runde Medium at 14 pixels. Spark loads the bitmap fonts from ROMFS and uses the
+vendor system font only as a glyph fallback. Source, conversion instructions, and the OFL
 license are in `fonts/`.
 
 The reply panel is an opaque Spark page overlay without a border or corner
@@ -187,7 +213,10 @@ dismiss the connection overlay. Slide Forward and Slide Backward
 must leave the empty Spark frame hidden. Calls and Host Disconnected must still show their
 normal popups. Use Spark Reply to preview or clear reply text without a phone
 connection. Use Spark Display to preview each supported list or full item with
-sample data. Mixed previews use the same card heights and page header. Restarting must use English
+sample data. Card Text is untitled showText (a `doc` with headings, numbered
+steps, and bullets). Grid is showGrid. Mixed includes card previews beside
+notes, reminders, mail, and events. Spark Reply has a
+30-word sample. Mixed previews use the same card heights and page header. Restarting must use English
 without a setup screen.
 
 The simulator window's TCP status refers to the phone test server. The event

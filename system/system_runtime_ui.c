@@ -500,6 +500,19 @@ bool system_ui_request_screen_refresh(void) {
     return true;
 }
 
+bool system_ui_paint_now(void) {
+#if defined(BUILD_NATIVE) && BUILD_NATIVE
+    /* The SDL simulator paints on its main thread; hand it the request. */
+    return system_ui_request_screen_refresh();
+#else
+    if (floatair_lcd_get_state() == LCD_OFF) {
+        return false;
+    }
+    lv_refr_now(lv_display_get_default());
+    return true;
+#endif
+}
+
 bool system_ui_apply_pending_screen_refresh(void) {
     lv_obj_t* screen = NULL;
 

@@ -157,6 +157,14 @@ bool system_ui_refresh_screen_now(void);
  */
 bool system_ui_request_screen_refresh(void);
 /**
+ * @brief 立即绘制 LVGL 已标记的无效区域，不等待下一次刷新周期。
+ *
+ * 只能在 LVGL 线程调用。灭屏期间不绘制；模拟器上转为向主线程提交刷新请求。
+ *
+ * @return `true` 表示已绘制或已提交请求，`false` 表示当前灭屏。
+ */
+bool system_ui_paint_now(void);
+/**
  * @brief 将待处理的强制刷屏请求转换为当前屏幕的 LVGL 无效区域。
  *
  * 本函数不立即刷屏，应在周期调用 `lv_timer_handler()` 前执行。

@@ -162,7 +162,7 @@ spark_display_t* spark_display_parse(mpack_node_t page) {
     if ((count == 0 && selected != 0) || (count > 0 && selected >= count)) return NULL;
     spark_display_t* display = calloc(1, sizeof(*display));
     if (display == NULL) return NULL;
-    display->is_list = is_list;
+    display->kind = is_list ? SPARK_DISPLAY_LIST : SPARK_DISPLAY_DETAIL;
     display->count = count;
     display->selected = selected;
     size_t text_limit = (is_list ? SPARK_DISPLAY_MAX_LIST_TEXT : SPARK_DISPLAY_MAX_TEXT) + 1;
@@ -228,14 +228,25 @@ invalid:
     return NULL;
 }
 
+static spark_display_t* single_row(spark_display_kind_t kind, mpack_node_t id) {
+    spark_display_t* display = calloc(1, sizeof(*display));
+    if (display == NULL) return NULL;
+    display->kind = kind;
+    display->count = 1;
+    display->rows[0].layout = SPARK_LAYOUT_DETAIL;
+    display->rows[0].id = mpack_node_utf8_cstr_alloc(id, 257);
+    if (spark_text_empty(display->rows[0].id)) {
+        spark_display_free(display);
+        return NULL;
+    }
+    return display;
+}
+
 spark_display_t* spark_display_parse_item(mpack_node_t item) {
     if (mpack_node_type(item) != mpack_type_array || mpack_node_array_length(item) != 6)
         return NULL;
-    spark_display_t* display = calloc(1, sizeof(*display));
+    spark_display_t* display = single_row(SPARK_DISPLAY_DETAIL, mpack_node_array_at(item, 0));
     if (display == NULL) return NULL;
-    display->count = 1;
-    display->rows[0].layout = SPARK_LAYOUT_DETAIL;
-    display->rows[0].id = mpack_node_utf8_cstr_alloc(mpack_node_array_at(item, 0), 257);
     display->title = mpack_node_utf8_cstr_alloc(
         mpack_node_array_at(item, 1), SPARK_DISPLAY_MAX_TEXT + 1);
     display->hint = mpack_node_utf8_cstr_alloc(
@@ -245,9 +256,7 @@ spark_display_t* spark_display_parse_item(mpack_node_t item) {
     display->rows[0].secondary = item_body(mpack_node_array_at(item, 4));
     display->rows[0].meta = mpack_node_utf8_cstr_alloc(
         mpack_node_array_at(item, 5), SPARK_DISPLAY_MAX_TEXT + 1);
-    display->rows[0].mark = calloc(1, 1);
-    if (display->rows[0].id == NULL || display->rows[0].id[0] == '\0' ||
-        display->title == NULL || display->hint == NULL || display->rows[0].mark == NULL ||
+    if (display->title == NULL || display->hint == NULL ||
         display->rows[0].primary == NULL || display->rows[0].secondary == NULL ||
         display->rows[0].meta == NULL || mpack_node_error(item) != mpack_ok) {
         spark_display_free(display);
@@ -256,10 +265,90 @@ spark_display_t* spark_display_parse_item(mpack_node_t item) {
     return display;
 }
 
+// `[id, [[tag, text], ...]]`: one through 24 blocks, tag "h" or "p", text not empty.
+spark_display_t* spark_display_parse_doc(mpack_node_t doc) {
+    if (mpack_node_type(doc) != mpack_type_array || mpack_node_array_length(doc) != 2)
+        return NULL;
+    mpack_node_t blocks = mpack_node_array_at(doc, 1);
+    if (mpack_node_type(blocks) != mpack_type_array) return NULL;
+    size_t count = mpack_node_array_length(blocks);
+    if (count == 0 || count > SPARK_DISPLAY_MAX_BLOCKS) return NULL;
+    spark_display_t* display = single_row(SPARK_DISPLAY_DOC, mpack_node_array_at(doc, 0));
+    if (display == NULL) return NULL;
+    spark_display_doc_t* body = &display->body.doc;
+    body->count = count;
+    for (size_t i = 0; i < count; ++i) {
+        mpack_node_t block = mpack_node_array_at(blocks, i);
+        if (mpack_node_type(block) != mpack_type_array || mpack_node_array_length(block) != 2)
+            goto invalid;
+        mpack_node_t tag = mpack_node_array_at(block, 0);
+        if (node_is(tag, "h")) body->heading[i] = true;
+        else if (!node_is(tag, "p")) goto invalid;
+        body->text[i] = mpack_node_utf8_cstr_alloc(
+            mpack_node_array_at(block, 1), SPARK_DISPLAY_MAX_TEXT + 1);
+        if (spark_text_empty(body->text[i])) goto invalid;
+    }
+    if (mpack_node_error(doc) != mpack_ok) goto invalid;
+    return display;
+invalid:
+    spark_display_free(display);
+    return NULL;
+}
+
+// `[id, headers, rows]`: two or three column headings (empty strings allowed)
+// and one through twenty rows with exactly one cell per column.
+spark_display_t* spark_display_parse_grid(mpack_node_t grid) {
+    if (mpack_node_type(grid) != mpack_type_array || mpack_node_array_length(grid) != 3)
+        return NULL;
+    mpack_node_t headers = mpack_node_array_at(grid, 1);
+    mpack_node_t rows = mpack_node_array_at(grid, 2);
+    if (mpack_node_type(headers) != mpack_type_array || mpack_node_type(rows) != mpack_type_array)
+        return NULL;
+    size_t columns = mpack_node_array_length(headers);
+    size_t row_count = mpack_node_array_length(rows);
+    if (columns < SPARK_DISPLAY_MIN_COLUMNS || columns > SPARK_DISPLAY_MAX_COLUMNS ||
+        row_count == 0 || row_count > SPARK_DISPLAY_MAX_GRID_ROWS)
+        return NULL;
+    spark_display_t* display = single_row(SPARK_DISPLAY_GRID, mpack_node_array_at(grid, 0));
+    if (display == NULL) return NULL;
+    spark_display_grid_t* body = &display->body.grid;
+    body->column_count = columns;
+    body->row_count = row_count;
+    for (size_t c = 0; c < columns; ++c) {
+        body->headers[c] = mpack_node_utf8_cstr_alloc(
+            mpack_node_array_at(headers, c), SPARK_DISPLAY_MAX_LIST_TEXT + 1);
+        if (body->headers[c] == NULL) goto invalid;
+    }
+    for (size_t r = 0; r < row_count; ++r) {
+        mpack_node_t row = mpack_node_array_at(rows, r);
+        if (mpack_node_type(row) != mpack_type_array || mpack_node_array_length(row) != columns)
+            goto invalid;
+        for (size_t c = 0; c < columns; ++c) {
+            body->cells[r][c] = mpack_node_utf8_cstr_alloc(
+                mpack_node_array_at(row, c), SPARK_DISPLAY_MAX_LIST_TEXT + 1);
+            if (body->cells[r][c] == NULL) goto invalid;
+        }
+    }
+    if (mpack_node_error(grid) != mpack_ok) goto invalid;
+    return display;
+invalid:
+    spark_display_free(display);
+    return NULL;
+}
+
 void spark_display_free(spark_display_t* display) {
     if (display == NULL) return;
     free(display->title);
     free(display->hint);
+    if (display->kind == SPARK_DISPLAY_DOC) {
+        for (size_t i = 0; i < display->body.doc.count; ++i) free(display->body.doc.text[i]);
+    } else if (display->kind == SPARK_DISPLAY_GRID) {
+        spark_display_grid_t* grid = &display->body.grid;
+        for (size_t c = 0; c < grid->column_count; ++c) {
+            free(grid->headers[c]);
+            for (size_t r = 0; r < grid->row_count; ++r) free(grid->cells[r][c]);
+        }
+    }
     for (size_t i = 0; i < display->count; ++i) {
         free(display->rows[i].id);
         free(display->rows[i].mark);

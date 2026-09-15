@@ -172,6 +172,15 @@ static void floatair_call_minute_cbs(void) {
     }
 }
 
+/* Whether a debug-level log line would reach the sink on this build. */
+static bool floatair_debug_logs_visible(void) {
+#if defined(BUILD_NATIVE)
+    return FLOATAIR_DBG_LEVEL >= FLOATAIR_DBG_LVL_DEBUG;
+#else
+    return (setlogmask(0) & LOG_MASK(LOG_DEBUG)) != 0;
+#endif
+}
+
 static void app_msg_handle(OSAL_MQ_MSG* msg) {
     uint32_t msg_start_time_us = (uint32_t)GetTimeUs();
     JYT_ELF_MQ_MSG* p_que_data = NULL;
@@ -194,12 +203,16 @@ static void app_msg_handle(OSAL_MQ_MSG* msg) {
                 case EMT_HOST_MPACK_MSG: {
                     int q_pending = floatair_get_app_msg_queue_pending();
                     stt_set_flow_queue_pending(q_pending);
-                    app_msg_dump_summary((char*)p_que_data->payload,
-                                         p_que_data->payload_len,
-                                         "mpack recv");
-                    app_msg_dump((char*)p_que_data->payload,
-                                 p_que_data->payload_len,
-                                 "phone msg");
+                    /* Both dumps parse the message and build their text even when
+                     * the log sink drops the output; skip them unless debug is visible. */
+                    if (floatair_debug_logs_visible()) {
+                        app_msg_dump_summary((char*)p_que_data->payload,
+                                             p_que_data->payload_len,
+                                             "mpack recv");
+                        app_msg_dump((char*)p_que_data->payload,
+                                     p_que_data->payload_len,
+                                     "phone msg");
+                    }
                     handle_ret = app_mpack_msg_handle((char*)p_que_data->payload,
                                                       p_que_data->payload_len);
                     break;

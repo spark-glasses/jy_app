@@ -202,7 +202,8 @@ class EventPanel:
         reply_frame.columnconfigure(0, weight=1)
         ttk.Entry(reply_frame, textvariable=self.spark_reply_value).grid(row=0, column=0, sticky="ew")
         ttk.Button(reply_frame, text="Send Text", command=self.send_spark_reply).grid(row=0, column=1, padx=(8, 0))
-        ttk.Button(reply_frame, text="Clear", command=self.clear_spark_reply).grid(row=0, column=2, padx=(8, 0))
+        ttk.Button(reply_frame, text="30 words", command=self.send_spark_reply_30).grid(row=0, column=2, padx=(8, 0))
+        ttk.Button(reply_frame, text="Clear", command=self.clear_spark_reply).grid(row=0, column=3, padx=(8, 0))
 
         ttk.Label(tools_frame, text="Spark Display").grid(row=3, column=0, sticky="nw", padx=(0, 8), pady=(10, 0))
         display_frame = ttk.Frame(tools_frame)
@@ -239,6 +240,18 @@ class EventPanel:
                 text=label,
                 command=lambda name=sample: self.send_spark_display(name),
             ).grid(row=1, column=col, sticky="ew", padx=(0 if col == 1 else 6, 0), pady=(8, 0))
+
+        card_samples = (
+            ("Text", "card_text"),
+            ("Grid", "card_grid"),
+        )
+        ttk.Label(display_frame, text="Card").grid(row=2, column=0, sticky="w", padx=(0, 8), pady=(8, 0))
+        for col, (label, sample) in enumerate(card_samples, start=1):
+            ttk.Button(
+                display_frame,
+                text=label,
+                command=lambda name=sample: self.send_spark_display(name),
+            ).grid(row=2, column=col, sticky="ew", padx=(0 if col == 1 else 6, 0), pady=(8, 0))
 
         status = ttk.Label(container, textvariable=self.status_var, foreground="#445")
         status.pack(anchor="w", pady=(10, 0))
@@ -332,6 +345,14 @@ class EventPanel:
             self.status_var.set("Spark reply text is required")
             return
         self._write_line(f"SET_SPARK_REPLY {text}")
+
+    def send_spark_reply_30(self) -> None:
+        text = (
+            "Here is the short version. The details are on the glasses so I "
+            "will not read them aloud. Check the card if you need the steps."
+        )
+        self.spark_reply_value.set(text)
+        self.send_spark_reply()
 
     def clear_spark_reply(self) -> None:
         self.spark_reply_value.set("")

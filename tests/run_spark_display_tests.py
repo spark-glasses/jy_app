@@ -46,6 +46,10 @@ with tempfile.TemporaryDirectory(prefix='spark-display-tests-') as temporary:
     temp = Path(temporary)
     sources = [root / file for file in ('tests/spark_display_test.c', 'apps/spark/display.c',
                                        'apps/spark/app.c', 'apps/spark/view.c',
+                                       'apps/spark/view_util.c', 'apps/spark/fonts.c',
+                                       'apps/spark/navigation.c', 'apps/spark/reply.c',
+                                       'apps/spark/body_list.c', 'apps/spark/body_detail.c',
+                                       'apps/spark/body_grid.c', 'apps/spark/body_doc.c',
                                        'apps/spark/assistant_avatar.c',
                                        'apps/spark/assistant_listening.c',
                                        'apps/spark/assistant_thinking.c',
@@ -54,7 +58,7 @@ with tempfile.TemporaryDirectory(prefix='spark-display-tests-') as temporary:
     compiled = []
     for index, source in enumerate(sources):
         output = temp / f'{index}.o'
-        subprocess.run([command[0], *flags, '-DLV_USE_LODEPNG=1',
+        subprocess.run([command[0], *flags, '-DLV_USE_LODEPNG=1', '-DSPARK_DISPLAY_TEST=1',
                         '-g', '-O1', '-fsanitize=address,undefined',
                         '-fno-omit-frame-pointer', '-c', str(source), '-o', str(output)], check=True)
         compiled.append(output)

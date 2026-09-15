@@ -7,13 +7,16 @@ of Inter. `OFL.txt` contains its SIL Open Font License 1.1.
 
 The generated LVGL bitmap files are in `../../../romfs/system/font/`. They use
 4-bit antialiasing, no bitmap compression, and fast-format kerning. Spark loads
-the 14 px default into SRAM for detail body and reply text. The 12 px and 16 px
-files remain available for other text sizes.
+each size on first use and keeps it in SRAM: 14 px for body, reply, and grid
+cells; 12 px for hints and note dates; 16 px for note titles and list previews;
+18 px for the page title, detail lead, list titles, and grid headings. The
+vendor TTF font is rasterized at run time and is much slower, so Spark uses it
+only as the fallback for glyphs the bitmaps lack.
 
 Generate the files from this directory:
 
 ```sh
-for size in 12 14 16; do
+for size in 12 14 16 18; do
   npm exec --yes --package=lv_font_conv@1.5.3 -- lv_font_conv \
     --font OpenRunde-Medium.otf \
     --size "$size" --bpp 4 --format bin --no-compress \

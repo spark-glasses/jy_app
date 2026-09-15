@@ -35,6 +35,8 @@ bool spark_display_is_selected(const char* id);
 void spark_display_clear(void);
 bool spark_reply_set(const char* text);
 bool spark_assistant_apply(const spark_assistant_presentation_t* presentation);
+// Renders pending changes now, so an ACK sent afterwards reports what is visible.
+void spark_display_paint(void);
 
 bool spark_display_ready(void);
 void spark_display_reset_revision(void);
