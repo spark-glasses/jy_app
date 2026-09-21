@@ -64,7 +64,7 @@ cmake -S . -B build \
   -DJY_APP_OS_SDK_ARCHIVE=/path/to/jy_os_sdk_<branch>_<tag>_<count>_g<hash>_dev.7z
 ```
 
-CMake computes the archive SHA256, extracts it into `.os_sdk_cache/<short-sha256>/os_sdk/`, and records the full SHA256 beside the cache. Later configure runs can omit `JY_APP_OS_SDK_ARCHIVE`; CMake will reuse the newest valid cache. If no archive is passed and no valid cache exists, configuration fails.
+CMake computes the archive SHA256, extracts it into `.os_sdk_cache/<short-sha256>/os_sdk/`, and records the full SHA256 beside the cache. If `JY_APP_OS_SDK_ARCHIVE` is omitted, CMake uses the pinned v1.12.3 cache. It fails if that exact cache is absent, even when an older cache exists.
 
 The SDK package contains:
 
@@ -125,7 +125,7 @@ cmake -S . -B build \
 cmake --build build
 ```
 
-If `PATH` already contains `arm-none-eabi-gcc`, `CMAKE_C_COMPILER` can be omitted. If a valid `.os_sdk_cache/` entry already exists, `JY_APP_OS_SDK_ARCHIVE` can also be omitted.
+If `PATH` already contains `arm-none-eabi-gcc`, `CMAKE_C_COMPILER` can be omitted. If the pinned v1.12.3 `.os_sdk_cache/` entry exists, `JY_APP_OS_SDK_ARCHIVE` can also be omitted.
 
 ## 7. Build Artifacts
 
@@ -146,7 +146,7 @@ After an ARM build, the build directory contains:
 | --- | --- |
 | CMake cannot find the ARM compiler | Make sure `arm-none-eabi-gcc` is in `PATH`, or pass its full path through `-DCMAKE_C_COMPILER` |
 | CMake reports missing `.config` | Make sure `.config` exists in the repository root |
-| CMake reports missing OS SDK cache | Pass `-DJY_APP_OS_SDK_ARCHIVE=<path-to-jy_os_sdk_..._dev.7z>` once, or keep a valid `.os_sdk_cache/` entry |
+| CMake reports missing OS SDK cache | Pass the v1.12.3 SDK with `-DJY_APP_OS_SDK_ARCHIVE=<path-to-jy_os_sdk_..._dev.7z>` once |
 | CMake cannot find 7-Zip | Install 7-Zip or set `-DJY_APP_OS_SDK_SEVEN_ZIP=<path-to-7z>` |
 | `fs_img.py` cannot import `littlefs` | Install the `littlefs` package for the active Python environment |
 | Symbol check fails | Check whether a source file is missing, config macros are correct, and referenced symbols are allowed |

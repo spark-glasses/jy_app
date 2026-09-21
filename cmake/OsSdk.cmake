@@ -1,41 +1,26 @@
-function(jy_app_find_latest_os_sdk_cache OUT_VAR)
-    set(_os_sdk_cache_root "${PROJECT_ROOT}/.os_sdk_cache")
-    if(NOT IS_DIRECTORY "${_os_sdk_cache_root}")
+set(JY_APP_DEFAULT_OS_SDK_VERSION "v1.12.3")
+set(JY_APP_DEFAULT_OS_SDK_SHA256
+    "923409b68e82e9614fd326ff93a29d1cf2ee83c71ffc28dbef649393fb3370e8")
+
+function(jy_app_find_default_os_sdk_cache OUT_VAR)
+    string(SUBSTRING "${JY_APP_DEFAULT_OS_SDK_SHA256}" 0 16 _os_sdk_cache_key)
+    set(_os_sdk_cache_candidate "${PROJECT_ROOT}/.os_sdk_cache/${_os_sdk_cache_key}")
+
+    if(NOT IS_DIRECTORY "${_os_sdk_cache_candidate}/os_sdk" OR
+            NOT EXISTS "${_os_sdk_cache_candidate}/os_sdk/manifest.json" OR
+            NOT EXISTS "${_os_sdk_cache_candidate}/.archive.sha256")
         set(${OUT_VAR} "" PARENT_SCOPE)
         return()
     endif()
 
-    file(GLOB _os_sdk_cache_candidates
-        CONFIGURE_DEPENDS
-        LIST_DIRECTORIES true
-        "${_os_sdk_cache_root}/*")
-
-    set(_valid_os_sdk_cache_entries)
-    foreach(_os_sdk_cache_candidate IN LISTS _os_sdk_cache_candidates)
-        if(IS_DIRECTORY "${_os_sdk_cache_candidate}" AND
-                IS_DIRECTORY "${_os_sdk_cache_candidate}/os_sdk" AND
-                EXISTS "${_os_sdk_cache_candidate}/os_sdk/manifest.json" AND
-                EXISTS "${_os_sdk_cache_candidate}/.archive.sha256")
-            file(TIMESTAMP
-                "${_os_sdk_cache_candidate}"
-                _os_sdk_cache_timestamp
-                "%Y%m%d%H%M%S"
-                UTC)
-            list(APPEND _valid_os_sdk_cache_entries
-                "${_os_sdk_cache_timestamp}|${_os_sdk_cache_candidate}")
-        endif()
-    endforeach()
-
-    if(NOT _valid_os_sdk_cache_entries)
+    file(READ "${_os_sdk_cache_candidate}/.archive.sha256" _os_sdk_cache_sha256)
+    string(STRIP "${_os_sdk_cache_sha256}" _os_sdk_cache_sha256)
+    if(NOT "${_os_sdk_cache_sha256}" STREQUAL "${JY_APP_DEFAULT_OS_SDK_SHA256}")
         set(${OUT_VAR} "" PARENT_SCOPE)
         return()
     endif()
 
-    list(SORT _valid_os_sdk_cache_entries)
-    list(REVERSE _valid_os_sdk_cache_entries)
-    list(GET _valid_os_sdk_cache_entries 0 _latest_os_sdk_cache_entry)
-    string(REGEX REPLACE "^[^|]*\\|" "" _latest_os_sdk_cache_dir "${_latest_os_sdk_cache_entry}")
-    set(${OUT_VAR} "${_latest_os_sdk_cache_dir}" PARENT_SCOPE)
+    set(${OUT_VAR} "${_os_sdk_cache_candidate}" PARENT_SCOPE)
 endfunction()
 
 function(jy_app_prepare_os_sdk)
@@ -92,13 +77,13 @@ function(jy_app_prepare_os_sdk)
             message(FATAL_ERROR "Failed to extract OS SDK archive: ${JY_APP_OS_SDK_ARCHIVE_ABS}")
         endif()
     else()
-        jy_app_find_latest_os_sdk_cache(JY_APP_OS_SDK_CACHE_DIR)
+        jy_app_find_default_os_sdk_cache(JY_APP_OS_SDK_CACHE_DIR)
     endif()
 
     if(NOT JY_APP_OS_SDK_CACHE_DIR)
         message(FATAL_ERROR
-            "JY_APP_OS_SDK_ARCHIVE is not set and no valid OS SDK cache exists under "
-            "${PROJECT_ROOT}/.os_sdk_cache. "
+            "JY_APP_OS_SDK_ARCHIVE is not set and the default OS SDK "
+            "${JY_APP_DEFAULT_OS_SDK_VERSION} is not cached under ${PROJECT_ROOT}/.os_sdk_cache. "
             "Pass -DJY_APP_OS_SDK_ARCHIVE=/path/to/jy_os_sdk_<branch>_<tag>_<count>_g<hash>_dev.7z once.")
     endif()
 

@@ -53,7 +53,7 @@ select_os_sdk_archive() {
     local archive
 
     echo
-    read -r -p "请输入 OS SDK 包路径（直接回车使用最新缓存）: " archive
+    read -r -p "请输入 OS SDK 包路径（直接回车使用默认缓存）: " archive
     archive="${archive%\"}"
     archive="${archive#\"}"
     os_sdk_archive="$archive"
@@ -182,7 +182,7 @@ fi
 if [[ -n "$os_sdk_archive" ]]; then
     echo "os_sdk_archive: $os_sdk_archive"
 else
-    echo "os_sdk_archive: newest cache"
+    echo "os_sdk_archive: default cache"
 fi
 
 if [[ $clean_build -eq 1 ]]; then

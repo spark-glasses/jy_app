@@ -104,7 +104,7 @@ function Select-Product {
 
 function Select-OsSdkArchive {
     Write-Host ''
-    $path = Read-Host 'Enter OS SDK archive path (empty to use newest cache)'
+    $path = Read-Host 'Enter OS SDK archive path (empty to use default cache)'
     if ($path) { return $path.Trim('"') }
     return ''
 }
@@ -491,7 +491,7 @@ if ((-not $OsSdkArchive) -and $PromptedProduct) {
 if ($OsSdkArchive) {
     Write-Host "[INFO] Using OS SDK archive: `"$OsSdkArchive`""
 } else {
-    Write-Host '[INFO] Using newest OS SDK cache.'
+    Write-Host '[INFO] Using default OS SDK cache.'
 }
 
 $compilerInfo = Prepare-Compiler

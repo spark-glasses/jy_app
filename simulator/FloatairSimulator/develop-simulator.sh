@@ -94,7 +94,7 @@ select_os_sdk_archive() {
     local archive
 
     echo
-    read -r -p "Enter OS SDK archive path (empty to use newest cache): " archive
+    read -r -p "Enter OS SDK archive path (empty to use default cache): " archive
     archive="${archive%\"}"
     archive="${archive#\"}"
     OS_SDK_ARCHIVE="$archive"
@@ -401,7 +401,7 @@ fi
 if [ -n "$OS_SDK_ARCHIVE" ]; then
     echo "[INFO] Using OS SDK archive: $OS_SDK_ARCHIVE"
 else
-    echo "[INFO] Using newest OS SDK cache."
+    echo "[INFO] Using default OS SDK cache."
 fi
 
 check_deps

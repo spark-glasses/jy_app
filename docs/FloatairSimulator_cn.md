@@ -224,7 +224,7 @@ Windows 下对应入口是：
 simulator\FloatairSimulator\build_all.bat
 ```
 
-交互运行这些脚本时，选择产品后会提示输入 OS SDK 包路径；直接回车表示使用最新 `.os_sdk_cache/` 缓存。命令行也可以把 7z 包路径作为第一个位置参数传入，例如 `develop-simulator.sh /home/user/os_sdk.7z` 或 `develop-simulator-mingw.bat C:\path\os_sdk.7z`。
+交互运行这些脚本时，选择产品后会提示输入 OS SDK 包路径；直接回车表示使用固定的 v1.12.3 `.os_sdk_cache/` 缓存。命令行也可以把 7z 包路径作为第一个位置参数传入，例如 `develop-simulator.sh /home/user/os_sdk.7z` 或 `develop-simulator-mingw.bat C:\path\os_sdk.7z`。
 
 如果不希望脚本结束后保留窗口，可以传入 `--no-pause`；`build_all.bat` 调用 `develop-simulator.ps1` 时也会自动传入 `--no-pause`。
 

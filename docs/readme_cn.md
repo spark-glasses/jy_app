@@ -266,7 +266,7 @@ ARM 目标会构建固件 app 层 ELF，并在构建后执行资源打包流程�
 
 涉及 ARM 构建时，需要使用对应固件工具链和配置环境。修改 `.config` 或 Kconfig 配置后，需要重新执行完整 CMake 配置流程。
 
-ARM 和模拟器构建都需要使用 OS 仓导出的 OS SDK 包。直接调用 CMake 时，首次配置传入 `-DJY_APP_OS_SDK_ARCHIVE=<path-to-jy_os_sdk_..._dev.7z>`；`scripts/develop.*` 和模拟器交互脚本会在选择产品后提示输入 OS SDK 包路径，直接回车则使用最新缓存。CMake 会解压到 `.os_sdk_cache/<short-sha256>/os_sdk/` 并在后续配置中复用；如果既没有传入包路径，也没有有效缓存，会直接报错。
+ARM 和模拟器构建都需要使用 OS 仓导出的 OS SDK 包。默认版本固定为 v1.12.3。直接调用 CMake 时，首次配置传入 `-DJY_APP_OS_SDK_ARCHIVE=<path-to-jy_os_sdk_..._dev.7z>`；`scripts/develop.*` 和模拟器交互脚本会在选择产品后提示输入 OS SDK 包路径，直接回车则使用固定缓存。CMake 会解压到 `.os_sdk_cache/<short-sha256>/os_sdk/`；如果缺少固定缓存，它会报错，不会选择旧缓存。
 
 板端常用脚本分为开发构建和烧录包打包两类：
 

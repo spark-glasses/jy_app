@@ -66,7 +66,7 @@ if not defined PRODUCT_NAME (
 )
 echo [INFO] Selected product: "%PRODUCT_NAME%"
 if defined OS_SDK_ARCHIVE echo [INFO] Using OS SDK archive: "!OS_SDK_ARCHIVE!"
-if not defined OS_SDK_ARCHIVE echo [INFO] Using newest OS SDK cache.
+if not defined OS_SDK_ARCHIVE echo [INFO] Using default OS SDK cache.
 
 echo [INFO] Detecting supported Windows simulator builds...
 
@@ -265,7 +265,7 @@ exit /b 0
 :select_os_sdk_archive
 echo.
 set "OS_SDK_ARCHIVE="
-set /p "OS_SDK_ARCHIVE=Enter OS SDK archive path (empty to use newest cache): "
+set /p "OS_SDK_ARCHIVE=Enter OS SDK archive path (empty to use default cache): "
 if defined OS_SDK_ARCHIVE if "!OS_SDK_ARCHIVE:~0,1!"=="""" set "OS_SDK_ARCHIVE=!OS_SDK_ARCHIVE:~1!"
 if defined OS_SDK_ARCHIVE if "!OS_SDK_ARCHIVE:~-1!"=="""" set "OS_SDK_ARCHIVE=!OS_SDK_ARCHIVE:~0,-1!"
 exit /b 0

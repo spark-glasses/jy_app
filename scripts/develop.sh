@@ -51,7 +51,7 @@ select_os_sdk_archive() {
     local archive
 
     echo
-    read -r -p "请输入 OS SDK 包路径（直接回车使用最新缓存）: " archive
+    read -r -p "请输入 OS SDK 包路径（直接回车使用默认缓存）: " archive
     archive="${archive%\"}"
     archive="${archive#\"}"
     os_sdk_archive="$archive"
@@ -120,7 +120,7 @@ fi
 if [[ -n "$os_sdk_archive" ]]; then
     echo "os_sdk_archive: $os_sdk_archive"
 else
-    echo "os_sdk_archive: newest cache"
+    echo "os_sdk_archive: default cache"
 fi
 
 if [[ $clean_build -eq 1 ]]; then
@@ -132,6 +132,8 @@ cd build
 cmake_args=(-G Ninja -DJY_APP_PRODUCT="$product_name")
 if [[ -n "$os_sdk_archive" ]]; then
     cmake_args+=(-DJY_APP_OS_SDK_ARCHIVE="$os_sdk_archive")
+else
+    cmake_args+=(-UJY_APP_OS_SDK_ARCHIVE)
 fi
 cmake "${cmake_args[@]}" ..
 ninja

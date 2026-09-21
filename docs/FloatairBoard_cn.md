@@ -64,7 +64,7 @@ cmake -S . -B build \
   -DJY_APP_OS_SDK_ARCHIVE=/path/to/jy_os_sdk_<branch>_<tag>_<count>_g<hash>_dev.7z
 ```
 
-CMake 会计算 7z 包 SHA256，解压到 `.os_sdk_cache/<short-sha256>/os_sdk/`，并在缓存目录旁记录完整 SHA256。后续配置可以不再传 `JY_APP_OS_SDK_ARCHIVE`，CMake 会复用最新的有效缓存；如果既没传包，也没有有效缓存，配置会直接失败。
+CMake 会计算 7z 包 SHA256，解压到 `.os_sdk_cache/<short-sha256>/os_sdk/`，并在缓存目录旁记录完整 SHA256。如果没有传 `JY_APP_OS_SDK_ARCHIVE`，CMake 会使用固定的 v1.12.3 缓存。即使有旧缓存，缺少这个精确缓存时也会失败。
 
 SDK 包包含：
 
@@ -125,7 +125,7 @@ cmake -S . -B build \
 cmake --build build
 ```
 
-如果当前 shell 的 `PATH` 已包含 `arm-none-eabi-gcc`，也可以不显式传 `CMAKE_C_COMPILER`。如果本地已经有有效 `.os_sdk_cache/`，也可以不再传 `JY_APP_OS_SDK_ARCHIVE`。
+如果当前 shell 的 `PATH` 已包含 `arm-none-eabi-gcc`，也可以不显式传 `CMAKE_C_COMPILER`。如果本地已有固定的 v1.12.3 `.os_sdk_cache/`，也可以不再传 `JY_APP_OS_SDK_ARCHIVE`。
 
 ## 7. 构建产物
 
@@ -146,7 +146,7 @@ ARM 构建后，构建目录中会生成：
 | --- | --- |
 | CMake 提示找不到 ARM 编译器 | 确认 `arm-none-eabi-gcc` 在 `PATH` 中，或使用 `-DCMAKE_C_COMPILER` 指定完整路径 |
 | CMake 提示 `.config` 缺失 | 确认仓库根目录存在 `.config` |
-| CMake 提示缺少 OS SDK 缓存 | 先传一次 `-DJY_APP_OS_SDK_ARCHIVE=<path-to-jy_os_sdk_..._dev.7z>`，或保留一个有效 `.os_sdk_cache/` |
+| CMake 提示缺少 OS SDK 缓存 | 先传一次 v1.12.3 SDK：`-DJY_APP_OS_SDK_ARCHIVE=<path-to-jy_os_sdk_..._dev.7z>` |
 | CMake 找不到 7-Zip | 安装 7-Zip，或设置 `-DJY_APP_OS_SDK_SEVEN_ZIP=<path-to-7z>` |
 | `fs_img.py` 导入 `littlefs` 失败 | 给当前 Python 环境安装 `littlefs` 包 |
 | 符号检查失败 | 检查是否漏编源文件、配置宏是否正确、依赖符号是否属于允许范围 |

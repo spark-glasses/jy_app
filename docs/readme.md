@@ -266,7 +266,7 @@ The ARM target builds the firmware app-layer ELF and runs the resource packaging
 
 ARM builds require the matching firmware toolchain and configuration environment. After changing `.config` or Kconfig options, rerun the full CMake configure step.
 
-ARM and simulator builds also consume an OS SDK archive exported from the OS repository. When calling CMake directly, pass it once with `-DJY_APP_OS_SDK_ARCHIVE=<path-to-jy_os_sdk_..._dev.7z>`. `scripts/develop.*` and the interactive simulator scripts prompt for the OS SDK archive path after product selection; press Enter to use the newest cache. CMake extracts the archive into `.os_sdk_cache/<short-sha256>/os_sdk/` and reuses that cache on later configure runs. If no archive path is provided and no valid cache exists, configuration fails with an explicit message.
+ARM and simulator builds also consume an OS SDK archive exported from the OS repository. The default is pinned to v1.12.3. When calling CMake directly, pass that archive once with `-DJY_APP_OS_SDK_ARCHIVE=<path-to-jy_os_sdk_..._dev.7z>`. `scripts/develop.*` and the interactive simulator scripts prompt for an archive after product selection; press Enter to use the pinned cache. CMake extracts archives into `.os_sdk_cache/<short-sha256>/os_sdk/`. If the pinned cache is absent, configuration fails instead of selecting an older cache.
 
 Board-side convenience scripts are split by purpose:
 

@@ -99,7 +99,7 @@ if errorlevel 1 (
 echo [INFO] Using Python: "%PYTHON_EXE%"
 echo [INFO] Selected product: "%PRODUCT_NAME%"
 if defined OS_SDK_ARCHIVE echo [INFO] Using OS SDK archive: "!OS_SDK_ARCHIVE!"
-if not defined OS_SDK_ARCHIVE echo [INFO] Using newest OS SDK cache.
+if not defined OS_SDK_ARCHIVE echo [INFO] Using default OS SDK cache.
 
 "%PYTHON_EXE%" -c "import littlefs" >nul 2>nul
 if errorlevel 1 (
@@ -120,7 +120,7 @@ echo [INFO] Configuring ARM build in "%BUILD_DIR%"...
 if defined OS_SDK_ARCHIVE (
     cmake -S . -B "%BUILD_DIR%" -G Ninja -DPython3_EXECUTABLE="%PYTHON_EXE%" -DJY_APP_PRODUCT="%PRODUCT_NAME%" -DJY_APP_OS_SDK_ARCHIVE="!OS_SDK_ARCHIVE!"
 ) else (
-    cmake -S . -B "%BUILD_DIR%" -G Ninja -DPython3_EXECUTABLE="%PYTHON_EXE%" -DJY_APP_PRODUCT="%PRODUCT_NAME%"
+    cmake -S . -B "%BUILD_DIR%" -G Ninja -DPython3_EXECUTABLE="%PYTHON_EXE%" -DJY_APP_PRODUCT="%PRODUCT_NAME%" -UJY_APP_OS_SDK_ARCHIVE
 )
 if errorlevel 1 (
     pause
@@ -178,7 +178,7 @@ exit /b 0
 :select_os_sdk_archive
 echo.
 set "OS_SDK_ARCHIVE="
-set /p "OS_SDK_ARCHIVE=Enter OS SDK archive path (empty to use newest cache): "
+set /p "OS_SDK_ARCHIVE=Enter OS SDK archive path (empty to use default cache): "
 if defined OS_SDK_ARCHIVE if "!OS_SDK_ARCHIVE:~0,1!"=="""" set "OS_SDK_ARCHIVE=!OS_SDK_ARCHIVE:~1!"
 if defined OS_SDK_ARCHIVE if "!OS_SDK_ARCHIVE:~-1!"=="""" set "OS_SDK_ARCHIVE=!OS_SDK_ARCHIVE:~0,-1!"
 exit /b 0
