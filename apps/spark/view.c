@@ -3,6 +3,7 @@
 #include "view_internal.h"
 
 #include "floatair_dbg.h"
+#include "system/system_runtime_state.h"
 #include "system/system_runtime_ui.h"
 
 #include <stdio.h>
@@ -127,6 +128,10 @@ static void spark_input(lv_event_t* event) {
         spark_navigation_move(code == LV_EVENT_GESTURE_LEFT);
     else if (code == LV_EVENT_CLICKED) spark_navigation_open();
     else if (code == LV_EVENT_DCLICKED) spark_navigation_back();
+    else if (code == system_runtime_state_get_btconn_event()) {
+        const uint8_t* connected = lv_event_get_param(event);
+        if (connected != NULL) spark_host_connection_changed(*connected != 0);
+    }
 }
 
 static void spark_page_create(lv_obj_t* parent, const app_page_data_t* data) {
@@ -155,7 +160,6 @@ static void spark_page_create(lv_obj_t* parent, const app_page_data_t* data) {
     lv_obj_set_style_radius(frame, SPARK_FRAME_RADIUS, LV_PART_MAIN);
     lv_obj_set_style_pad_hor(frame, SPARK_FRAME_INSET_H, LV_PART_MAIN);
     lv_obj_set_style_pad_ver(frame, 0, LV_PART_MAIN);
-    lv_obj_set_style_clip_corner(frame, true, LV_PART_MAIN);
 
     s_header = lv_obj_create(frame);
     floatair_assert(s_header != NULL, "Spark display header create failed");

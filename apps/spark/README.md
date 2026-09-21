@@ -52,8 +52,17 @@ The phone sends reliable MessagePack on app ID `1`, business `Display`, command
 {"id":1,"payload":{"seq":7,"type":128,"biz":"Display","cmd":"update","data":{"revision":"7","displayID":"result-1","navigationSequence":"0","reply":"Done","page":{"kind":"list","title":"Notes","hint":"1 item","selected":0,"rowGap":4,"rows":[{"id":"note-1","mark":"","primary":"Plan","secondary":"Meet at 10:00","meta":"Sep 12, 2026","layout":"note","height":48}]}}}}
 ```
 
-`page`, `item`, `grid`, `doc`, and `reply` are independent optional fields; a
-request carries at most one of `page`, `item`, `grid`, and `doc`. Lists use `page`.
+`page`, `item`, `grid`, `doc`, `reply`, `assistant`, and `screen` are
+independent optional fields; a request carries at most one of `page`, `item`,
+`grid`, and `doc`. Lists use `page`. `screen` accepts only `"off"` and must
+arrive together with an empty page and an empty reply; anything else is
+rejected with `ErrBadParam`. The receiver applies and paints the request, which
+is the clear, then turns the screen off and reports the screen state with
+trigger `phoneDismiss`, then ACKs. A retry of the same revision is ACKed without
+touching the screen. A dismiss is never stale: it applies even when it echoes an
+older navigation sequence. The phone sends it only on the dismiss action, so the
+frame is blank when the screen next comes on. The glasses never turn the screen
+on from a display update.
 Details use the compact array `item`: `[id, title, hint, primary, body, meta]`.
 The body is either a UTF-8 string or `[uncompressedBytes, deflateBase64]`. The phone
 uses raw DEFLATE with Base64 only when the final JSON field is smaller. The receiver
@@ -141,7 +150,9 @@ glasses keep the list and restore it locally on double click, then report
 list. Detail swipes still scroll text.
 
 Reports use app ID `30003` and include `revision`, `displayID`, and an increasing
-decimal-string `navigationSequence`. The display ID remains stable across
+decimal-string `navigationSequence`. `selected`, `open`, and `opened` carry
+`artifact_id`; `dismissed` and `pageDismissed` do not. `dismissed` clears the
+page and reply. A corrective `pageDismissed` keeps a newer reply. The display ID remains stable across
 reply updates and detail navigation. A new server display gets a new ID.
 The phone rejects older sequences and reports from other displays. A later
 selection report can also recover a lost Back report. The phone keeps only the
@@ -149,10 +160,29 @@ newest report while a send is pending. An `opened` report
 describes an already visible detail and does not request another send.
 
 Updates echo the latest report sequence. For the same display ID, an older
-sequence cannot replace a view after a local swipe or Back. The receiver ACKs
-that request and reports the actual view, including on a retry. The phone
-continues to report only the visible page to the server. Vendor popup input
-priority remains unchanged.
+sequence cannot replace a view after a local swipe, Back, or timeout clear. The
+receiver ACKs that request and reports the actual view (`selected`, `opened`,
+`dismissed`, or `pageDismissed`), including on a retry and on reply-only updates,
+so a lost report heals on the next exchange. The phone continues to report only the
+visible page to the server. Vendor popup input priority remains unchanged.
+
+### Content lifetime
+
+The page and reply live until an explicit dismiss, three minutes of screen off,
+or a host disconnect. The glasses alone decide the timeout: Spark installs the
+system screen-state listener, which fires on every change regardless of the
+current page, records the monotonic time on screen off, and on screen on clears
+the page, return list, and reply when three minutes have passed. The on
+notification arrives while the LCD is still dark, so the clear paints before
+the screen lights up. The clear keeps the display ID, revision, and assistant
+state, bumps the navigation sequence, and sends a `dismissed` report without
+`artifact_id`. The phone applies it to its
+mirror like a swipe and never runs a second clock. Any update accepted while
+the screen is off restarts the clock, so content that arrived in the dark is
+shown at the next screen on. A screen on with nothing to clear sends nothing.
+On the host disconnect event the glasses run the full clear, revision
+included, and the phone drops its retained content, so a reconnect always
+starts a new empty display on both sides.
 
 ### Offline checks
 

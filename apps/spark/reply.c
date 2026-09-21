@@ -47,6 +47,10 @@ void spark_reply_destroy(void) {
     s_footer = s_panel = s_label = NULL;
 }
 
+bool spark_reply_visible(void) {
+    return s_panel != NULL && lv_obj_is_valid(s_panel) && !lv_obj_has_flag(s_panel, LV_OBJ_FLAG_HIDDEN);
+}
+
 bool spark_reply_set(const char* text) {
     if (!spark_display_ready() || s_panel == NULL || s_label == NULL ||
         !lv_obj_is_valid(s_panel) || !lv_obj_is_valid(s_label)) {

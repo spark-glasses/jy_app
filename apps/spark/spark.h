@@ -40,6 +40,7 @@ void spark_display_paint(void);
 
 bool spark_display_ready(void);
 void spark_display_reset_revision(void);
+#define SPARK_SCREEN_OFF_CLEAR_MS (3u * 60u * 1000u)
 const spark_assistant_presentation_t* spark_assistant_current(void);
 bool spark_display_report(const char* command, const char* artifact_id);
 // Simulator samples use the same request validation and revision state as the phone.

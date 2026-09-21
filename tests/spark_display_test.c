@@ -1,4 +1,5 @@
 #include "apps/spark/spark.h"
+#include "system/system.h"
 #include "system/system_runtime_ui.h"
 #include "system/system_res.h"
 #include "lvgl/src/libs/lodepng/lodepng.h"
@@ -34,7 +35,30 @@ static bool test_grid;
 static size_t test_grid_columns = 2;
 static bool test_doc;
 static unsigned reports;
+static uint64_t test_now_ms;
+static const char* test_screen;
+static bool test_screen_bad_type;
+static uint8_t test_sys_state = 1;
+static unsigned sys_state_sets;
+static char last_sys_state_trigger[32];
 
+void system_set_sys_state(uint8_t state) { test_sys_state = state; ++sys_state_sets; }
+bool system_report_sys_state(uint8_t state, const char* trigger) {
+    assert(state == test_sys_state);
+    snprintf(last_sys_state_trigger, sizeof(last_sys_state_trigger), "%s", trigger);
+    return true;
+}
+
+uint64_t spark_monotonic_ms(void) { return test_now_ms; }
+static system_sys_state_listener_t sys_state_listener;
+void system_set_sys_state_listener(system_sys_state_listener_t listener) {
+    sys_state_listener = listener;
+}
+uint32_t system_runtime_state_get_btconn_event(void) {
+    static uint32_t id;
+    if (id == 0) id = lv_event_register_id();
+    return id;
+}
 bool app_manager_register(app_t* value) { app = value; return true; }
 const char* app_manager_current_name(void) { return active_app; }
 const char* app_router_get_app(void) { return active_app; }
@@ -113,8 +137,11 @@ static void send_request(const char* revision, int count, bool list, const char*
     mpack_writer_t writer;
     mpack_writer_init_growable(&writer, &bytes, &size);
     mpack_start_map(&writer, 3 + (count >= 0) + (reply != NULL) +
-                                 (test_assistant_state != NULL));
+                                 (test_assistant_state != NULL) +
+                                 (test_screen != NULL || test_screen_bad_type));
     text(&writer, "revision", revision);
+    if (test_screen_bad_type) { mpack_write_cstr(&writer, "screen"); mpack_write_u8(&writer, 0); }
+    else if (test_screen != NULL) text(&writer, "screen", test_screen);
     text(&writer, "displayID", test_display_id);
     char sequence[21]; snprintf(sequence, sizeof(sequence), "%llu", (unsigned long long)test_navigation_sequence);
     text(&writer, "navigationSequence", sequence);
@@ -587,11 +614,13 @@ int main(int argc, char** argv) {
     assert(!lv_obj_has_flag(avatar_image, LV_OBJ_FLAG_HIDDEN));
     lv_obj_invalidate(lv_screen_active()); lv_refr_now(display);
     save_frame(argc > 1 ? argv[1] : NULL, "assistant-notes");
-    const char* icon_states[] = {"todo", "calendar", "maps"};
+    const char* icon_states[] = {"todo", "calendar", "maps", "web"};
     const spark_assistant_state_t expected_icons[] = {
-        SPARK_ASSISTANT_TODO, SPARK_ASSISTANT_CALENDAR, SPARK_ASSISTANT_MAPS};
-    const char* icon_frames[] = {"assistant-todo", "assistant-calendar", "assistant-maps"};
-    for (size_t i = 0; i < 3; ++i) {
+        SPARK_ASSISTANT_TODO, SPARK_ASSISTANT_CALENDAR, SPARK_ASSISTANT_MAPS,
+        SPARK_ASSISTANT_WEB};
+    const char* icon_frames[] = {
+        "assistant-todo", "assistant-calendar", "assistant-maps", "assistant-web"};
+    for (size_t i = 0; i < 4; ++i) {
         char revision[4]; snprintf(revision, sizeof(revision), "%zu", i + 8);
         test_assistant_state = icon_states[i];
         send_request(revision, -1, true, NULL, 0);
@@ -604,7 +633,7 @@ int main(int argc, char** argv) {
     }
     test_assistant_state = "unknown";
     test_assistant_detail = NULL;
-    send_request("11", -1, true, NULL, 0);
+    send_request("12", -1, true, NULL, 0);
     assert(last_error == Dp_ErrNone && spark_assistant_current()->state == SPARK_ASSISTANT_WORKING);
     assert(!lv_obj_has_flag(avatar_image, LV_OBJ_FLAG_HIDDEN));
     assert(pen != NULL && lv_image_get_src(avatar_image) == pen);
@@ -613,7 +642,7 @@ int main(int argc, char** argv) {
     oversized_detail[sizeof(oversized_detail) - 1] = '\0';
     test_assistant_state = "working";
     test_assistant_detail = oversized_detail;
-    send_request("12", -1, true, NULL, 0); assert(last_error == ErrBadParam);
+    send_request("13", -1, true, NULL, 0); assert(last_error == ErrBadParam);
     assert(spark_assistant_current()->state == SPARK_ASSISTANT_WORKING);
     test_assistant_state = NULL;
     test_assistant_detail = NULL;
@@ -741,9 +770,100 @@ int main(int argc, char** argv) {
     assert(lv_obj_has_flag(grid, LV_OBJ_FLAG_HIDDEN) && !lv_obj_has_flag(body, LV_OBJ_FLAG_HIDDEN));
     assert(lv_obj_has_flag(doc, LV_OBJ_FLAG_HIDDEN) && lv_label_get_text(h0)[0] == '\0');
     assert(lv_label_get_text(cell_00)[0] == '\0');
+    // Screen off under three minutes keeps the page. Over three minutes the glasses
+    // clear it as a local dismiss: identity and revision survive, and it is reported.
+    // Screen state reaches Spark through the system listener, whichever page is current.
+    assert(sys_state_listener != NULL);
+    test_now_ms = 1000;
+    sys_state_listener(0);
+    test_now_ms += SPARK_SCREEN_OFF_CLEAR_MS - 1;
+    unsigned before_dismiss = reports;
+    sys_state_listener(1);
+    assert(spark_display_current() != NULL && reports == before_dismiss);
+    sys_state_listener(0);
+    test_now_ms += SPARK_SCREEN_OFF_CLEAR_MS;
+    send_request("2", -1, true, "Still here", 0); assert(last_error == Dp_ErrNone);
+    test_now_ms += SPARK_SCREEN_OFF_CLEAR_MS - 1;
+    sys_state_listener(1);
+    assert(spark_display_current() != NULL && reports == before_dismiss); // Content in the dark restarts the clock.
+    assert(strcmp(lv_label_get_text(reply_label), "Still here") == 0);
+    sys_state_listener(0);
+    test_now_ms += SPARK_SCREEN_OFF_CLEAR_MS;
+    flushed_pixels = 0;
+    sys_state_listener(1);
+    assert(spark_display_current() == NULL && lv_obj_has_flag(frame, LV_OBJ_FLAG_HIDDEN));
+    assert(flushed_pixels > 0); // The clear paints before the screen-on refresh.
+    assert(reports == before_dismiss + 1 && strcmp(last_command, "dismissed") == 0);
+    assert(strcmp(last_display_id, "titled-again") == 0 && strcmp(last_revision, "2") == 0);
+    assert(lv_label_get_text(reply_label)[0] == '\0');
+    uint64_t dismissed_sequence = last_navigation_sequence;
+    assert(dismissed_sequence > test_navigation_sequence);
+    sys_state_listener(0);
+    test_now_ms += SPARK_SCREEN_OFF_CLEAR_MS;
+    sys_state_listener(1);
+    assert(reports == before_dismiss + 1); // Nothing to clear, nothing to report.
+    // The phone missed the report: any update echoing the older sequence is ACKed and answered
+    // with the actual view, so the mirror heals on the next exchange.
+    send_request("3", -1, true, "After clear", 0);
+    assert(last_error == Dp_ErrNone && strcmp(lv_label_get_text(reply_label), "After clear") == 0);
+    assert(reports == before_dismiss + 2 && strcmp(last_command, "pageDismissed") == 0);
+    assert(last_navigation_sequence > dismissed_sequence && strcmp(last_revision, "3") == 0);
+    dismissed_sequence = last_navigation_sequence;
+    send_request("4", 1, false, NULL, 0);
+    assert(last_error == Dp_ErrNone && spark_display_current() == NULL);
+    assert(reports == before_dismiss + 3 && strcmp(last_command, "pageDismissed") == 0);
+    assert(last_navigation_sequence > dismissed_sequence);
+    // A phone that saw the clear echoes the current sequence; its list applies quietly.
+    test_navigation_sequence = last_navigation_sequence;
+    before_dismiss = reports;
+    send_request("5", 2, true, NULL, 0);
+    assert(last_error == Dp_ErrNone && spark_display_current() != NULL && reports == before_dismiss);
+    // Host disconnect clears everything, revision included. A reconnecting phone must
+    // start a new display; the old identity is gone.
+    uint8_t host_connected = 1, host_disconnected = 0;
+    uint32_t btconn_event = system_runtime_state_get_btconn_event();
+    lv_obj_send_event(parent, btconn_event, &host_connected);
+    assert(spark_display_current() != NULL);
+    lv_obj_send_event(parent, btconn_event, &host_disconnected);
+    assert(spark_display_current() == NULL && spark_assistant_current()->state == SPARK_ASSISTANT_IDLE);
+    assert(reports == before_dismiss);
+    send_request("6", -1, true, "No page", 0); assert(last_error == ErrBadParam);
+    test_display_id = "after-disconnect";
+    send_request("1", 1, false, "Back", 0);
+    assert(last_error == Dp_ErrNone && spark_display_current() != NULL);
+    // A phone dismiss clears the page and reply on screen, then turns the screen off.
+    // The ACK follows the paint and the screen change; a retry toggles nothing.
+    assert(sys_state_sets == 0);
+    test_screen = "on";
+    send_request("2", 0, true, "", 0); assert(last_error == ErrBadParam);
+    test_screen = NULL; test_screen_bad_type = true;
+    send_request("2", 0, true, "", 0); assert(last_error == ErrBadParam);
+    test_screen_bad_type = false;
+    // The dismiss must be explicit: an empty page and an empty reply, nothing else.
+    test_screen = "off";
+    send_request("2", 0, false, NULL, 0); assert(last_error == ErrBadParam);
+    send_request("2", -1, true, "", 0); assert(last_error == ErrBadParam);
+    send_request("2", 1, true, "", 0); assert(last_error == ErrBadParam);
+    send_request("2", 0, true, "Kept", 0); assert(last_error == ErrBadParam);
+    assert(sys_state_sets == 0 && spark_display_current()->count != 0);
+    flushed_pixels = 0;
+    send_request("2", 0, true, "", 0);
+    assert(last_error == Dp_ErrNone && spark_display_current()->count == 0);
+    assert(lv_obj_has_flag(frame, LV_OBJ_FLAG_HIDDEN) && lv_label_get_text(reply_label)[0] == '\0');
+    assert(flushed_at_ack > 0 && sys_state_sets == 1 && test_sys_state == 0);
+    assert(strcmp(last_sys_state_trigger, "phoneDismiss") == 0);
+    send_request("2", 0, true, "", 0);
+    assert(last_error == Dp_ErrNone && sys_state_sets == 1);
+    test_screen = NULL;
+    // Content sent while the screen is off waits for the next screen on, then survives it.
+    sys_state_listener(0);
+    send_request("3", 2, true, "Woke", 0); assert(last_error == Dp_ErrNone);
+    test_now_ms += SPARK_SCREEN_OFF_CLEAR_MS - 1;
+    sys_state_listener(1);
+    assert(spark_display_current()->count == 2 && strcmp(lv_label_get_text(reply_label), "Woke") == 0);
     active_app = "prompter";
     send_request("7", 1, false, NULL, 0); assert(last_error == ErrNotReady);
     app->on_stop(); spark_page_get()->on_destroy(); lv_obj_delete(parent);
     lv_display_delete(display); lv_deinit();
-    puts("Spark display: partial redraw, five-row fit, independent updates, retry ACK, validation, ownership, layout and reports passed.");
+    puts("Spark display: partial redraw, five-row fit, independent updates, retry ACK, validation, ownership, layout, reports, screen-off clear, phone dismiss and disconnect passed.");
 }

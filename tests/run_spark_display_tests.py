@@ -58,7 +58,7 @@ with tempfile.TemporaryDirectory(prefix='spark-display-tests-') as temporary:
     compiled = []
     for index, source in enumerate(sources):
         output = temp / f'{index}.o'
-        subprocess.run([command[0], *flags, '-DLV_USE_LODEPNG=1', '-DSPARK_DISPLAY_TEST=1',
+        subprocess.run([command[0], *flags, '-DLV_USE_LODEPNG=1',
                         '-g', '-O1', '-fsanitize=address,undefined',
                         '-fno-omit-frame-pointer', '-c', str(source), '-o', str(output)], check=True)
         compiled.append(output)

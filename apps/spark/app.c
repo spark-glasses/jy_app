@@ -1,10 +1,12 @@
 #include "spark.h"
+#include "view_internal.h"
 
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
 
 #include "app_def.h"
+#include "app_lcd.h"
 #include "common/app_framework/app_nav.h"
 #include "common/message.h"
 #include "system/system.h"
@@ -15,7 +17,10 @@ static bool s_has_revision;
 static uint32_t s_report_sequence;
 static uint64_t s_navigation_sequence;
 static char s_display_id[65];
-static bool s_last_page_skipped;
+// The phone echoed an older navigation sequence; the ACK is followed by the actual view.
+static bool s_report_after_ack;
+static bool s_screen_off;
+static uint64_t s_screen_off_at;
 static spark_assistant_presentation_t s_assistant = {
     .state = SPARK_ASSISTANT_IDLE,
 };
@@ -24,12 +29,38 @@ void spark_display_reset_revision(void) {
     s_has_revision = false;
     s_display_id[0] = '\0';
     s_navigation_sequence = 0;
-    s_last_page_skipped = false;
+    s_report_after_ack = false;
     s_assistant.state = SPARK_ASSISTANT_IDLE;
     s_assistant.detail[0] = '\0';
 }
 
 const spark_assistant_presentation_t* spark_assistant_current(void) { return &s_assistant; }
+
+// The glasses decide the timeout alone and announce it as navigation, so the
+// phone never measures the same interval with a second clock. Screen state comes
+// straight from the system listener, not from page events, so it is tracked
+// whichever page is current. The on notification arrives while the LCD is still
+// dark, so the clear paints before the screen lights up.
+static void spark_screen_state_changed(bool on) {
+    if (!on) {
+        s_screen_off = true;
+        s_screen_off_at = spark_monotonic_ms();
+        return;
+    }
+    bool was_off = s_screen_off;
+    s_screen_off = false;
+    if (!was_off || !spark_display_ready()) return;
+    uint64_t now = spark_monotonic_ms();
+    if (now - s_screen_off_at >= SPARK_SCREEN_OFF_CLEAR_MS) spark_navigation_dismiss();
+}
+
+static void spark_sys_state_listener(uint8_t state) {
+    spark_screen_state_changed(state != LCD_OFF);
+}
+
+void spark_host_connection_changed(bool connected) {
+    if (!connected && spark_display_ready()) spark_display_clear();
+}
 
 static bool spark_node_is(mpack_node_t node, const char* value) {
     size_t length = strlen(value);
@@ -106,10 +137,12 @@ bool spark_display_report(const char* command, const char* artifact_id) {
 
 static bool ack_current(msg_pack_t* msg) {
     bool acked = spark_ack_revision(msg);
-    if (s_last_page_skipped) {
+    if (s_report_after_ack) {
         const spark_display_t* current = spark_display_current();
         if (current != NULL && current->count != 0)
             spark_display_report(current->kind == SPARK_DISPLAY_LIST ? "selected" : "opened", current->rows[current->selected].id);
+        else
+            spark_display_report(spark_reply_visible() ? "pageDismissed" : "dismissed", NULL);
     }
     return acked;
 }
@@ -146,6 +179,7 @@ static bool spark_message(mpack_node_t data, msg_pack_t* msg) {
     mpack_node_t doc = mpack_node_map_cstr_optional(data, "doc");
     mpack_node_t reply = mpack_node_map_cstr_optional(data, "reply");
     mpack_node_t assistant = mpack_node_map_cstr_optional(data, "assistant");
+    mpack_node_t screen = mpack_node_map_cstr_optional(data, "screen");
     bool has_full_page = !mpack_node_is_missing(page);
     bool has_item = !mpack_node_is_missing(item);
     bool has_grid = !mpack_node_is_missing(grid);
@@ -153,13 +187,20 @@ static bool spark_message(mpack_node_t data, msg_pack_t* msg) {
     bool has_page = has_full_page || has_item || has_grid || has_doc;
     bool has_reply = !mpack_node_is_missing(reply);
     bool has_assistant = !mpack_node_is_missing(assistant);
+    // A phone dismiss clears the page and reply, then turns the screen off. Only "off"
+    // is accepted; the screen is turned on by the glasses themselves.
+    bool has_screen = !mpack_node_is_missing(screen);
+    if (has_screen && !spark_node_is(screen, "off")) return app_mpack_send_ack(msg, ErrBadParam);
     if (has_full_page + has_item + has_grid + has_doc > 1) return app_mpack_send_ack(msg, ErrBadParam);
-    if (!has_page && !has_reply && !has_assistant)
+    if (!has_page && !has_reply && !has_assistant && !has_screen)
         return app_mpack_send_ack(msg, ErrBadParam);
     if (new_display && !has_page) return app_mpack_send_ack(msg, ErrBadParam);
-    // A swipe or Back can overtake the phone's detail response. Never undo it.
-    bool stale_navigation = has_page && !new_display && display_id[0] != '\0' &&
+    // A swipe, Back, or timeout clear can overtake the phone's response. Never undo
+    // it; ACK and re-report the actual view so a lost report heals here. A dismiss
+    // is never stale: clearing the screen is valid whatever the device navigated to.
+    bool stale_sequence = !new_display && display_id[0] != '\0' &&
         navigation_sequence < s_navigation_sequence;
+    bool stale_navigation = has_page && stale_sequence && !has_screen;
     spark_assistant_presentation_t next_assistant = s_assistant;
     if (has_assistant && !spark_assistant_parse(assistant, &next_assistant))
         return app_mpack_send_ack(msg, ErrBadParam);
@@ -169,6 +210,14 @@ static bool spark_message(mpack_node_t data, msg_pack_t* msg) {
         has_full_page ? spark_display_parse(page) : NULL;
     char* text = has_reply ? mpack_node_utf8_cstr_alloc(reply, SPARK_DISPLAY_MAX_REPLY + 1) : NULL;
     if ((has_page && next == NULL) || (has_reply && text == NULL) || mpack_node_error(data) != mpack_ok) {
+        spark_display_free(next);
+        free(text);
+        return app_mpack_send_ack(msg, ErrBadParam);
+    }
+    // A dismiss is explicit on the wire: it must carry an empty page and an empty
+    // reply, so applying the request is the clear and nothing can be retained
+    // behind a dark screen.
+    if (has_screen && !(has_page && next->count == 0 && has_reply && spark_text_empty(text))) {
         spark_display_free(next);
         free(text);
         return app_mpack_send_ack(msg, ErrBadParam);
@@ -192,10 +241,18 @@ static bool spark_message(mpack_node_t data, msg_pack_t* msg) {
     if (has_assistant) s_assistant = next_assistant;
     s_revision = revision;
     s_has_revision = true;
-    s_last_page_skipped = stale_navigation;
+    s_report_after_ack = stale_sequence;
     if (new_display) {
         strcpy(s_display_id, display_id);
         s_navigation_sequence = navigation_sequence;
+    }
+    // Content that arrives in the dark is shown at the next screen on.
+    if (s_screen_off) s_screen_off_at = spark_monotonic_ms();
+    // The clear is painted first, so the frame is blank when the screen comes back.
+    // A retry of this revision is ACKed above and never toggles the screen again.
+    if (has_screen) {
+        system_set_sys_state(LCD_OFF);
+        (void)system_report_sys_state(LCD_OFF, SYSTEM_SYS_STATE_TRIGGER_PHONE_DISMISS);
     }
     return ack_current(msg);
 }
@@ -241,5 +298,6 @@ static app_t s_spark_app = {
 };
 
 bool spark_app_register(void) {
+    system_set_sys_state_listener(spark_sys_state_listener);
     return app_manager_register(&s_spark_app);
 }

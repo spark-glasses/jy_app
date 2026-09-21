@@ -112,6 +112,14 @@ void spark_navigation_back(void) {
     spark_display_report("selected", s_display->rows[s_display->selected].id);
 }
 
+void spark_navigation_dismiss(void) {
+    if (!showing() && !spark_reply_visible()) return;
+    spark_navigation_clear();
+    (void)spark_reply_set("");
+    spark_display_paint();
+    spark_display_report("dismissed", NULL);
+}
+
 void spark_navigation_clear(void) {
     s_open_pending = false;
     spark_view_render(NULL);

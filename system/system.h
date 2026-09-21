@@ -454,6 +454,7 @@ bool system_report_guide_close(void);
 #define SYSTEM_SYS_STATE_TRIGGER_KEYWORD_SPOTTING     "keywordSpotting"    ///< 关键词唤醒触发。
 #define SYSTEM_SYS_STATE_TRIGGER_INACTIVITY_TIMEOUT   "inactivityTimeout"  ///< 无操作超时触发。
 #define SYSTEM_SYS_STATE_TRIGGER_GLASSES_CASE         "glassesCase"        ///< 收到眼镜盒附件触发。
+#define SYSTEM_SYS_STATE_TRIGGER_PHONE_DISMISS        "phoneDismiss"       ///< 手机 Display.update 携带 screen=off 触发。
 
 /**
  * @brief 上报系统亮灭屏状态。
@@ -638,6 +639,15 @@ uint8_t system_get_sys_state(void);
  * @return 无返回值。
  */
 void system_set_sys_state(uint8_t state);
+/**
+ * @brief 亮灭屏状态监听回调。灭屏后以 `0` 回调；亮屏前（LCD 仍为暗时）以 `1` 回调，页面可先绘制。
+ */
+typedef void (*system_sys_state_listener_t)(uint8_t state);
+/**
+ * @brief 设置亮灭屏状态监听（单个）。与当前页面无关，每次状态变化都会回调。
+ * @param[in] listener 回调函数，`NULL` 表示取消。
+ */
+void system_set_sys_state_listener(system_sys_state_listener_t listener);
 /**
  * @brief 获取制造商字符串。
  * @return 返回制造商字符串。

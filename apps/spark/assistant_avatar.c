@@ -3,7 +3,6 @@
 #include "assistant_thinking.h"
 #include "assistant_working.h"
 
-#define SPARK_AVATAR_ROLL_MS 450
 #define SPARK_AVATAR_FRAME_SIZE SPARK_AVATAR_ASSET_SIZE
 #define SPARK_AVATAR_FRAME_COUNT 8
 #define SPARK_AVATAR_FRAME_STRIDE SPARK_AVATAR_ASSET_STRIDE
@@ -256,7 +255,7 @@ static const lv_image_dsc_t spark_avatar_frames[SPARK_AVATAR_FRAME_COUNT] = {
     },
 };
 
-#define SPARK_ICON_COUNT 3
+#define SPARK_ICON_COUNT 4
 #define SPARK_I1_PALETTE \
     0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff
 
@@ -326,6 +325,28 @@ spark_icon_data[SPARK_ICON_COUNT][SPARK_AVATAR_FRAME_BYTES] = {
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     },
+    { SPARK_I1_PALETTE,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x7e, 0x00, 0x00,
+        0x00, 0x03, 0xff, 0xc0, 0x00, 0x00, 0x07, 0xff, 0xe0, 0x00,
+        0x00, 0x0f, 0xff, 0xf0, 0x00, 0x00, 0x1f, 0xe7, 0xf8, 0x00,
+        0x00, 0x3d, 0xc3, 0xbc, 0x00, 0x00, 0x79, 0xc3, 0x9e, 0x00,
+        0x00, 0xff, 0xff, 0xff, 0x00, 0x00, 0xe3, 0x81, 0xc7, 0x00,
+        0x00, 0xe3, 0x81, 0xc7, 0x00, 0x01, 0xe3, 0x81, 0xc7, 0x80,
+        0x01, 0xff, 0xff, 0xff, 0x80, 0x01, 0xc3, 0x81, 0xc3, 0x80,
+        0x01, 0xff, 0xff, 0xff, 0x80, 0x01, 0xc3, 0x81, 0xc3, 0x80,
+        0x01, 0xe3, 0x81, 0xc7, 0x80, 0x00, 0xe3, 0x81, 0xc7, 0x00,
+        0x00, 0xe3, 0x81, 0xc7, 0x00, 0x00, 0xff, 0xff, 0xff, 0x00,
+        0x00, 0x79, 0xc3, 0x9e, 0x00, 0x00, 0x3d, 0xc3, 0xbc, 0x00,
+        0x00, 0x1f, 0xe7, 0xf8, 0x00, 0x00, 0x0f, 0xff, 0xf0, 0x00,
+        0x00, 0x07, 0xff, 0xe0, 0x00, 0x00, 0x03, 0xff, 0xc0, 0x00,
+        0x00, 0x00, 0x7e, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    },
 };
 
 #define SPARK_ICON_DESCRIPTOR(index_) \
@@ -346,16 +367,14 @@ static const lv_image_dsc_t spark_icons[SPARK_ICON_COUNT] = {
     SPARK_ICON_DESCRIPTOR(0),
     SPARK_ICON_DESCRIPTOR(1),
     SPARK_ICON_DESCRIPTOR(2),
+    SPARK_ICON_DESCRIPTOR(3),
 };
 
 struct spark_assistant_avatar {
     lv_obj_t* root;
     lv_obj_t* image;
     const lv_image_dsc_t* current_frame;
-    const spark_avatar_frame_sequence_t* sequence;
-    int32_t roll_start_x;
     spark_assistant_state_t state;
-    bool sequence_repeats;
 };
 
 static void spark_avatar_set_image(
@@ -367,50 +386,6 @@ static void spark_avatar_set_image(
 
 static void spark_avatar_set_idle_frame(spark_assistant_avatar_t* avatar, uint8_t frame_index) {
     spark_avatar_set_image(avatar, &spark_avatar_frames[frame_index % SPARK_AVATAR_FRAME_COUNT]);
-}
-
-static void spark_avatar_roll(void* value, int32_t progress) {
-    spark_assistant_avatar_t* avatar = value;
-    lv_obj_set_style_translate_x(
-        avatar->root, avatar->roll_start_x * (1000 - progress) / 1000, LV_PART_MAIN);
-    spark_avatar_set_idle_frame(
-        avatar, (uint8_t)((progress * SPARK_AVATAR_FRAME_COUNT / 1000) %
-                          SPARK_AVATAR_FRAME_COUNT));
-}
-
-static void spark_avatar_sequence_step(void* value, int32_t step) {
-    spark_assistant_avatar_t* avatar = value;
-    if (avatar->sequence == NULL || avatar->sequence->frame_count == 0) return;
-    uint8_t frame = avatar->sequence_repeats
-        ? (uint8_t)(step % avatar->sequence->frame_count)
-        : (uint8_t)LV_MIN(step, avatar->sequence->frame_count - 1);
-    spark_avatar_set_image(avatar, &avatar->sequence->frames[frame]);
-}
-
-static void spark_avatar_start_sequence(
-    spark_assistant_avatar_t* avatar, const spark_avatar_frame_sequence_t* sequence,
-    bool repeat, lv_anim_completed_cb_t completed) {
-    lv_anim_delete(avatar, spark_avatar_sequence_step);
-    avatar->sequence = sequence;
-    avatar->sequence_repeats = repeat;
-    if (sequence == NULL || sequence->frames == NULL || sequence->frame_count == 0) return;
-    spark_avatar_set_image(avatar, &sequence->frames[0]);
-
-    lv_anim_t animation;
-    lv_anim_init(&animation);
-    lv_anim_set_var(&animation, avatar);
-    lv_anim_set_exec_cb(&animation, spark_avatar_sequence_step);
-    lv_anim_set_values(&animation, 0, sequence->frame_count);
-    lv_anim_set_duration(&animation, sequence->frame_count * sequence->frame_period_ms);
-    if (repeat) lv_anim_set_repeat_count(&animation, LV_ANIM_REPEAT_INFINITE);
-    if (completed != NULL) lv_anim_set_completed_cb(&animation, completed);
-    (void)lv_anim_start(&animation);
-}
-
-static void spark_avatar_thinking_morph_completed(lv_anim_t* animation) {
-    spark_assistant_avatar_t* avatar = animation->var;
-    if (avatar != NULL && avatar->state == SPARK_ASSISTANT_THINKING)
-        spark_avatar_start_sequence(avatar, spark_assistant_thinking_loop(), true, NULL);
 }
 
 static void spark_avatar_deleted(lv_event_t* event) {
@@ -451,23 +426,10 @@ lv_obj_t* spark_assistant_avatar_object(spark_assistant_avatar_t* avatar) {
 
 void spark_assistant_avatar_roll_in(spark_assistant_avatar_t* avatar) {
     if (avatar == NULL || avatar->root == NULL || !lv_obj_is_valid(avatar->root)) return;
-    lv_anim_delete(avatar, spark_avatar_roll);
+    lv_anim_delete(avatar, NULL);
     lv_obj_set_style_translate_x(avatar->root, 0, LV_PART_MAIN);
-    lv_obj_update_layout(avatar->root);
-    lv_area_t area;
-    lv_obj_get_coords(avatar->root, &area);
-    avatar->roll_start_x = -(area.x2 + 1);
     avatar->current_frame = NULL;
     spark_avatar_set_idle_frame(avatar, 0);
-
-    lv_anim_t animation;
-    lv_anim_init(&animation);
-    lv_anim_set_var(&animation, avatar);
-    lv_anim_set_exec_cb(&animation, spark_avatar_roll);
-    lv_anim_set_values(&animation, 0, 1000);
-    lv_anim_set_duration(&animation, SPARK_AVATAR_ROLL_MS);
-    lv_anim_set_path_cb(&animation, lv_anim_path_ease_out);
-    (void)lv_anim_start(&animation);
 }
 
 bool spark_assistant_avatar_set_state(
@@ -478,25 +440,20 @@ bool spark_assistant_avatar_set_state(
     if (presentation->state > SPARK_ASSISTANT_ERROR) return false;
     if (presentation->state == avatar->state) return true;
 
-    lv_anim_delete(avatar, spark_avatar_roll);
+    lv_anim_delete(avatar, NULL);
     lv_obj_set_style_translate_x(avatar->root, 0, LV_PART_MAIN);
-    lv_anim_delete(avatar, spark_avatar_sequence_step);
-    avatar->sequence = NULL;
     avatar->state = presentation->state;
     switch (presentation->state) {
         case SPARK_ASSISTANT_LISTENING:
-            spark_avatar_start_sequence(avatar, spark_assistant_listening_loop(), true, NULL);
+            spark_avatar_set_image(avatar, &spark_assistant_listening_loop()->frames[6]);
             break;
         case SPARK_ASSISTANT_THINKING:
-            spark_avatar_start_sequence(
-                avatar, spark_assistant_thinking_morph(), false,
-                spark_avatar_thinking_morph_completed);
+            spark_avatar_set_image(avatar, &spark_assistant_thinking_loop()->frames[0]);
             break;
         case SPARK_ASSISTANT_WORKING:
         case SPARK_ASSISTANT_NOTES:
         case SPARK_ASSISTANT_EMAIL:
         case SPARK_ASSISTANT_CONTACTS:
-        case SPARK_ASSISTANT_WEB:
             spark_avatar_set_image(avatar, spark_assistant_working_frame());
             break;
         case SPARK_ASSISTANT_TODO:
@@ -507,6 +464,9 @@ bool spark_assistant_avatar_set_state(
             break;
         case SPARK_ASSISTANT_MAPS:
             spark_avatar_set_image(avatar, &spark_icons[2]);
+            break;
+        case SPARK_ASSISTANT_WEB:
+            spark_avatar_set_image(avatar, &spark_icons[3]);
             break;
         case SPARK_ASSISTANT_IDLE:
         case SPARK_ASSISTANT_ERROR:

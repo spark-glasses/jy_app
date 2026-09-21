@@ -372,6 +372,12 @@ uint8_t system_get_sys_state(void) {
  * @param[in] state 目标系统状态，`0` 表示灭屏，`1` 表示亮屏。
  * @return 无返回值。
  */
+static system_sys_state_listener_t s_sys_state_listener;
+
+void system_set_sys_state_listener(system_sys_state_listener_t listener) {
+    s_sys_state_listener = listener;
+}
+
 void system_set_sys_state(uint8_t state) {
     lcd_state_t next_state = (lcd_state_t)state;
     lcd_state_t previous_state = floatair_lcd_get_state();
@@ -385,10 +391,14 @@ void system_set_sys_state(uint8_t state) {
     floatair_info("set screen state: %u(%s)",
                   (unsigned)next_state,
                   floatair_lcd_state_name(next_state));
+    bool changed = previous_state != next_state;
     if (next_state == LCD_OFF) {
         system_timer_sleep_deinit();
         floatair_lcd_set_state(LCD_OFF);
+        if (changed && s_sys_state_listener != NULL) s_sys_state_listener(LCD_OFF);
     } else {
+        // The listener runs while the LCD is still dark so a page can paint first.
+        if (changed && s_sys_state_listener != NULL) s_sys_state_listener(LCD_ON);
         floatair_lcd_set_state(LCD_ON);
         if (previous_state == LCD_OFF) {
             app_sleep_timer_init();
@@ -398,7 +408,7 @@ void system_set_sys_state(uint8_t state) {
         system_ui_flush_pending_after_screen_on();
     }
 
-    if (previous_state != next_state) {
+    if (changed) {
         (void)system_runtime_input_notify_sys_state((uint8_t)next_state);
     }
 }

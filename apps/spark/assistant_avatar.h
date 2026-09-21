@@ -10,7 +10,7 @@ spark_assistant_avatar_t* spark_assistant_avatar_create(lv_obj_t* parent, int32_
 /** Return the LVGL root used for layout. */
 lv_obj_t* spark_assistant_avatar_object(spark_assistant_avatar_t* avatar);
 
-/** Roll the existing sphere in from the left. */
+/** Show the static idle sphere. */
 void spark_assistant_avatar_roll_in(spark_assistant_avatar_t* avatar);
 
 /** Apply one validated assistant state to the existing avatar. */

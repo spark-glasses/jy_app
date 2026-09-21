@@ -39,3 +39,9 @@ void spark_navigation_move(bool forward);
 void spark_navigation_open(void);
 void spark_navigation_back(void);
 void spark_navigation_clear(void);
+// A device-side clear that keeps the display identity and reports `dismissed`.
+void spark_navigation_dismiss(void);
+
+uint64_t spark_monotonic_ms(void);
+void spark_host_connection_changed(bool connected);
+bool spark_reply_visible(void);
