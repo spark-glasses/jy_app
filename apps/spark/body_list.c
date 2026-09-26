@@ -1,5 +1,6 @@
 #include "view_internal.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 typedef struct {
@@ -14,8 +15,8 @@ typedef struct {
 
 static spark_row_t s_rows[SPARK_DISPLAY_VISIBLE_ROWS];
 
-static bool row_done(const spark_display_row_t* item) {
-    return item->layout == SPARK_LAYOUT_REMINDER && strcmp(spark_text(item->mark), "[x]") == 0;
+static bool item_done(const spark_display_item_t* item) {
+    return item->type == SPARK_ITEM_TODO && spark_item_flag(item, "completed");
 }
 
 static void select_row(spark_row_t* row, bool selected, bool done) {
@@ -32,55 +33,144 @@ static void select_row(spark_row_t* row, bool selected, bool done) {
     lv_obj_set_style_bg_color(row->mark, primary, LV_PART_MAIN);
 }
 
-static void render_item(spark_row_t* row, const spark_display_row_t* item, int32_t y, bool selected) {
-    bool note = item->layout == SPARK_LAYOUT_NOTE;
-    bool email = item->layout == SPARK_LAYOUT_EMAIL;
-    bool compact = email || item->layout == SPARK_LAYOUT_EVENT;
-    lv_obj_remove_flag(row->root, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_set_size(row->root, LV_PCT(100), item->height);
-    lv_obj_set_style_pad_ver(row->root, note ? 4 : compact ? 6 : SPARK_CARD_PADDING, LV_PART_MAIN);
-    lv_obj_set_y(row->root, y);
+static void style_row(spark_row_t* row, unsigned pad, unsigned primary, unsigned secondary,
+                      unsigned meta) {
+    lv_obj_set_style_pad_ver(row->root, pad, LV_PART_MAIN);
     lv_obj_update_layout(row->root);
-    lv_obj_set_style_text_font(row->primary, spark_font(note ? 16 : 18), LV_PART_MAIN);
-    lv_obj_set_style_text_font(row->secondary, spark_font(note ? 14 : 16), LV_PART_MAIN);
-    lv_obj_set_style_text_font(row->meta, spark_font(note ? 12 : 14), LV_PART_MAIN);
+    lv_obj_set_style_text_font(row->primary, spark_font(primary), LV_PART_MAIN);
+    lv_obj_set_style_text_font(row->secondary, spark_font(secondary), LV_PART_MAIN);
+    lv_obj_set_style_text_font(row->meta, spark_font(meta), LV_PART_MAIN);
+}
+
+static void hide(lv_obj_t* label) {
+    spark_line(label, NULL, 0, 0, 0);
+}
+
+// One line with a checkbox in front and a short value on the right.
+static void draw_check(spark_row_t* row, const char* text, const char* trailing, bool done) {
+    style_row(row, SPARK_CARD_PADDING, 18, 16, 14);
     int32_t width = lv_obj_get_content_width(row->root);
-    bool reminder = item->layout == SPARK_LAYOUT_REMINDER;
-    bool done = row_done(item);
-    lv_obj_update_flag(row->mark, LV_OBJ_FLAG_HIDDEN, !reminder);
+    lv_obj_remove_flag(row->mark, LV_OBJ_FLAG_HIDDEN);
     lv_obj_set_style_bg_opa(row->mark, done ? LV_OPA_COVER : LV_OPA_TRANSP, LV_PART_MAIN);
-    if (note) {
-        int32_t date_width = spark_text_empty(item->meta)
-            ? 0 : LV_MIN(spark_text_width(row->meta, item->meta), width / 3);
-        int32_t preview_x = date_width == 0 ? 0 : date_width + 10;
-        spark_line(row->primary, item->primary, 0, 0, width);
-        spark_line(row->meta, item->meta, 0, 20, date_width);
-        spark_line(row->secondary, item->secondary, preview_x, 20, width - preview_x);
-        spark_line(row->address, NULL, 0, 0, 0);
-        spark_line(row->subject, NULL, 0, 0, 0);
-        select_row(row, selected, false);
+    int32_t meta_width = spark_text_empty(trailing)
+        ? 0 : LV_MIN(spark_text_width(row->meta, trailing), width / 3);
+    spark_line(row->primary, text, 26, 0, width - 26 - (meta_width == 0 ? 0 : meta_width + 10));
+    spark_line(row->meta, trailing, width - meta_width, 2, meta_width);
+    hide(row->secondary);
+    hide(row->address);
+    hide(row->subject);
+}
+
+// A title, then a small lead and a preview on the second line.
+static void draw_stacked(spark_row_t* row, const char* title, const char* lead, const char* preview) {
+    style_row(row, 4, 16, 14, 12);
+    int32_t width = lv_obj_get_content_width(row->root);
+    lv_obj_add_flag(row->mark, LV_OBJ_FLAG_HIDDEN);
+    int32_t lead_width = spark_text_empty(lead)
+        ? 0 : LV_MIN(spark_text_width(row->meta, lead), width / 3);
+    int32_t preview_x = lead_width == 0 ? 0 : lead_width + 10;
+    spark_line(row->primary, title, 0, 0, width);
+    spark_line(row->meta, lead, 0, 20, lead_width);
+    spark_line(row->secondary, preview, preview_x, 20, width - preview_x);
+    hide(row->address);
+    hide(row->subject);
+}
+
+// A name, a note after it, and a value on the right; then an emphasised
+// lead and the rest on the second line.
+static void draw_mail(spark_row_t* row, const char* name, const char* note, const char* trailing,
+                      const char* lead, const char* body) {
+    style_row(row, 6, 18, 16, 14);
+    int32_t width = lv_obj_get_content_width(row->root);
+    lv_obj_add_flag(row->mark, LV_OBJ_FLAG_HIDDEN);
+    int32_t meta_width = spark_text_empty(trailing)
+        ? 0 : LV_MIN(spark_text_width(row->meta, trailing), width / 3);
+    int32_t line_width = width - (meta_width == 0 ? 0 : meta_width + 10);
+    int32_t name_width = LV_MIN(line_width, spark_text_width(row->primary, name));
+    spark_line(row->primary, name, 0, 0, name_width);
+    spark_line(row->address, note, name_width + 8, 2, line_width - name_width - 8);
+    spark_line(row->meta, trailing, width - meta_width, 2, meta_width);
+    int32_t lead_width = spark_text_empty(lead)
+        ? 0 : LV_MIN(width, spark_text_width(row->subject, lead));
+    int32_t body_x = lead_width == 0 ? 0 : lead_width + 8;
+    spark_line(row->subject, lead, 0, SPARK_LINE_HEIGHT, lead_width);
+    spark_line(row->secondary, body, body_x, SPARK_LINE_HEIGHT, width - body_x);
+}
+
+// A title, then one line under it.
+static void draw_two_lines(spark_row_t* row, const char* title, const char* body) {
+    style_row(row, 6, 18, 16, 14);
+    int32_t width = lv_obj_get_content_width(row->root);
+    lv_obj_add_flag(row->mark, LV_OBJ_FLAG_HIDDEN);
+    spark_line(row->primary, title, 0, 0, width);
+    spark_line(row->secondary, body, 0, SPARK_LINE_HEIGHT, width);
+    hide(row->meta);
+    hide(row->address);
+    hide(row->subject);
+}
+
+static void draw_card(spark_row_t* row, const spark_display_card_t* card) {
+    if (!card->is_grid) {
+        draw_stacked(row, card->doc.text[0], NULL, card->doc.count > 1 ? card->doc.text[1] : NULL);
         return;
     }
-    int32_t x = reminder ? 26 : 0;
-    int32_t meta_width = (reminder || email) && !spark_text_empty(item->meta)
-        ? LV_MIN(spark_text_width(row->meta, item->meta), width / 3) : 0;
-    int32_t primary_width = width - x - (meta_width == 0 ? 0 : meta_width + 10);
-    int32_t name_width = email ? LV_MIN(primary_width, spark_text_width(row->primary, item->primary)) : primary_width;
-    spark_line(row->primary, item->primary, x, 0, name_width);
-    spark_line(row->address, email ? item->address : NULL, name_width + 8, 2, primary_width - name_width - 8);
-    if (reminder || email) spark_line(row->meta, item->meta, width - meta_width, 2, meta_width);
-    else spark_line(row->meta, item->layout == SPARK_LAYOUT_EVENT ? item->meta : NULL, 0, 2 * SPARK_LINE_HEIGHT, width);
+    char* headings = spark_joined((const char* const*)card->grid.headers, card->grid.column_count, " · ");
+    char* first = spark_joined((const char* const*)card->grid.cells[0], card->grid.column_count, " · ");
+    draw_stacked(row, headings != NULL ? headings : first, NULL, headings != NULL ? first : NULL);
+    free(headings);
+    free(first);
+}
 
-    if (email && !spark_text_empty(item->subject)) {
-        int32_t subject_width = LV_MIN(width, spark_text_width(row->subject, item->subject));
-        spark_line(row->subject, item->subject, 0, SPARK_LINE_HEIGHT, subject_width);
-        const char* preview = item->secondary + strlen(item->subject);
-        spark_line(row->secondary, preview, subject_width, SPARK_LINE_HEIGHT, width - subject_width);
-    } else {
-        spark_line(row->subject, NULL, 0, 0, 0);
-        spark_line(row->secondary, reminder ? NULL : item->secondary, 0, SPARK_LINE_HEIGHT, width);
+static void render_item(spark_row_t* row, const spark_display_item_t* item, int32_t y, bool selected) {
+    lv_obj_remove_flag(row->root, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_size(row->root, LV_PCT(100), spark_item_row_height(item->type));
+    lv_obj_set_y(row->root, y);
+    switch (item->type) {
+    case SPARK_ITEM_TODO:
+        draw_check(row, spark_item_text(item, "content"), spark_item_text(item, "due"), item_done(item));
+        break;
+    case SPARK_ITEM_NOTE:
+        draw_stacked(row, spark_item_text(item, "title"), spark_item_text(item, "date"),
+                     spark_item_text(item, "content"));
+        break;
+    case SPARK_ITEM_EMAIL:
+        draw_mail(row, spark_item_text(item, "sender"), spark_item_text(item, "address"),
+                  spark_item_text(item, "time"), spark_item_text(item, "subject"),
+                  spark_item_text(item, "preview"));
+        break;
+    case SPARK_ITEM_EMAIL_DRAFT:
+        draw_mail(row, spark_item_text(item, "to"), NULL, spark_item_text(item, "status"),
+                  spark_item_text(item, "subject"), spark_item_text(item, "body"));
+        break;
+    case SPARK_ITEM_CALENDAR_EVENT:
+        draw_two_lines(row, spark_item_text(item, "title"), spark_item_text(item, "when"));
+        break;
+    case SPARK_ITEM_CONTACT: {
+        const char* work[] = {spark_item_text(item, "jobTitle"), spark_item_text(item, "organization")};
+        char* detail = spark_joined(work, 2, " · ");
+        draw_stacked(row, spark_item_text(item, "name"), NULL,
+                     detail != NULL ? detail : spark_item_text(item, "phone"));
+        free(detail);
+        break;
     }
-    select_row(row, selected, done);
+    case SPARK_ITEM_PLACES:
+        draw_stacked(row, spark_item_text(item, "name"), spark_item_text(item, "open"),
+                     spark_item_text(item, "address"));
+        break;
+    case SPARK_ITEM_ROUTE: {
+        const char* way[] = {spark_item_text(item, "distance"), spark_item_text(item, "via")};
+        char* detail = spark_joined(way, 2, " · ");
+        draw_stacked(row, spark_item_text(item, "title"), spark_item_text(item, "duration"), detail);
+        free(detail);
+        break;
+    }
+    case SPARK_ITEM_CARD:
+        draw_card(row, item->card);
+        break;
+    case SPARK_ITEM_TYPE_COUNT:
+        break;
+    }
+    select_row(row, selected, item_done(item));
 }
 
 static bool create(lv_obj_t* content) {
@@ -130,8 +220,8 @@ static void render(const spark_display_t* display) {
     size_t start = display->page_starts[page];
     size_t end = page + 1 < display->page_count ? display->page_starts[page + 1] : display->count;
     for (size_t i = start; i < end; ++i) {
-        render_item(&s_rows[i - start], &display->rows[i], y, i == display->selected);
-        y += display->rows[i].height + display->row_gap;
+        render_item(&s_rows[i - start], &display->items[i], y, i == display->selected);
+        y += spark_item_row_height(display->items[i].type) + SPARK_DISPLAY_ROW_GAP;
     }
 }
 
@@ -139,8 +229,8 @@ static void destroy(void) {
     memset(s_rows, 0, sizeof(s_rows));
 }
 
-void spark_body_list_select(size_t page_row, const spark_display_row_t* row, bool selected) {
-    select_row(&s_rows[page_row], selected, row_done(row));
+void spark_body_list_select(size_t page_row, const spark_display_item_t* item, bool selected) {
+    select_row(&s_rows[page_row], selected, item_done(item));
 }
 
 const spark_body_t spark_body_list = {create, reset, render, destroy};

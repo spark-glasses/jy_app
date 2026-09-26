@@ -31,7 +31,7 @@ static void reset(void) {
 }
 
 static void render(const spark_display_t* display) {
-    const spark_display_doc_t* doc = &display->body.doc;
+    const spark_display_doc_t* doc = &display->items[0].card->doc;
     lv_obj_t* content = lv_obj_get_parent(s_doc);
     lv_obj_remove_flag(s_doc, LV_OBJ_FLAG_HIDDEN);
     lv_obj_update_layout(content);

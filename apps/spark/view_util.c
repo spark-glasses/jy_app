@@ -1,5 +1,8 @@
 #include "view_internal.h"
 
+#include <stdlib.h>
+#include <string.h>
+
 void spark_prepare_static_obj(lv_obj_t* obj) {
     lv_obj_remove_style_all(obj);
     lv_obj_remove_flag(obj, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE |
@@ -53,9 +56,38 @@ void spark_detach(lv_obj_t* label) {
     lv_obj_add_flag(label, LV_OBJ_FLAG_HIDDEN);
 }
 
+char* spark_joined(const char* const* parts, size_t count, const char* separator) {
+    size_t size = 1;
+    for (size_t i = 0; i < count; ++i)
+        if (!spark_text_empty(parts[i])) size += strlen(parts[i]) + strlen(separator);
+    char* text = malloc(size);
+    if (text == NULL) return NULL;
+    text[0] = '\0';
+    for (size_t i = 0; i < count; ++i) {
+        if (spark_text_empty(parts[i])) continue;
+        if (text[0] != '\0') strcat(text, separator);
+        strcat(text, parts[i]);
+    }
+    if (text[0] == '\0') {
+        free(text);
+        return NULL;
+    }
+    return text;
+}
+
 void spark_line(lv_obj_t* label, const char* text, int32_t x, int32_t y, int32_t width) {
+    // One line: line breaks in the text read as spaces. LVGL cuts the text as
+    // it is set, so they are replaced first.
+    const char* value = spark_text(text);
+    char* flat = NULL;
+    if (strpbrk(value, "\n\r\t") != NULL && (flat = malloc(strlen(value) + 1)) != NULL) {
+        strcpy(flat, value);
+        for (char* c = flat; *c != '\0'; ++c)
+            if (*c == '\n' || *c == '\r' || *c == '\t') *c = ' ';
+    }
     // DOT mode can modify its buffer. Give LVGL an owned copy, never a model string.
-    lv_label_set_text(label, spark_text(text));
+    lv_label_set_text(label, flat != NULL ? flat : value);
+    free(flat);
     lv_obj_set_align(label, LV_ALIGN_TOP_LEFT);
     lv_obj_set_pos(label, x, y);
     lv_obj_set_size(label, LV_MAX(1, width), SPARK_LINE_HEIGHT);

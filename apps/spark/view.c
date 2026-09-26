@@ -30,15 +30,22 @@ static spark_assistant_avatar_t* s_avatar;
 static bool s_ready;
 static int s_shown = -1;
 
-static const spark_body_t* const s_bodies[SPARK_DISPLAY_KIND_COUNT] = {
-    [SPARK_DISPLAY_LIST] = &spark_body_list,
-    [SPARK_DISPLAY_DETAIL] = &spark_body_detail,
-    [SPARK_DISPLAY_GRID] = &spark_body_grid,
-    [SPARK_DISPLAY_DOC] = &spark_body_doc,
+static const spark_body_t* const s_bodies[SPARK_BODY_COUNT] = {
+    [SPARK_BODY_LIST] = &spark_body_list,
+    [SPARK_BODY_DETAIL] = &spark_body_detail,
+    [SPARK_BODY_GRID] = &spark_body_grid,
+    [SPARK_BODY_DOC] = &spark_body_doc,
 };
-static const spark_display_kind_t s_creation_order[SPARK_DISPLAY_KIND_COUNT] = {
-    SPARK_DISPLAY_DETAIL, SPARK_DISPLAY_LIST, SPARK_DISPLAY_GRID, SPARK_DISPLAY_DOC,
+static const spark_body_kind_t s_creation_order[SPARK_BODY_COUNT] = {
+    SPARK_BODY_DETAIL, SPARK_BODY_LIST, SPARK_BODY_GRID, SPARK_BODY_DOC,
 };
+
+static spark_body_kind_t body_kind(const spark_display_t* display) {
+    if (display->kind == SPARK_DISPLAY_LIST) return SPARK_BODY_LIST;
+    const spark_display_card_t* card = display->items[0].card;
+    if (card == NULL) return SPARK_BODY_DETAIL;
+    return card->is_grid ? SPARK_BODY_GRID : SPARK_BODY_DOC;
+}
 
 static void set_header_height(int32_t height) {
     // Untitled pages have no header band; the body starts at the frame top.
@@ -50,7 +57,7 @@ static void set_header_height(int32_t height) {
         height == SPARK_LIST_HEADER_HEIGHT ? LV_MIN(available, SPARK_DISPLAY_CONTENT_HEIGHT) : available));
 }
 
-static void render_header(const spark_display_t* display) {
+static void render_header(const spark_display_t* display, const char* title, const char* hint) {
     int32_t width = lv_obj_get_content_width(s_header);
     bool list = display->kind == SPARK_DISPLAY_LIST;
     char pages[48] = "";
@@ -61,15 +68,15 @@ static void render_header(const spark_display_t* display) {
     int32_t page_width = pages[0] == '\0' ? 0 : LV_MIN(spark_text_width(s_pages, pages), width / 3);
     spark_line(s_pages, pages, width - page_width, 10, page_width);
     int32_t available = width - (page_width ? page_width + 12 : 0);
-    int32_t title_width = list ? LV_MIN(spark_text_width(s_title, display->title), available * 2 / 3) : available;
-    spark_line(s_title, display->title, 0, 8, title_width);
+    int32_t title_width = list ? LV_MIN(spark_text_width(s_title, title), available * 2 / 3) : available;
+    spark_line(s_title, title, 0, 8, title_width);
     lv_obj_set_height(s_title, 32);
     const lv_font_t* title_font = lv_obj_get_style_text_font(s_title, LV_PART_MAIN);
     const lv_font_t* hint_font = lv_obj_get_style_text_font(s_hint, LV_PART_MAIN);
     int32_t hint_y = 8 + title_font->line_height - title_font->base_line
                        - hint_font->line_height + hint_font->base_line;
-    if (list) spark_line(s_hint, display->hint, title_width + 10, hint_y, available - title_width - 10);
-    else spark_line(s_hint, display->hint, 0, 38, width);
+    if (list) spark_line(s_hint, hint, title_width + 10, hint_y, available - title_width - 10);
+    else spark_line(s_hint, hint, 0, 38, width);
 }
 
 /*
@@ -86,7 +93,15 @@ void spark_view_render(const spark_display_t* display) {
     if (!s_ready) return;
     bool visible = display != NULL && display->count != 0;
     bool is_list = visible && display->kind == SPARK_DISPLAY_LIST;
-    bool untitled = visible && !is_list && spark_text_empty(display->title) && spark_text_empty(display->hint);
+    const char* title = NULL;
+    const char* hint = NULL;
+    if (is_list) {
+        title = display->title;
+        hint = display->hint;
+    } else if (visible) {
+        spark_item_heading(&display->items[0], &title, &hint);
+    }
+    bool untitled = visible && !is_list && spark_text_empty(title) && spark_text_empty(hint);
     set_header_height(is_list ? SPARK_LIST_HEADER_HEIGHT : untitled ? 0 : SPARK_HEADER_HEIGHT);
     lv_label_set_text_static(s_title, "");
     lv_label_set_text_static(s_hint, "");
@@ -96,10 +111,11 @@ void spark_view_render(const spark_display_t* display) {
         lv_obj_add_flag(s_frame, LV_OBJ_FLAG_HIDDEN);
         return;
     }
-    if (!untitled) render_header(display);
+    if (!untitled) render_header(display, title, hint);
     lv_obj_update_flag(s_content, LV_OBJ_FLAG_SCROLLABLE, !is_list);
-    s_bodies[display->kind]->render(display);
-    s_shown = (int)display->kind;
+    spark_body_kind_t body = body_kind(display);
+    s_bodies[body]->render(display);
+    s_shown = (int)body;
     lv_obj_remove_flag(s_frame, LV_OBJ_FLAG_HIDDEN);
     lv_obj_update_layout(s_frame);
     lv_obj_scroll_to_y(s_content, 0, LV_ANIM_OFF);
@@ -196,7 +212,7 @@ static void spark_page_create(lv_obj_t* parent, const app_page_data_t* data) {
     lv_obj_set_size(s_content, LV_PCT(100), LV_MAX(1, lv_obj_get_content_height(frame) - SPARK_HEADER_HEIGHT));
     lv_obj_set_pos(s_content, 0, SPARK_HEADER_HEIGHT);
     lv_obj_update_layout(s_content);
-    for (size_t i = 0; i < SPARK_DISPLAY_KIND_COUNT; ++i)
+    for (size_t i = 0; i < SPARK_BODY_COUNT; ++i)
         if (!s_bodies[s_creation_order[i]]->create(s_content)) return;
 
     s_footer = lv_obj_create(parent);
@@ -221,7 +237,7 @@ static void spark_page_destroy(void) {
     s_ready = false;
     s_shown = -1;
     s_frame = s_header = s_title = s_hint = s_pages = s_content = NULL;
-    for (size_t i = 0; i < SPARK_DISPLAY_KIND_COUNT; ++i) s_bodies[i]->destroy();
+    for (size_t i = 0; i < SPARK_BODY_COUNT; ++i) s_bodies[i]->destroy();
     s_footer = NULL;
     s_avatar = NULL;
     spark_reply_destroy();

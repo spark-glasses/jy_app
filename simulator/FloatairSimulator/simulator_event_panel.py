@@ -208,7 +208,7 @@ class EventPanel:
         ttk.Label(tools_frame, text="Spark Display").grid(row=3, column=0, sticky="nw", padx=(0, 8), pady=(10, 0))
         display_frame = ttk.Frame(tools_frame)
         display_frame.grid(row=3, column=1, sticky="ew", pady=(10, 0))
-        display_frame.columnconfigure(tuple(range(7)), weight=1)
+        display_frame.columnconfigure(tuple(range(10)), weight=1)
         list_samples = (
             ("Mixed", "mixed_list"),
             ("Notes", "note_list"),
@@ -216,6 +216,9 @@ class EventPanel:
             ("Email", "email_list"),
             ("Drafts", "draft_list"),
             ("Calendar", "calendar_list"),
+            ("Contacts", "contact_list"),
+            ("Places", "places_list"),
+            ("Routes", "route_list"),
         )
         ttk.Label(display_frame, text="List").grid(row=0, column=0, sticky="w", padx=(0, 8))
         for col, (label, sample) in enumerate(list_samples, start=1):
@@ -231,6 +234,9 @@ class EventPanel:
             ("Email", "email_full"),
             ("Draft", "draft_full"),
             ("Calendar", "calendar_full"),
+            ("Contact", "contact_full"),
+            ("Place", "places_full"),
+            ("Route", "route_full"),
             ("Clear", "clear"),
         )
         ttk.Label(display_frame, text="Full").grid(row=1, column=0, sticky="w", padx=(0, 8), pady=(8, 0))

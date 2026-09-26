@@ -2,7 +2,6 @@
 #include "system/system.h"
 #include "system/system_runtime_ui.h"
 #include "system/system_res.h"
-#include "lvgl/src/libs/lodepng/lodepng.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -19,18 +18,18 @@ static uint8_t outgoing_type;
 static const char* active_app = "home";
 static uint16_t screen_pixels[540 * 440];
 static unsigned test_selected;
-static spark_row_layout_t test_layout = SPARK_LAYOUT_REMINDER;
-static bool test_mixed;
+static spark_item_type_t test_type = SPARK_ITEM_TODO;
+// When set, list items take their types from here in turn.
+static const spark_item_type_t* test_types;
+static size_t test_type_count;
+static bool test_completed;
 static const char* test_display_id = "";
 static uint64_t test_navigation_sequence, last_navigation_sequence;
 static char last_artifact_id[257], last_display_id[65];
 static bool drop_report;
 static const char* test_assistant_state;
 static const char* test_assistant_detail;
-static bool test_compact_item;
-static bool test_compressed_item;
-static bool test_bad_compressed_size;
-static bool test_compact_untitled;
+// A single item is a card: a grid with count rows, or text with count blocks.
 static bool test_grid;
 static size_t test_grid_columns = 2;
 static bool test_doc;
@@ -131,7 +130,162 @@ static void text(mpack_writer_t* writer, const char* key, const char* value) {
     mpack_write_cstr(writer, key); mpack_write_cstr(writer, value);
 }
 
-// count < 0 omits the page. A NULL reply omits the footer update.
+#define DETAIL_LEAD "A long lead that wraps across several lines on this display. A long lead that wraps across several lines on this display. A long lead that wraps across several lines on this display."
+
+static const char* const type_names[SPARK_ITEM_TYPE_COUNT] = {
+    "todo", "note", "email", "email_draft", "calendar_event", "contact", "places", "route", "card",
+};
+
+// A type's text fields and their values, required ones first.
+static size_t item_fields(spark_item_type_t type, bool detail, const char** keys, const char** values) {
+    size_t n = 0;
+#define FIELD(key, value) (keys[n] = (key), values[n++] = (value))
+    switch (type) {
+    case SPARK_ITEM_TODO:
+        FIELD("content", detail ? DETAIL_LEAD : "Call Kim back");
+        FIELD("due", "Tomorrow"); FIELD("repeat", "Weekly");
+        break;
+    case SPARK_ITEM_NOTE:
+        FIELD("title", "Meeting notes"); FIELD("content", "Body content\nSecond line");
+        FIELD("date", "Sep 5, 2026");
+        break;
+    case SPARK_ITEM_EMAIL:
+        FIELD("sender", "Dr Okafor"); FIELD("subject", "Scan results");
+        FIELD("preview", "Sending the MRI from Tuesday. Please review before Thursday.");
+        FIELD("time", "10:43"); FIELD("sentAt", "Sep 5, 2026 at 10:43 AM");
+        FIELD("address", "dr.okafor@example.com");
+        break;
+    case SPARK_ITEM_EMAIL_DRAFT:
+        FIELD("to", "kim@example.com"); FIELD("from", "me@example.com");
+        FIELD("subject", "Project update"); FIELD("body", "Here is the project update.");
+        FIELD("status", "Composing");
+        break;
+    case SPARK_ITEM_CALENDAR_EVENT:
+        FIELD("title", "Studio crit"); FIELD("when", "Sep 5, 2026, 10:00 AM - 11:00 AM");
+        FIELD("location", "Room 2"); FIELD("response", "Accepted");
+        break;
+    case SPARK_ITEM_CONTACT:
+        FIELD("name", "Sam Lee"); FIELD("organization", "Acme"); FIELD("jobTitle", "Designer");
+        FIELD("phone", "+1 555 0100"); FIELD("email", "sam@example.com");
+        break;
+    case SPARK_ITEM_PLACES:
+        FIELD("name", "Blue Bottle Coffee"); FIELD("address", "66 Mint St");
+        FIELD("rating", "4.5 (1,200)"); FIELD("open", "Open now");
+        break;
+    case SPARK_ITEM_ROUTE:
+        FIELD("title", "Home to Work"); FIELD("via", "via I-280"); FIELD("duration", "24 mins");
+        FIELD("distance", "18 km"); FIELD("mode", "Drive");
+        break;
+    case SPARK_ITEM_CARD:
+    case SPARK_ITEM_TYPE_COUNT:
+        break;
+    }
+#undef FIELD
+    return n;
+}
+
+// invalid: 1 duplicate id, 2 NUL in text, 4 bad UTF-8, 5 text over 4096 bytes, 6 unknown type,
+// 7 a required field missing, 8 a flag that is not a bool, 9 a key the type does not have.
+static void write_item(mpack_writer_t* writer, spark_item_type_t type, int index, bool detail,
+                       unsigned invalid) {
+    char id[32]; snprintf(id, sizeof(id), "item-%d", invalid == 1 ? 0 : index);
+    if (type == SPARK_ITEM_CARD) {
+        mpack_start_map(writer, 4);
+        text(writer, "id", id); text(writer, "type", "card");
+        mpack_write_cstr(writer, "hasMore"); mpack_write_bool(writer, false);
+        mpack_write_cstr(writer, "blocks"); mpack_start_array(writer, 2);
+        mpack_start_array(writer, 2); text(writer, "h", "Pack"); mpack_finish_array(writer);
+        mpack_start_array(writer, 2); text(writer, "p", "• Charger\n• Passport"); mpack_finish_array(writer);
+        mpack_finish_array(writer);
+        mpack_finish_map(writer);
+        return;
+    }
+    const char* keys[SPARK_ITEM_MAX_FIELDS]; const char* values[SPARK_ITEM_MAX_FIELDS];
+    size_t count = item_fields(type, detail, keys, values);
+    bool todo = type == SPARK_ITEM_TODO;
+    size_t skip = invalid == 7 ? 1 : 0;
+    mpack_start_map(writer, 3 + (uint32_t)(count - skip) + todo + (invalid == 9));
+    text(writer, "id", id);
+    text(writer, "type", invalid == 6 ? "bad" : type_names[type]);
+    mpack_write_cstr(writer, "hasMore"); mpack_write_bool(writer, false);
+    for (size_t f = skip; f < count; ++f) {
+        mpack_write_cstr(writer, keys[f]);
+        if (f == 0 && invalid == 2) mpack_write_str(writer, "bad\0text", 8);
+        else if (f == 0 && invalid == 4) mpack_write_str(writer, "\xff", 1);
+        else if (f == 0 && invalid == 5) {
+            char huge[SPARK_DISPLAY_MAX_TEXT + 1]; memset(huge, 'a', sizeof(huge));
+            mpack_write_str(writer, huge, sizeof(huge));
+        } else mpack_write_cstr(writer, values[f]);
+    }
+    if (todo) {
+        mpack_write_cstr(writer, "completed");
+        if (invalid == 8) mpack_write_cstr(writer, "no");
+        else mpack_write_bool(writer, test_completed);
+    }
+    if (invalid == 9) text(writer, "mark", "[ ]");
+    mpack_finish_map(writer);
+}
+
+// A text card with count blocks. invalid 1: bad tag; 2: empty text; 3: a bare string block;
+// 4: headers and rows as well.
+static void write_doc(mpack_writer_t* writer, int count, unsigned invalid) {
+    mpack_start_map(writer, invalid == 4 ? 6 : 4);
+    text(writer, "id", "card-0"); text(writer, "type", "card");
+    mpack_write_cstr(writer, "hasMore"); mpack_write_bool(writer, false);
+    mpack_write_cstr(writer, "blocks");
+    mpack_start_array(writer, count);
+    for (int i = 0; i < count; ++i) {
+        if (invalid == 3 && i == 0) { mpack_write_cstr(writer, "loose"); continue; }
+        mpack_start_array(writer, 2);
+        mpack_write_cstr(writer, invalid == 1 && i == 0 ? "x" : i % 2 == 0 ? "h" : "p");
+        if (invalid == 2 && i == 1) mpack_write_cstr(writer, "");
+        else if (i % 2 == 0) mpack_write_cstr(writer, i == 0 ? "Reset router" : "If it still fails");
+        else mpack_write_cstr(writer, "Unplug it and wait 30 seconds.\n• Plug the modem in first\n• Then the router, and give it a minute to settle");
+        mpack_finish_array(writer);
+    }
+    mpack_finish_array(writer);
+    if (invalid == 4) {
+        mpack_write_cstr(writer, "headers"); mpack_start_array(writer, 2);
+        mpack_write_cstr(writer, "A"); mpack_write_cstr(writer, "B"); mpack_finish_array(writer);
+        mpack_write_cstr(writer, "rows"); mpack_start_array(writer, 1); mpack_start_array(writer, 2);
+        mpack_write_cstr(writer, "1"); mpack_write_cstr(writer, "2");
+        mpack_finish_array(writer); mpack_finish_array(writer);
+    }
+    mpack_finish_map(writer);
+}
+
+// A grid card with count rows. invalid 1: a ragged row; 2: four columns; 3: a number cell.
+static void write_grid(mpack_writer_t* writer, int count, unsigned invalid) {
+    size_t columns = invalid == 2 ? 4 : test_grid_columns;
+    const char* headers[] = {"Train", "Drive", "Walk", "Fly"};
+    mpack_start_map(writer, 5);
+    text(writer, "id", "card-0"); text(writer, "type", "card");
+    mpack_write_cstr(writer, "hasMore"); mpack_write_bool(writer, false);
+    mpack_write_cstr(writer, "headers");
+    mpack_start_array(writer, columns);
+    for (size_t c = 0; c < columns; ++c) mpack_write_cstr(writer, headers[c]);
+    mpack_finish_array(writer);
+    mpack_write_cstr(writer, "rows");
+    mpack_start_array(writer, count);
+    for (int r = 0; r < count; ++r) {
+        size_t width = invalid == 1 && r == 1 ? columns - 1 : columns;
+        mpack_start_array(writer, width);
+        for (size_t c = 0; c < width; ++c) {
+            if (invalid == 3 && r == 0 && c == 0) { mpack_write_u32(writer, 7); continue; }
+            char cell[64];
+            if (r == 1 && c == 1) snprintf(cell, sizeof(cell), "Door to door, then a short walk");
+            else snprintf(cell, sizeof(cell), "Cell %d-%zu", r, c);
+            mpack_write_cstr(writer, cell);
+        }
+        mpack_finish_array(writer);
+    }
+    mpack_finish_array(writer);
+    mpack_finish_map(writer);
+}
+
+// count < 0 omits the page. A NULL reply omits the footer update. A list sends
+// `page` with count items; otherwise one `item` is sent (a card's count is its
+// rows or blocks). invalid 3: selection out of range; 12: a title over 256 bytes.
 static void send_request(const char* revision, int count, bool list, const char* reply, unsigned invalid) {
     char* bytes = NULL; size_t size = 0;
     mpack_writer_t writer;
@@ -153,113 +307,25 @@ static void send_request(const char* revision, int count, bool list, const char*
         if (test_assistant_detail != NULL) text(&writer, "detail", test_assistant_detail);
         mpack_finish_map(&writer);
     }
-    if (count >= 0) {
-        if (test_compact_item) {
-            assert(!list && count == 1 && invalid == 0);
-            mpack_write_cstr(&writer, "item");
-            mpack_start_array(&writer, 6);
-            mpack_write_cstr(&writer, "item-0");
-            mpack_write_cstr(&writer, test_compact_untitled ? "" : "Items");
-            mpack_write_cstr(&writer, test_compact_untitled ? "" : "8 items");
-            mpack_write_cstr(&writer, test_compact_untitled ? "" : "Compact lead");
-            if (test_compressed_item) {
-                const char* body = "Compact body content repeated. Compact body content repeated. Compact body content repeated.";
-                mpack_start_array(&writer, 2);
-                mpack_write_u32(
-                    &writer, (uint32_t)strlen(body) + (test_bad_compressed_size ? 1 : 0));
-                // Produced by Compression.COMPRESSION_ZLIB, then JSONEncoder Base64.
-                mpack_write_cstr(
-                    &writer, "c87PLUhMLlFIyk+pVEjOzytJzStRKEotSE0sSU3RU3CmRBoA");
-                mpack_finish_array(&writer);
-            } else {
-                mpack_write_cstr(&writer, "Compact body content");
-            }
-            mpack_write_cstr(&writer, test_compact_untitled ? "" : "Compact detail");
-            mpack_finish_array(&writer);
-        } else if (test_doc) {
-            // [id, [[tag, text], ...]]. invalid 1: bad tag; 2: empty text; 3: a bare string block.
-            assert(!list);
-            mpack_write_cstr(&writer, "doc");
-            mpack_start_array(&writer, 2);
-            mpack_write_cstr(&writer, "doc-0");
-            mpack_start_array(&writer, count);
-            for (int i = 0; i < count; ++i) {
-                if (invalid == 3 && i == 0) { mpack_write_cstr(&writer, "loose"); continue; }
-                mpack_start_array(&writer, 2);
-                mpack_write_cstr(&writer, invalid == 1 && i == 0 ? "x" : i % 2 == 0 ? "h" : "p");
-                if (invalid == 2 && i == 1) mpack_write_cstr(&writer, "");
-                else if (i % 2 == 0) mpack_write_cstr(&writer, i == 0 ? "Reset router" : "If it still fails");
-                else mpack_write_cstr(&writer, "Unplug it and wait 30 seconds.\n• Plug the modem in first\n• Then the router, and give it a minute to settle");
-                mpack_finish_array(&writer);
-            }
-            mpack_finish_array(&writer);
-            mpack_finish_array(&writer);
-        } else if (test_grid) {
-            // [id, headers, rows]. invalid 1: a ragged row; 2: four columns; 3: a number cell.
-            assert(!list);
-            size_t columns = invalid == 2 ? 4 : test_grid_columns;
-            const char* headers[] = {"Train", "Drive", "Walk", "Fly"};
-            mpack_write_cstr(&writer, "grid");
-            mpack_start_array(&writer, 3);
-            mpack_write_cstr(&writer, "grid-0");
-            mpack_start_array(&writer, columns);
-            for (size_t c = 0; c < columns; ++c) mpack_write_cstr(&writer, headers[c]);
-            mpack_finish_array(&writer);
-            mpack_start_array(&writer, count);
-            for (int r = 0; r < count; ++r) {
-                size_t width = invalid == 1 && r == 1 ? columns - 1 : columns;
-                mpack_start_array(&writer, width);
-                for (size_t c = 0; c < width; ++c) {
-                    if (invalid == 3 && r == 0 && c == 0) { mpack_write_u32(&writer, 7); continue; }
-                    char cell[64];
-                    if (r == 1 && c == 1) snprintf(cell, sizeof(cell), "Door to door, then a short walk");
-                    else snprintf(cell, sizeof(cell), "Cell %d-%zu", r, c);
-                    mpack_write_cstr(&writer, cell);
-                }
-                mpack_finish_array(&writer);
-            }
-            mpack_finish_array(&writer);
-            mpack_finish_array(&writer);
-        } else {
-            mpack_write_cstr(&writer, "page"); mpack_start_map(&writer, list && count ? 6 : 5);
-            text(&writer, "kind", list ? "list" : "item");
-            text(&writer, "title", "Items"); text(&writer, "hint", "8 items");
-            if (list && count) {
-                mpack_write_cstr(&writer, "rowGap"); mpack_write_u32(&writer, invalid == 9 ? 0 : SPARK_DISPLAY_ROW_GAP);
-            }
-            mpack_write_cstr(&writer, "selected"); mpack_write_u32(&writer, invalid == 3 ? 10 : test_selected);
-            mpack_write_cstr(&writer, "rows"); mpack_start_array(&writer, count);
-            for (int i = 0; i < count; ++i) {
-                char id[32]; snprintf(id, sizeof(id), "item-%d", invalid == 1 ? 0 : i);
-                spark_row_layout_t layout = test_mixed ? SPARK_LAYOUT_NOTE + i : test_layout;
-                const char* names[] = {"detail", "reminder", "note", "email", "event"};
-                bool email = layout == SPARK_LAYOUT_EMAIL && list;
-                mpack_start_map(&writer, list ? (email ? 9 : 7) : 5);
-                if (list) {
-                    text(&writer, "layout", invalid == 7 ? "bad" : names[layout]);
-                    mpack_write_cstr(&writer, "height");
-                    mpack_write_u32(&writer, invalid == 6 ? 500 :
-                        layout == SPARK_LAYOUT_REMINDER ? 40 :
-                        layout == SPARK_LAYOUT_NOTE ? 48 :
-                        60);
-                    if (email) {
-                        text(&writer, "address", "dr.okafor@example.com");
-                        text(&writer, "subject", invalid == 10 ? "Wrong prefix" : "Scan results");
-                    }
-                }
-                text(&writer, "id", id); text(&writer, "mark", "[ ]");
-                text(&writer, "primary", list ? (layout == SPARK_LAYOUT_EMAIL ? "Dr Okafor" : layout == SPARK_LAYOUT_EVENT ? "Studio crit" : layout == SPARK_LAYOUT_NOTE ? "Meeting notes" : "Call Kim back") : "A long lead that wraps across several lines on this display. A long lead that wraps across several lines on this display. A long lead that wraps across several lines on this display.");
-                mpack_write_cstr(&writer, "secondary");
-                if (invalid == 2) mpack_write_str(&writer, "bad\0text", 8);
-                else if (invalid == 4) mpack_write_str(&writer, "\xff", 1);
-                else if (invalid == 5 || invalid == 12) {
-                    char huge[SPARK_DISPLAY_MAX_TEXT + 1]; memset(huge, 'a', sizeof(huge));
-                    mpack_write_str(&writer, huge, invalid == 5 ? sizeof(huge) : SPARK_DISPLAY_MAX_LIST_TEXT + 1);
-                } else mpack_write_cstr(&writer, email ? "Scan results - Sending the MRI from Tuesday. Please review before Thursday." : layout == SPARK_LAYOUT_EVENT && list ? "Sep 5, 2026, 10:00 AM - 11:00 AM" : "Body content");
-                text(&writer, "meta", email ? "10:43" : layout == SPARK_LAYOUT_NOTE && list ? "Sep 5, 2026" : layout == SPARK_LAYOUT_EVENT && list ? "" : "Detail"); mpack_finish_map(&writer);
-            }
-            mpack_finish_array(&writer); mpack_finish_map(&writer);
+    if (count >= 0 && list) {
+        mpack_write_cstr(&writer, "page"); mpack_start_map(&writer, 4);
+        if (invalid == 12) {
+            char long_title[SPARK_DISPLAY_MAX_LIST_TEXT + 1]; memset(long_title, 'a', sizeof(long_title));
+            mpack_write_cstr(&writer, "title"); mpack_write_str(&writer, long_title, sizeof(long_title));
+        } else text(&writer, "title", "Items");
+        text(&writer, "hint", "8 items");
+        mpack_write_cstr(&writer, "selected"); mpack_write_u32(&writer, invalid == 3 ? 10 : test_selected);
+        mpack_write_cstr(&writer, "items"); mpack_start_array(&writer, count);
+        for (int i = 0; i < count; ++i) {
+            spark_item_type_t type = test_types != NULL ? test_types[i % test_type_count] : test_type;
+            write_item(&writer, type, i, false, invalid == 12 ? 0 : invalid);
         }
+        mpack_finish_array(&writer); mpack_finish_map(&writer);
+    } else if (count >= 0) {
+        mpack_write_cstr(&writer, "item");
+        if (test_grid) write_grid(&writer, count, invalid);
+        else if (test_doc) write_doc(&writer, count, invalid);
+        else { assert(count == 1); write_item(&writer, test_type, 0, true, invalid); }
     }
     mpack_finish_map(&writer); assert(mpack_writer_destroy(&writer) == mpack_ok);
     mpack_tree_t tree;
@@ -284,7 +350,12 @@ static void save_frame(const char* directory, const char* name) {
     fclose(file);
 }
 
+static const char* current_text(size_t index, const char* key) {
+    return spark_item_text(&spark_display_current()->items[index], key);
+}
+
 int main(int argc, char** argv) {
+    const char* artifacts = argc > 1 ? argv[1] : NULL;
     lv_init();
     lv_display_t* display = lv_display_create(540, 440);
     static uint16_t pixels[540 * 40];
@@ -298,18 +369,16 @@ int main(int argc, char** argv) {
     lv_obj_t* footer = lv_obj_get_child(parent, 1);
     lv_obj_t* avatar = lv_obj_get_child(footer, 0);
     lv_obj_t* avatar_image = lv_obj_get_child(avatar, 0);
-    const void* first_avatar_frame = lv_image_get_src(avatar_image);
-    int32_t first_avatar_x = lv_obj_get_style_translate_x(avatar, LV_PART_MAIN);
-    lv_tick_inc(225); lv_anim_refr_now();
-    assert(lv_image_get_src(avatar_image) != first_avatar_frame);
-    assert(lv_obj_get_style_translate_x(avatar, LV_PART_MAIN) > first_avatar_x);
-    lv_tick_inc(275); lv_anim_refr_now();
-    assert(lv_obj_get_style_translate_x(avatar, LV_PART_MAIN) == 0);
+    // The avatar is a still image; it starts on its idle frame.
+    assert(lv_image_get_src(avatar_image) != NULL);
     lv_obj_t* frame = lv_obj_get_child(parent, 0);
+    lv_obj_t* header = lv_obj_get_child(frame, 0);
+    lv_obj_t* title_label = lv_obj_get_child(header, 0);
     lv_obj_t* reply_panel = lv_obj_get_child(footer, 1);
     lv_obj_t* reply_label = lv_obj_get_child(reply_panel, 0);
     lv_obj_t* content = lv_obj_get_child(frame, 1);
     assert(lv_obj_has_flag(frame, LV_OBJ_FLAG_HIDDEN));
+    lv_obj_update_layout(parent);
     assert(lv_obj_get_height(footer) == 84 && lv_obj_get_width(avatar) == 40);
     assert(lv_obj_get_x(avatar) == 30);
     assert(lv_obj_get_y(avatar) + lv_obj_get_height(avatar) / 2 ==
@@ -318,28 +387,29 @@ int main(int argc, char** argv) {
     send_request("1", 5, true, "Done", 0);
     assert(last_error == Dp_ErrNone && strcmp(last_revision, "1") == 0);
     assert(spark_display_current()->count == 5);
-    assert(strcmp(spark_display_current()->rows[0].secondary, "Body content") == 0);
+    assert(spark_display_current()->items[0].type == SPARK_ITEM_TODO);
+    assert(strcmp(current_text(0, "content"), "Call Kim back") == 0);
     lv_refr_now(display);
-    save_frame(argc > 1 ? argv[1] : NULL, "list");
+    save_frame(artifacts, "list");
     lv_obj_t* last_row = lv_obj_get_child(content, 7);
     assert(lv_obj_get_y(last_row) + lv_obj_get_height(last_row) <= lv_obj_get_content_height(content));
     assert(lv_obj_get_child_count(content) == 10);
     assert(lv_obj_get_width(lv_obj_get_child(last_row, 1)) > 200);
     assert(spark_reply_set("Okay."));
     lv_obj_invalidate(lv_screen_active());
-    lv_refr_now(display); save_frame(argc > 1 ? argv[1] : NULL, "reply-short");
+    lv_refr_now(display); save_frame(artifacts, "reply-short");
     lv_coord_t short_width = lv_obj_get_width(reply_panel);
     assert(lv_obj_get_height(reply_panel) == 68);
     assert(lv_obj_get_style_align(reply_label, LV_PART_MAIN) == LV_ALIGN_LEFT_MID);
     assert(lv_obj_get_style_text_align(reply_label, LV_PART_MAIN) == LV_TEXT_ALIGN_LEFT);
     assert(spark_reply_set("I found three notes from yesterday."));
     lv_obj_invalidate(lv_screen_active());
-    lv_refr_now(display); save_frame(argc > 1 ? argv[1] : NULL, "reply-medium");
+    lv_refr_now(display); save_frame(artifacts, "reply-medium");
     lv_coord_t medium_width = lv_obj_get_width(reply_panel);
     assert(medium_width > short_width && lv_obj_get_height(reply_panel) == 68);
     assert(spark_reply_set("This is a longer assistant response that exceeds the fixed reply area and must end with an ellipsis instead of making the box taller, even when several more words arrive after the visible limit."));
     lv_obj_invalidate(lv_screen_active());
-    lv_refr_now(display); save_frame(argc > 1 ? argv[1] : NULL, "reply-long");
+    lv_refr_now(display); save_frame(artifacts, "reply-long");
     assert(lv_obj_get_width(reply_panel) >= medium_width);
     assert(lv_obj_get_height(reply_panel) == 68);
     assert(lv_obj_get_height(reply_label) <=
@@ -370,18 +440,15 @@ int main(int argc, char** argv) {
     assert(strcmp(last_command, "selected") == 0 && strcmp(last_revision, "2") == 0);
     assert(spark_display_current()->selected == 1);
     for (unsigned invalid = 1; invalid <= 9; ++invalid) {
-        if (invalid == 8) continue;
         send_request("3", 2, true, "Must not apply", invalid);
         assert(last_error == ErrBadParam && spark_display_current() == previous);
         assert(strcmp(lv_label_get_text(reply_label), "New reply") == 0);
     }
-    test_layout = SPARK_LAYOUT_NOTE;
+    test_type = SPARK_ITEM_NOTE;
     send_request("3", 21, true, NULL, 0); assert(last_error == ErrBadParam);
-    test_layout = SPARK_LAYOUT_EMAIL;
-    send_request("3", 2, true, NULL, 10); assert(last_error == ErrBadParam);
-    test_layout = SPARK_LAYOUT_REMINDER;
+    test_type = SPARK_ITEM_TODO;
     send_request("3", 21, true, NULL, 0); assert(last_error == ErrBadParam);
-    send_request("3", 0, false, NULL, 0); assert(last_error == ErrBadParam);
+    send_request("3", 1, false, NULL, 6); assert(last_error == ErrBadParam);
     send_request("3", -1, true, NULL, 0); assert(last_error == ErrBadParam);
     send_request("1", -1, true, "stale", 0); assert(last_error == ErrSeqErr);
     const char* invalid_revisions[] = {"", "01", "-1", "18446744073709551616"};
@@ -391,9 +458,12 @@ int main(int argc, char** argv) {
     send_request("3", 1, false, NULL, 0);
     assert(last_error == Dp_ErrNone && strcmp(lv_label_get_text(reply_label), "New reply") == 0);
     lv_refr_now(display);
-    save_frame(argc > 1 ? argv[1] : NULL, "item");
+    save_frame(artifacts, "item");
     lv_obj_t* lead = lv_obj_get_child(content, 0);
     lv_obj_t* body = lv_obj_get_child(content, 1);
+    assert(strcmp(lv_label_get_text(title_label), "Reminder") == 0);
+    assert(strcmp(lv_label_get_text(lead), DETAIL_LEAD) == 0);
+    assert(strcmp(lv_label_get_text(body), "Tomorrow · Weekly") == 0);
     assert(lv_obj_get_style_text_font(body, LV_PART_MAIN) ==
            lv_obj_get_style_text_font(reply_label, LV_PART_MAIN));
     assert(lv_obj_get_y(body) > lv_obj_get_y(lead) + lv_obj_get_height(lead));
@@ -401,21 +471,32 @@ int main(int argc, char** argv) {
     memcpy(partial, screen_pixels, sizeof(screen_pixels));
     lv_obj_invalidate(lv_screen_active()); lv_refr_now(display);
     assert(memcmp(partial, screen_pixels, sizeof(screen_pixels)) == 0); free(partial);
-    test_mixed = true;
+
+    static const spark_item_type_t mixed[] = {
+        SPARK_ITEM_NOTE, SPARK_ITEM_EMAIL, SPARK_ITEM_CALENDAR_EVENT,
+    };
+    test_types = mixed; test_type_count = 3;
     send_request("4", 3, true, NULL, 0);
     assert(last_error == Dp_ErrNone);
     lv_refr_now(display);
-    save_frame(argc > 1 ? argv[1] : NULL, "mixed");
+    save_frame(artifacts, "mixed");
+    lv_obj_t* note_row = lv_obj_get_child(content, 3);
+    // A card is one line: line breaks in its text read as spaces.
+    assert(strcmp(lv_label_get_text(lv_obj_get_child(note_row, 2)), "Body content Second line") == 0);
     lv_obj_t* email_row = lv_obj_get_child(content, 4);
     lv_obj_t* name = lv_obj_get_child(email_row, 1);
     lv_obj_t* address = lv_obj_get_child(email_row, 4);
     lv_obj_t* time = lv_obj_get_child(email_row, 3);
+    lv_obj_t* subject = lv_obj_get_child(email_row, 5);
+    lv_obj_t* preview = lv_obj_get_child(email_row, 2);
     assert(lv_obj_get_x(name) + lv_obj_get_width(name) <= lv_obj_get_x(address));
     assert(lv_obj_get_x(address) + lv_obj_get_width(address) <= lv_obj_get_x(time));
+    assert(strcmp(lv_label_get_text(subject), "Scan results") == 0);
+    assert(lv_obj_get_x(subject) + lv_obj_get_width(subject) <= lv_obj_get_x(preview));
     lv_obj_t* event_row = lv_obj_get_child(content, 5);
     assert(lv_obj_get_y(event_row) + lv_obj_get_height(event_row) <= SPARK_DISPLAY_CONTENT_HEIGHT);
-    assert(strcmp(spark_display_current()->rows[1].secondary,
-                  "Scan results - Sending the MRI from Tuesday. Please review before Thursday.") == 0);
+    assert(strcmp(current_text(1, "preview"),
+                  "Sending the MRI from Tuesday. Please review before Thursday.") == 0);
     previous = spark_display_current();
     const char* label_buffer = lv_label_get_text(name);
     test_selected = 1;
@@ -431,22 +512,22 @@ int main(int argc, char** argv) {
     lv_obj_invalidate(lv_screen_active()); lv_refr_now(display);
     assert(memcmp(partial, screen_pixels, sizeof(screen_pixels)) == 0); free(partial);
     test_selected = 0;
-    test_mixed = false;
-    test_layout = SPARK_LAYOUT_NOTE;
+    test_types = NULL;
+    test_type = SPARK_ITEM_NOTE;
     send_request("6", 3, true, NULL, 0); assert(last_error == Dp_ErrNone);
-    lv_refr_now(display); save_frame(argc > 1 ? argv[1] : NULL, "notes");
-    test_layout = SPARK_LAYOUT_EMAIL;
+    lv_refr_now(display); save_frame(artifacts, "notes");
+    test_type = SPARK_ITEM_EMAIL;
     send_request("7", 4, true, NULL, 0); assert(last_error == Dp_ErrNone);
     assert(spark_display_current()->page_count == 1);
-    lv_refr_now(display); save_frame(argc > 1 ? argv[1] : NULL, "email");
-    test_layout = SPARK_LAYOUT_EVENT;
+    lv_refr_now(display); save_frame(artifacts, "email");
+    test_type = SPARK_ITEM_CALENDAR_EVENT;
     send_request("8", 4, true, NULL, 0); assert(last_error == Dp_ErrNone);
     assert(spark_display_current()->page_count == 1);
-    lv_refr_now(display); save_frame(argc > 1 ? argv[1] : NULL, "calendar");
+    lv_refr_now(display); save_frame(artifacts, "calendar");
     send_request("9", 0, true, "", 0);
     assert(lv_obj_has_flag(frame, LV_OBJ_FLAG_HIDDEN));
 
-    test_layout = SPARK_LAYOUT_REMINDER;
+    test_type = SPARK_ITEM_TODO;
     test_display_id = "result-a";
     send_request("10", 20, true, NULL, 0);
     assert(last_error == Dp_ErrNone && spark_display_current()->count == 20);
@@ -489,22 +570,15 @@ int main(int argc, char** argv) {
     lv_obj_send_event(parent, LV_EVENT_CLICKED, NULL);
     assert(reports == before_open + 1 && strcmp(last_artifact_id, "item-0") == 0);
     test_navigation_sequence = last_navigation_sequence;
-    test_compact_item = true;
-    test_compressed_item = true;
-    test_bad_compressed_size = true;
-    send_request("11", 1, false, NULL, 0);
+    // An item without its required fields is rejected and does not complete the open.
+    send_request("11", 1, false, NULL, 7);
     assert(last_error == ErrBadParam && spark_display_current()->kind == SPARK_DISPLAY_LIST);
     before_open = reports;
     lv_obj_send_event(parent, LV_EVENT_CLICKED, NULL);
     assert(reports == before_open); // A rejected response does not complete the open.
-    test_bad_compressed_size = false;
     send_request("11", 1, false, NULL, 0);
-    test_compressed_item = false;
-    test_compact_item = false;
-    assert(last_error == Dp_ErrNone && spark_display_current()->kind != SPARK_DISPLAY_LIST);
-    assert(strcmp(spark_display_current()->rows[0].primary, "Compact lead") == 0);
-    assert(strcmp(spark_display_current()->rows[0].secondary,
-                  "Compact body content repeated. Compact body content repeated. Compact body content repeated.") == 0);
+    assert(last_error == Dp_ErrNone && spark_display_current()->kind == SPARK_DISPLAY_ITEM);
+    assert(strcmp(current_text(0, "content"), DETAIL_LEAD) == 0);
     lv_obj_send_event(parent, LV_EVENT_DCLICKED, NULL);
     assert(spark_display_current()->kind == SPARK_DISPLAY_LIST && spark_display_current()->count == 20);
     assert(strcmp(last_command, "selected") == 0 && strcmp(last_artifact_id, "item-0") == 0);
@@ -535,7 +609,7 @@ int main(int argc, char** argv) {
     test_display_id = "standalone";
     send_request("14", 1, false, NULL, 0); assert(last_error == Dp_ErrNone);
     lv_obj_send_event(parent, LV_EVENT_DCLICKED, NULL);
-    assert(spark_display_current()->kind != SPARK_DISPLAY_LIST);
+    assert(spark_display_current()->kind == SPARK_DISPLAY_ITEM);
     // A new phone/controller starts a new display and may restart its revision.
     test_display_id = "restarted";
     send_request("1", 2, true, NULL, 0);
@@ -546,12 +620,15 @@ int main(int argc, char** argv) {
     assert(last_error == ErrSeqErr && spark_display_current() == previous);
     test_display_id = "same-revision-new-display";
     send_request("1", 1, false, NULL, 0);
-    assert(last_error == Dp_ErrNone && spark_display_current()->kind != SPARK_DISPLAY_LIST);
+    assert(last_error == Dp_ErrNone && spark_display_current()->kind == SPARK_DISPLAY_ITEM);
     // Receiver-derived pages use the same fixed-height packing as the phone mirror.
     const char* ids[] = {"notes", "emails", "events"};
+    const spark_item_type_t packed_types[] = {
+        SPARK_ITEM_NOTE, SPARK_ITEM_EMAIL, SPARK_ITEM_CALENDAR_EVENT,
+    };
     for (unsigned i = 0; i < 3; ++i) {
         test_display_id = ids[i];
-        test_layout = SPARK_LAYOUT_NOTE + i;
+        test_type = packed_types[i];
         test_selected = 19;
         char revision[21]; snprintf(revision, sizeof(revision), "%u", 15 + i);
         send_request(revision, 20, true, NULL, 0);
@@ -562,6 +639,7 @@ int main(int argc, char** argv) {
         assert(packed->page_starts[1] == (i == 0 ? 5 : 4));
     }
     test_selected = 0;
+    test_type = SPARK_ITEM_TODO;
     app->on_pause(); assert(spark_display_current() == NULL);
     assert(spark_assistant_current()->state == SPARK_ASSISTANT_IDLE);
     send_request("1", 1, false, "Reconnected", 0); assert(last_error == Dp_ErrNone);
@@ -581,29 +659,24 @@ int main(int argc, char** argv) {
         assert(frames == refreshes);
         assert(strcmp(spark_assistant_current()->detail,
                       test_assistant_detail == NULL ? "" : test_assistant_detail) == 0);
+        if (expected_states[i] == SPARK_ASSISTANT_IDLE || expected_states[i] == SPARK_ASSISTANT_ERROR)
+            continue;
+        // Each state is its own still image: time passing does not change it.
+        const void* still = lv_image_get_src(avatar_image);
+        assert(still != previous_avatar_frame);
+        lv_tick_inc(660); lv_anim_refr_now();
+        assert(lv_image_get_src(avatar_image) == still);
+        lv_obj_invalidate(lv_screen_active()); lv_refr_now(display);
         if (expected_states[i] == SPARK_ASSISTANT_LISTENING) {
-            lv_tick_inc(540); lv_anim_refr_now();
-            assert(lv_image_get_src(avatar_image) != previous_avatar_frame);
-            lv_obj_invalidate(lv_screen_active()); lv_refr_now(display);
-            save_frame(argc > 1 ? argv[1] : NULL, "assistant-listening");
+            save_frame(artifacts, "assistant-listening");
         } else if (expected_states[i] == SPARK_ASSISTANT_THINKING) {
-            const void* morph_start = lv_image_get_src(avatar_image);
-            lv_tick_inc(180); lv_anim_refr_now();
-            assert(lv_image_get_src(avatar_image) != morph_start);
-            lv_tick_inc(180); lv_anim_refr_now();
-            lv_tick_inc(300); lv_anim_refr_now();
-            lv_obj_invalidate(lv_screen_active()); lv_refr_now(display);
-            save_frame(argc > 1 ? argv[1] : NULL, "assistant-thinking");
+            save_frame(artifacts, "assistant-thinking");
             flushed_pixels = 0;
             lv_tick_inc(100); lv_anim_refr_now(); lv_refr_now(display);
             assert(flushed_pixels == 0);
-        } else if (expected_states[i] == SPARK_ASSISTANT_WORKING) {
-            pen = lv_image_get_src(avatar_image);
-            assert(pen != previous_avatar_frame);
-            lv_tick_inc(500); lv_anim_refr_now();
-            assert(lv_image_get_src(avatar_image) == pen);
-            lv_obj_invalidate(lv_screen_active()); lv_refr_now(display);
-            save_frame(argc > 1 ? argv[1] : NULL, "assistant-working");
+        } else {
+            pen = still;
+            save_frame(artifacts, "assistant-working");
         }
     }
     test_assistant_state = "notes";
@@ -613,7 +686,7 @@ int main(int argc, char** argv) {
     assert(pen != NULL && lv_image_get_src(avatar_image) == pen);
     assert(!lv_obj_has_flag(avatar_image, LV_OBJ_FLAG_HIDDEN));
     lv_obj_invalidate(lv_screen_active()); lv_refr_now(display);
-    save_frame(argc > 1 ? argv[1] : NULL, "assistant-notes");
+    save_frame(artifacts, "assistant-notes");
     const char* icon_states[] = {"todo", "calendar", "maps", "web"};
     const spark_assistant_state_t expected_icons[] = {
         SPARK_ASSISTANT_TODO, SPARK_ASSISTANT_CALENDAR, SPARK_ASSISTANT_MAPS,
@@ -629,7 +702,7 @@ int main(int argc, char** argv) {
         assert(lv_obj_get_child_count(avatar) == 1);
         assert(lv_image_get_src(avatar_image) != pen);
         lv_obj_invalidate(lv_screen_active()); lv_refr_now(display);
-        save_frame(argc > 1 ? argv[1] : NULL, icon_frames[i]);
+        save_frame(artifacts, icon_frames[i]);
     }
     test_assistant_state = "unknown";
     test_assistant_detail = NULL;
@@ -647,23 +720,22 @@ int main(int argc, char** argv) {
     test_assistant_state = NULL;
     test_assistant_detail = NULL;
 
-    // An untitled detail has no header band; the body starts at the top.
-    lv_obj_t* header = lv_obj_get_child(frame, 0);
+    // A card has no header band; its text starts at the top.
     test_display_id = "untitled";
-    test_compact_item = true;
-    test_compact_untitled = true;
-    send_request("1", 1, false, "Read this", 0);
-    assert(last_error == Dp_ErrNone && spark_display_current()->kind != SPARK_DISPLAY_LIST);
-    lv_refr_now(display); save_frame(argc > 1 ? argv[1] : NULL, "untitled");
+    test_doc = true;
+    lv_obj_t* doc = lv_obj_get_child(content, 9);
+    send_request("1", 2, false, "Read this", 0);
+    assert(last_error == Dp_ErrNone && spark_display_current()->kind == SPARK_DISPLAY_ITEM);
+    lv_refr_now(display); save_frame(artifacts, "untitled");
     assert(lv_obj_has_flag(header, LV_OBJ_FLAG_HIDDEN) && lv_obj_get_height(header) == 0);
-    assert(lv_obj_get_y(content) == 6 && lv_obj_get_y(body) == 8);
+    assert(lv_obj_get_y(content) == 6 && lv_obj_get_y(lv_obj_get_child(doc, 0)) == 8);
     assert(lv_obj_get_height(content) > SPARK_DISPLAY_CONTENT_HEIGHT);
-    test_compact_untitled = false;
-    send_request("2", 1, false, NULL, 0);
-    assert(last_error == Dp_ErrNone); // The same item with a title brings the header back.
+    test_doc = false;
+    test_display_id = "titled";
+    send_request("1", 1, false, NULL, 0);
+    assert(last_error == Dp_ErrNone); // An item with a title brings the header back.
     assert(!lv_obj_has_flag(header, LV_OBJ_FLAG_HIDDEN) && lv_obj_get_height(header) == 64);
     assert(lv_obj_get_y(content) == 70);
-    test_compact_item = false;
 
     // A grid lays its columns out on the glasses, without a header.
     test_display_id = "grid";
@@ -671,17 +743,18 @@ int main(int argc, char** argv) {
     lv_obj_t* grid = lv_obj_get_child(content, 8);
     for (unsigned invalid = 1; invalid <= 3; ++invalid) {
         send_request("1", 2, false, NULL, invalid);
-        assert(last_error == ErrBadParam && spark_display_current()->kind != SPARK_DISPLAY_GRID);
+        assert(last_error == ErrBadParam && spark_display_current()->items[0].card == NULL);
     }
     send_request("1", 0, false, NULL, 0);
-    assert(last_error == ErrBadParam && spark_display_current()->kind != SPARK_DISPLAY_GRID);
+    assert(last_error == ErrBadParam && spark_display_current()->items[0].card == NULL);
     assert(lv_obj_has_flag(grid, LV_OBJ_FLAG_HIDDEN));
     send_request("1", 2, false, "Compare", 0);
-    assert(last_error == Dp_ErrNone && spark_display_current()->kind == SPARK_DISPLAY_GRID);
-    assert(spark_display_current()->body.grid.column_count == 2 && spark_display_current()->body.grid.row_count == 2);
-    assert(strcmp(spark_display_current()->body.grid.headers[1], "Drive") == 0);
-    assert(strcmp(spark_display_current()->body.grid.cells[1][1], "Door to door, then a short walk") == 0);
-    lv_refr_now(display); save_frame(argc > 1 ? argv[1] : NULL, "grid");
+    const spark_display_card_t* card = spark_display_current()->items[0].card;
+    assert(last_error == Dp_ErrNone && card != NULL && card->is_grid);
+    assert(card->grid.column_count == 2 && card->grid.row_count == 2);
+    assert(strcmp(card->grid.headers[1], "Drive") == 0);
+    assert(strcmp(card->grid.cells[1][1], "Door to door, then a short walk") == 0);
+    lv_refr_now(display); save_frame(artifacts, "grid");
     assert(lv_obj_has_flag(header, LV_OBJ_FLAG_HIDDEN) && lv_obj_get_y(content) == 6);
     assert(!lv_obj_has_flag(grid, LV_OBJ_FLAG_HIDDEN) && lv_obj_has_flag(body, LV_OBJ_FLAG_HIDDEN));
     lv_obj_t* head_left = lv_obj_get_child(grid, 0);
@@ -708,11 +781,11 @@ int main(int argc, char** argv) {
     // Three columns and twenty rows overflow the page and scroll like a detail body.
     test_grid_columns = 3;
     send_request("2", 20, false, NULL, 0);
-    assert(last_error == Dp_ErrNone && spark_display_current()->body.grid.row_count == 20);
+    assert(last_error == Dp_ErrNone && spark_display_current()->items[0].card->grid.row_count == 20);
     assert(!lv_obj_has_flag(lv_obj_get_child(grid, 2), LV_OBJ_FLAG_HIDDEN));
     assert(!lv_obj_has_flag(lv_obj_get_child(grid, lv_obj_get_child_count(grid) - 1), LV_OBJ_FLAG_HIDDEN));
     assert(lv_obj_get_height(grid) > lv_obj_get_height(content));
-    lv_refr_now(display); save_frame(argc > 1 ? argv[1] : NULL, "grid-long");
+    lv_refr_now(display); save_frame(artifacts, "grid-long");
     assert(lv_obj_get_scroll_y(content) == 0);
     lv_obj_send_event(parent, LV_EVENT_GESTURE_LEFT, NULL);
     assert(lv_obj_get_scroll_y(content) > 0);
@@ -721,23 +794,23 @@ int main(int argc, char** argv) {
     test_grid = false;
     test_grid_columns = 2;
 
-    // A doc stacks heading and paragraph labels, without a header.
+    // A text card stacks heading and paragraph labels, without a header.
     test_display_id = "doc";
     test_doc = true;
-    lv_obj_t* doc = lv_obj_get_child(content, 9);
-    for (unsigned invalid = 1; invalid <= 3; ++invalid) {
+    for (unsigned invalid = 1; invalid <= 4; ++invalid) {
         send_request("1", 2, false, NULL, invalid);
-        assert(last_error == ErrBadParam && spark_display_current()->kind != SPARK_DISPLAY_DOC);
+        assert(last_error == ErrBadParam && spark_display_current()->items[0].card->is_grid);
     }
     send_request("1", 0, false, NULL, 0);
-    assert(last_error == ErrBadParam && spark_display_current()->kind != SPARK_DISPLAY_DOC);
+    assert(last_error == ErrBadParam && spark_display_current()->items[0].card->is_grid);
     send_request("1", 25, false, NULL, 0);
-    assert(last_error == ErrBadParam && spark_display_current()->kind != SPARK_DISPLAY_DOC);
+    assert(last_error == ErrBadParam && spark_display_current()->items[0].card->is_grid);
     send_request("1", 4, false, "Steps are up", 0);
-    assert(last_error == Dp_ErrNone && spark_display_current()->kind == SPARK_DISPLAY_DOC);
-    assert(spark_display_current()->body.doc.count == 4 && spark_display_current()->body.doc.heading[2]);
-    assert(strcmp(spark_display_current()->body.doc.text[2], "If it still fails") == 0);
-    lv_refr_now(display); save_frame(argc > 1 ? argv[1] : NULL, "doc");
+    card = spark_display_current()->items[0].card;
+    assert(last_error == Dp_ErrNone && !card->is_grid);
+    assert(card->doc.count == 4 && card->doc.heading[2]);
+    assert(strcmp(card->doc.text[2], "If it still fails") == 0);
+    lv_refr_now(display); save_frame(artifacts, "doc");
     assert(lv_obj_has_flag(header, LV_OBJ_FLAG_HIDDEN) && lv_obj_get_y(content) == 6);
     assert(!lv_obj_has_flag(doc, LV_OBJ_FLAG_HIDDEN) && lv_obj_has_flag(grid, LV_OBJ_FLAG_HIDDEN));
     lv_obj_t* h0 = lv_obj_get_child(doc, 0);
@@ -756,7 +829,7 @@ int main(int argc, char** argv) {
            lv_obj_get_style_text_font(reply_label, LV_PART_MAIN));
     assert(lv_obj_get_height(doc) >= lv_obj_get_y(p1) + lv_obj_get_height(p1));
     send_request("2", 24, false, NULL, 0);
-    assert(last_error == Dp_ErrNone && spark_display_current()->body.doc.count == 24);
+    assert(last_error == Dp_ErrNone && spark_display_current()->items[0].card->doc.count == 24);
     assert(lv_obj_get_height(doc) > lv_obj_get_height(content));
     lv_obj_send_event(parent, LV_EVENT_GESTURE_LEFT, NULL);
     assert(lv_obj_get_scroll_y(content) > 0);
@@ -765,14 +838,81 @@ int main(int argc, char** argv) {
     // Replacing a card with a titled detail restores the header and hides the blocks.
     test_display_id = "titled-again";
     send_request("1", 1, false, NULL, 0);
-    assert(last_error == Dp_ErrNone && spark_display_current()->kind != SPARK_DISPLAY_GRID);
+    assert(last_error == Dp_ErrNone && spark_display_current()->items[0].card == NULL);
     assert(!lv_obj_has_flag(header, LV_OBJ_FLAG_HIDDEN) && lv_obj_get_height(header) == 64);
     assert(lv_obj_has_flag(grid, LV_OBJ_FLAG_HIDDEN) && !lv_obj_has_flag(body, LV_OBJ_FLAG_HIDDEN));
     assert(lv_obj_has_flag(doc, LV_OBJ_FLAG_HIDDEN) && lv_label_get_text(h0)[0] == '\0');
     assert(lv_label_get_text(cell_00)[0] == '\0');
+
+    // Every type has its own card in a list, packed by its own height.
+    static const spark_item_type_t every_type[] = {
+        SPARK_ITEM_TODO, SPARK_ITEM_NOTE, SPARK_ITEM_EMAIL, SPARK_ITEM_EMAIL_DRAFT,
+        SPARK_ITEM_CALENDAR_EVENT, SPARK_ITEM_CONTACT, SPARK_ITEM_PLACES, SPARK_ITEM_ROUTE,
+        SPARK_ITEM_CARD,
+    };
+    test_display_id = "every-type";
+    test_types = every_type; test_type_count = SPARK_ITEM_TYPE_COUNT;
+    test_completed = true;
+    send_request("1", SPARK_ITEM_TYPE_COUNT, true, NULL, 0);
+    const spark_display_t* all = spark_display_current();
+    assert(last_error == Dp_ErrNone && all->count == SPARK_ITEM_TYPE_COUNT);
+    for (size_t i = 0; i < SPARK_ITEM_TYPE_COUNT; ++i) assert(all->items[i].type == every_type[i]);
+    // 40 + 48 + 60 + 60, then 60 + 48 + 48 + 48, then the card.
+    assert(all->page_count == 3 && all->page_starts[1] == 4 && all->page_starts[2] == 8);
+    lv_refr_now(display); save_frame(artifacts, "types-1");
+    lv_obj_t* todo_row = lv_obj_get_child(content, 3);
+    assert(lv_obj_get_style_bg_opa(lv_obj_get_child(todo_row, 0), LV_PART_MAIN) == LV_OPA_COVER);
+    lv_obj_t* draft_row = lv_obj_get_child(content, 6);
+    assert(strcmp(lv_label_get_text(lv_obj_get_child(draft_row, 1)), "kim@example.com") == 0);
+    assert(strcmp(lv_label_get_text(lv_obj_get_child(draft_row, 3)), "Composing") == 0);
+    for (unsigned i = 0; i < 4; ++i) lv_obj_send_event(parent, LV_EVENT_GESTURE_LEFT, NULL);
+    assert(spark_display_current()->page_index == 2);
+    lv_refr_now(display); save_frame(artifacts, "types-2");
+    lv_obj_t* contact_row = lv_obj_get_child(content, 4);
+    assert(strcmp(lv_label_get_text(lv_obj_get_child(contact_row, 1)), "Sam Lee") == 0);
+    assert(strcmp(lv_label_get_text(lv_obj_get_child(contact_row, 2)), "Designer · Acme") == 0);
+    lv_obj_t* route_row = lv_obj_get_child(content, 6);
+    assert(strcmp(lv_label_get_text(lv_obj_get_child(route_row, 3)), "24 mins") == 0);
+    assert(strcmp(lv_label_get_text(lv_obj_get_child(route_row, 2)), "18 km · via I-280") == 0);
+    for (unsigned i = 0; i < 4; ++i) lv_obj_send_event(parent, LV_EVENT_GESTURE_LEFT, NULL);
+    assert(spark_display_current()->page_index == 3);
+    lv_refr_now(display); save_frame(artifacts, "types-3");
+    lv_obj_t* card_row = lv_obj_get_child(content, 3);
+    assert(strcmp(lv_label_get_text(lv_obj_get_child(card_row, 1)), "Pack") == 0);
+    assert(strcmp(lv_label_get_text(lv_obj_get_child(card_row, 2)), "• Charger • Passport") == 0);
+    test_types = NULL;
+    test_completed = false;
+
+    // Every type has its own detail page and header.
+    const char* headings[] = {
+        "Reminder", "Meeting notes", "Scan results", "Project update", "Studio crit",
+        "Sam Lee", "Blue Bottle Coffee", "Home to Work",
+    };
+    const char* leads[] = {
+        DETAIL_LEAD, "", "Dr Okafor", "kim@example.com", "Sep 5, 2026, 10:00 AM - 11:00 AM",
+        "Designer · Acme", "66 Mint St", "24 mins · 18 km",
+    };
+    char detail_id[32];
+    for (size_t t = 0; t < SPARK_ITEM_CARD; ++t) {
+        snprintf(detail_id, sizeof(detail_id), "detail-%zu", t);
+        test_display_id = detail_id;
+        test_type = (spark_item_type_t)t;
+        send_request("1", 1, false, NULL, 0);
+        assert(last_error == Dp_ErrNone && spark_display_current()->items[0].type == test_type);
+        assert(strcmp(lv_label_get_text(title_label), headings[t]) == 0);
+        assert(strcmp(lv_label_get_text(lead), leads[t]) == 0);
+        lv_refr_now(display);
+        char frame_name[32]; snprintf(frame_name, sizeof(frame_name), "detail-%s", type_names[t]);
+        save_frame(artifacts, frame_name);
+    }
+    assert(strcmp(lv_label_get_text(body), "via I-280") == 0);
+    test_type = SPARK_ITEM_TODO;
+
     // Screen off under three minutes keeps the page. Over three minutes the glasses
     // clear it as a local dismiss: identity and revision survive, and it is reported.
     // Screen state reaches Spark through the system listener, whichever page is current.
+    test_display_id = "titled-again";
+    send_request("1", 1, false, NULL, 0); assert(last_error == Dp_ErrNone);
     assert(sys_state_listener != NULL);
     test_now_ms = 1000;
     sys_state_listener(0);
@@ -841,7 +981,7 @@ int main(int argc, char** argv) {
     test_screen_bad_type = false;
     // The dismiss must be explicit: an empty page and an empty reply, nothing else.
     test_screen = "off";
-    send_request("2", 0, false, NULL, 0); assert(last_error == ErrBadParam);
+    send_request("2", 1, false, NULL, 0); assert(last_error == ErrBadParam);
     send_request("2", -1, true, "", 0); assert(last_error == ErrBadParam);
     send_request("2", 1, true, "", 0); assert(last_error == ErrBadParam);
     send_request("2", 0, true, "Kept", 0); assert(last_error == ErrBadParam);
@@ -865,5 +1005,5 @@ int main(int argc, char** argv) {
     send_request("7", 1, false, NULL, 0); assert(last_error == ErrNotReady);
     app->on_stop(); spark_page_get()->on_destroy(); lv_obj_delete(parent);
     lv_display_delete(display); lv_deinit();
-    puts("Spark display: partial redraw, five-row fit, independent updates, retry ACK, validation, ownership, layout, reports, screen-off clear, phone dismiss and disconnect passed.");
+    puts("Spark display: typed items, per-type cards and details, strict items, partial redraw, five-row fit, independent updates, retry ACK, validation, ownership, layout, reports, screen-off clear, phone dismiss and disconnect passed.");
 }

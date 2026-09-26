@@ -94,64 +94,37 @@ static uint8_t g_simulator_battery_soc = 80;
 static uint8_t g_simulator_charge_state = 0;
 static uint64_t g_simulator_spark_revision = 1;
 
-typedef enum {
-    SPARK_DISPLAY_NOTE,
-    SPARK_DISPLAY_TODO,
-    SPARK_DISPLAY_EMAIL,
-    SPARK_DISPLAY_EMAIL_DRAFT,
-    SPARK_DISPLAY_CALENDAR_EVENT,
-    SPARK_DISPLAY_CARD,
-    SPARK_DISPLAY_TYPE_COUNT,
-} simulator_spark_type_t;
-
 typedef struct {
     const char* name;
     bool is_list;
     bool is_mixed;
     bool is_clear;
-    simulator_spark_type_t type;
+    spark_item_type_t type;
+    bool is_grid;
 } simulator_spark_sample_t;
 
 static const simulator_spark_sample_t g_simulator_spark_samples[] = {
-    {"mixed_list", true, true, false, SPARK_DISPLAY_NOTE},
-    {"note_list", true, false, false, SPARK_DISPLAY_NOTE},
-    {"todo_list", true, false, false, SPARK_DISPLAY_TODO},
-    {"email_list", true, false, false, SPARK_DISPLAY_EMAIL},
-    {"draft_list", true, false, false, SPARK_DISPLAY_EMAIL_DRAFT},
-    {"calendar_list", true, false, false, SPARK_DISPLAY_CALENDAR_EVENT},
-    {"note_full", false, false, false, SPARK_DISPLAY_NOTE},
-    {"todo_full", false, false, false, SPARK_DISPLAY_TODO},
-    {"email_full", false, false, false, SPARK_DISPLAY_EMAIL},
-    {"draft_full", false, false, false, SPARK_DISPLAY_EMAIL_DRAFT},
-    {"calendar_full", false, false, false, SPARK_DISPLAY_CALENDAR_EVENT},
-    {"card_text", false, false, false, SPARK_DISPLAY_CARD},
-    {"card_grid", false, false, false, SPARK_DISPLAY_CARD},
-    {"clear", true, false, true, SPARK_DISPLAY_NOTE},
+    {"mixed_list", true, true, false, SPARK_ITEM_NOTE, false},
+    {"note_list", true, false, false, SPARK_ITEM_NOTE, false},
+    {"todo_list", true, false, false, SPARK_ITEM_TODO, false},
+    {"email_list", true, false, false, SPARK_ITEM_EMAIL, false},
+    {"draft_list", true, false, false, SPARK_ITEM_EMAIL_DRAFT, false},
+    {"calendar_list", true, false, false, SPARK_ITEM_CALENDAR_EVENT, false},
+    {"contact_list", true, false, false, SPARK_ITEM_CONTACT, false},
+    {"places_list", true, false, false, SPARK_ITEM_PLACES, false},
+    {"route_list", true, false, false, SPARK_ITEM_ROUTE, false},
+    {"note_full", false, false, false, SPARK_ITEM_NOTE, false},
+    {"todo_full", false, false, false, SPARK_ITEM_TODO, false},
+    {"email_full", false, false, false, SPARK_ITEM_EMAIL, false},
+    {"draft_full", false, false, false, SPARK_ITEM_EMAIL_DRAFT, false},
+    {"calendar_full", false, false, false, SPARK_ITEM_CALENDAR_EVENT, false},
+    {"contact_full", false, false, false, SPARK_ITEM_CONTACT, false},
+    {"places_full", false, false, false, SPARK_ITEM_PLACES, false},
+    {"route_full", false, false, false, SPARK_ITEM_ROUTE, false},
+    {"card_text", false, false, false, SPARK_ITEM_CARD, false},
+    {"card_grid", false, false, false, SPARK_ITEM_CARD, true},
+    {"clear", true, false, true, SPARK_ITEM_NOTE, false},
 };
-
-static void simulator_spark_card(const simulator_spark_sample_t* sample,
-                                 size_t index,
-                                 const char** title,
-                                 const char** body,
-                                 const char** preview) {
-    // Cards have no title. In a mixed list the phone previews a text card's
-    // heading and first lines, or a grid card's headings and first row.
-    unsigned kind = 0;
-    if (sample == NULL || sample->is_mixed) {
-        kind = (unsigned)(index / SPARK_DISPLAY_TYPE_COUNT) % 3;
-    }
-    *title = "";
-    if (kind == 1) {
-        *body = "• Charger\n• Passport\n• Headphones\n• Medication\n• House keys";
-        *preview = "Pack • Charger • Passport • Headphones";
-    } else if (kind == 2) {
-        *body = "";
-        *preview = "Train · Drive · Faster door to door · Cheaper";
-    } else {
-        *body = "1. Unplug the modem and router.\n2. Wait 30 seconds.\n3. Plug the modem in first, then the router.";
-        *preview = "Reset router 1. Unplug the modem and router. 2. Wait 30 seconds.";
-    }
-}
 
 static const char* simulator_spark_reply(const simulator_spark_sample_t* sample) {
     if (strcmp(sample->name, "card_text") == 0) {
@@ -164,101 +137,167 @@ static const char* simulator_spark_reply(const simulator_spark_sample_t* sample)
 }
 
 static const char* simulator_spark_title(const simulator_spark_sample_t* sample) {
-    static const char* list_titles[] = {
-        "Notes", "Reminders", "Inbox", "Drafts", "Calendar", "Items",
+    static const char* list_titles[SPARK_ITEM_TYPE_COUNT] = {
+        [SPARK_ITEM_TODO] = "Reminders",
+        [SPARK_ITEM_NOTE] = "Notes",
+        [SPARK_ITEM_EMAIL] = "Inbox",
+        [SPARK_ITEM_EMAIL_DRAFT] = "Drafts",
+        [SPARK_ITEM_CALENDAR_EVENT] = "Calendar",
+        [SPARK_ITEM_CONTACT] = "Items",
+        [SPARK_ITEM_PLACES] = "Items",
+        [SPARK_ITEM_ROUTE] = "Items",
+        [SPARK_ITEM_CARD] = "Items",
     };
-    static const char* detail_titles[] = {
-        "Weekend plans", "Reminder", "Scan results", "Project update", "Studio crit", "Pack",
-    };
-    if (sample->is_mixed) {
-        return "Items";
-    }
-    if (sample->type == SPARK_DISPLAY_CARD) {
+    if (sample->is_clear) {
         return "";
     }
-    return sample->is_list ? list_titles[sample->type] : detail_titles[sample->type];
+    return sample->is_mixed ? "Items" : list_titles[sample->type];
 }
 
-static void simulator_spark_write_row(mpack_writer_t* writer,
-                                      const simulator_spark_sample_t* sample,
-                                      simulator_spark_type_t type,
-                                      size_t index,
-                                      bool detail) {
+static void simulator_spark_text(mpack_writer_t* writer, const char* key, const char* value) {
+    mpack_write_cstr(writer, key);
+    mpack_write_cstr(writer, value);
+}
+
+// A card is text blocks or a grid; it has no title.
+static void simulator_spark_write_card(mpack_writer_t* writer, const char* id, bool grid) {
+    mpack_start_map(writer, grid ? 5 : 4);
+    simulator_spark_text(writer, "id", id);
+    simulator_spark_text(writer, "type", "card");
+    mpack_write_cstr(writer, "hasMore");
+    mpack_write_bool(writer, false);
+    if (grid) {
+        static const char* headings[] = {"Train", "Drive"};
+        static const char* cells[][2] = {
+            {"Faster door to door", "Cheaper"},
+            {"Last train is 11pm", "Parking downtown"},
+            {"No transfers", "Leaves any time"},
+        };
+        mpack_write_cstr(writer, "headers");
+        mpack_start_array(writer, 2);
+        for (size_t c = 0; c < 2; ++c) mpack_write_cstr(writer, headings[c]);
+        mpack_finish_array(writer);
+        mpack_write_cstr(writer, "rows");
+        mpack_start_array(writer, 3);
+        for (size_t r = 0; r < 3; ++r) {
+            mpack_start_array(writer, 2);
+            for (size_t c = 0; c < 2; ++c) mpack_write_cstr(writer, cells[r][c]);
+            mpack_finish_array(writer);
+        }
+        mpack_finish_array(writer);
+    } else {
+        static const char* blocks[][2] = {
+            {"h", "Reset router"},
+            {"p", "1. Unplug the modem and router.\n2. Wait 30 seconds.\n3. Plug the modem in first, then the router."},
+            {"h", "If it still fails"},
+            {"p", "• Check the lights are steady\n• Try the page again\n• Call the ISP and quote the error light"},
+        };
+        mpack_write_cstr(writer, "blocks");
+        mpack_start_array(writer, 4);
+        for (size_t i = 0; i < 4; ++i) {
+            mpack_start_array(writer, 2);
+            mpack_write_cstr(writer, blocks[i][0]);
+            mpack_write_cstr(writer, blocks[i][1]);
+            mpack_finish_array(writer);
+        }
+        mpack_finish_array(writer);
+    }
+    mpack_finish_map(writer);
+}
+
+// One item as the phone sends it: `{id, type, hasMore, ...fields}`.
+static void simulator_spark_write_item(mpack_writer_t* writer,
+                                       spark_item_type_t type,
+                                       size_t index,
+                                       bool grid) {
     char id[32];
-    const char* keys[] = {"id", "mark", "primary", "secondary", "meta"};
-    const char* values[] = {id, "", "", "", ""};
+    const char* fields[12];
+    size_t count = 0;
 
     snprintf(id, sizeof(id), "sim-%u-%u", (unsigned)type, (unsigned)index);
+    if (type == SPARK_ITEM_CARD) {
+        simulator_spark_write_card(writer, id, grid);
+        return;
+    }
+#define FIELD(key, value) (fields[count++] = (key), fields[count++] = (value))
     switch (type) {
-        case SPARK_DISPLAY_NOTE:
-            values[1] = detail ? "NOTE" : "";
-            values[2] = detail ? "" : "Weekend plans";
-            values[3] = "Meet at the station at 10:00. Bring lunch and water.";
-            values[4] = detail ? "" : "Sep 12, 2026";
+        case SPARK_ITEM_TODO:
+            FIELD("content", "Call Kim");
+            FIELD("due", "Tomorrow");
+            FIELD("repeat", "Weekly");
             break;
-        case SPARK_DISPLAY_TODO:
-            values[1] = "[ ]";
-            values[2] = "Call Kim";
-            values[3] = detail ? "Sep 5, 2026 at 9:30 AM" : "";
-            values[4] = detail ? "Open" : "Tomorrow";
+        case SPARK_ITEM_NOTE:
+            FIELD("title", "Weekend plans");
+            FIELD("content", "Meet at the station at 10:00. Bring lunch and water.");
+            FIELD("date", "Sep 12, 2026");
             break;
-        case SPARK_DISPLAY_EMAIL:
-            values[1] = detail ? "MAIL" : "";
-            values[2] = "Dr Okafor";
-            values[3] = detail ? "The results are attached. Please review them before our call."
-                               : "Scan results - The results are attached.";
-            values[4] = detail ? "Sep 5, 2026 at 10:43 AM" : "10:43";
+        case SPARK_ITEM_EMAIL:
+            FIELD("sender", "Dr Okafor");
+            FIELD("address", "dr@example.com");
+            FIELD("subject", "Scan results");
+            FIELD("preview", "The results are attached. Please review them before our call.");
+            FIELD("time", "10:43");
+            FIELD("sentAt", "Sep 5, 2026 at 10:43 AM");
             break;
-        case SPARK_DISPLAY_EMAIL_DRAFT:
-            values[1] = detail ? "DRAFT" : "";
-            values[2] = detail ? "me@example.com" : "kim@example.com";
-            values[3] = detail ? "Here is the project update for this week."
-                               : "Project update - Here is the project update.";
-            values[4] = "Draft";
+        case SPARK_ITEM_EMAIL_DRAFT:
+            FIELD("to", "kim@example.com");
+            FIELD("from", "me@example.com");
+            FIELD("subject", "Project update");
+            FIELD("body", "Here is the project update for this week.");
+            FIELD("status", "Composing");
             break;
-        case SPARK_DISPLAY_CALENDAR_EVENT:
-            values[1] = detail ? "Sep 5, 2026 at 1:45 PM" : "";
-            values[2] = detail ? "Sep 5, 2026, 1:45 PM - 2:30 PM" : "Studio crit";
-            values[3] = detail ? "Room 2" : "Sep 5, 2026, 1:45 PM - 2:30 PM";
-            values[4] = detail ? "Accepted" : "";
+        case SPARK_ITEM_CALENDAR_EVENT:
+            FIELD("title", "Studio crit");
+            FIELD("when", "Sep 5, 2026, 1:45 PM - 2:30 PM");
+            FIELD("location", "Room 2");
+            FIELD("response", "Accepted");
             break;
-        case SPARK_DISPLAY_CARD: {
-            const char* title = "Pack";
-            const char* body = "";
-            const char* preview = "";
-            simulator_spark_card(sample, index, &title, &body, &preview);
-            snprintf(id, sizeof(id), "cd_%010u", (unsigned)index);
-            values[2] = detail ? "" : title;
-            values[3] = detail ? body : preview;
+        case SPARK_ITEM_CONTACT:
+            FIELD("name", "Sam Lee");
+            FIELD("organization", "Acme");
+            FIELD("jobTitle", "Designer");
+            FIELD("phone", "+1 555 0100");
+            FIELD("email", "sam@example.com");
             break;
-        }
-        case SPARK_DISPLAY_TYPE_COUNT:
+        case SPARK_ITEM_PLACES:
+            FIELD("name", "Blue Bottle Coffee");
+            FIELD("address", "66 Mint St, San Francisco");
+            FIELD("rating", "4.5 (1,200)");
+            FIELD("open", "Open now");
+            break;
+        case SPARK_ITEM_ROUTE:
+            FIELD("title", "Home to Work");
+            FIELD("via", "via I-280");
+            FIELD("duration", "24 mins");
+            FIELD("distance", "18 km");
+            FIELD("mode", "Drive");
+            break;
+        case SPARK_ITEM_CARD:
+        case SPARK_ITEM_TYPE_COUNT:
             break;
     }
-
-    bool email_list = !detail &&
-        (type == SPARK_DISPLAY_EMAIL || type == SPARK_DISPLAY_EMAIL_DRAFT);
-    mpack_start_map(writer, email_list ? 9 : detail ? 5 : 7);
-    for (size_t i = 0; i < 5; ++i) {
-        mpack_write_cstr(writer, keys[i]);
-        mpack_write_cstr(writer, values[i]);
-    }
-    if (!detail) {
-        const char* layouts[] = {"note", "reminder", "email", "email", "event", "note"};
-        mpack_write_cstr(writer, "layout");
-        mpack_write_cstr(writer, layouts[type]);
-        mpack_write_cstr(writer, "height");
-        mpack_write_u32(writer, type == SPARK_DISPLAY_TODO
-                            ? 40
-                            : type == SPARK_DISPLAY_NOTE || type == SPARK_DISPLAY_CARD
-                                  ? 48
-                                  : 60);
-        if (email_list) {
-            mpack_write_cstr(writer, "address");
-            mpack_write_cstr(writer, type == SPARK_DISPLAY_EMAIL ? "dr@example.com" : "");
-            mpack_write_cstr(writer, "subject");
-            mpack_write_cstr(writer, type == SPARK_DISPLAY_EMAIL ? "Scan results" : "Project update");
-        }
+#undef FIELD
+    bool todo = type == SPARK_ITEM_TODO;
+    mpack_start_map(writer, (uint32_t)(3 + count / 2 + (todo ? 1 : 0)));
+    static const char* const type_names[SPARK_ITEM_TYPE_COUNT] = {
+        [SPARK_ITEM_TODO] = "todo",
+        [SPARK_ITEM_NOTE] = "note",
+        [SPARK_ITEM_EMAIL] = "email",
+        [SPARK_ITEM_EMAIL_DRAFT] = "email_draft",
+        [SPARK_ITEM_CALENDAR_EVENT] = "calendar_event",
+        [SPARK_ITEM_CONTACT] = "contact",
+        [SPARK_ITEM_PLACES] = "places",
+        [SPARK_ITEM_ROUTE] = "route",
+        [SPARK_ITEM_CARD] = "card",
+    };
+    simulator_spark_text(writer, "id", id);
+    simulator_spark_text(writer, "type", type_names[type]);
+    mpack_write_cstr(writer, "hasMore");
+    mpack_write_bool(writer, type == SPARK_ITEM_EMAIL);
+    for (size_t i = 0; i < count; i += 2) simulator_spark_text(writer, fields[i], fields[i + 1]);
+    if (todo) {
+        mpack_write_cstr(writer, "completed");
+        mpack_write_bool(writer, index % 3 == 1);
     }
     mpack_finish_map(writer);
 }
@@ -282,74 +321,28 @@ static bool simulator_spark_show_sample(const simulator_spark_sample_t* sample) 
     mpack_write_cstr(&writer, revision);
     mpack_write_cstr(&writer, "reply");
     mpack_write_cstr(&writer, simulator_spark_reply(sample));
-    if (strcmp(sample->name, "card_text") == 0) {
-        static const char* blocks[][2] = {
-            {"h", "Reset router"},
-            {"p", "1. Unplug the modem and router.\n2. Wait 30 seconds.\n3. Plug the modem in first, then the router."},
-            {"h", "If it still fails"},
-            {"p", "• Check the lights are steady\n• Try the page again\n• Call the ISP and quote the error light"},
-        };
-        mpack_write_cstr(&writer, "doc");
-        mpack_start_array(&writer, 2);
-        mpack_write_cstr(&writer, "cd_0000000001");
-        mpack_start_array(&writer, 4);
-        for (size_t i = 0; i < 4; ++i) {
-            mpack_start_array(&writer, 2);
-            mpack_write_cstr(&writer, blocks[i][0]);
-            mpack_write_cstr(&writer, blocks[i][1]);
-            mpack_finish_array(&writer);
-        }
-        mpack_finish_array(&writer);
-        mpack_finish_array(&writer);
-        mpack_finish_map(&writer);
-        goto send;
-    }
-    if (strcmp(sample->name, "card_grid") == 0) {
-        // The compact grid: [id, headings, rows].
-        static const char* headings[] = {"Train", "Drive"};
-        static const char* cells[][2] = {
-            {"Faster door to door", "Cheaper"},
-            {"Last train is 11pm", "Parking downtown"},
-            {"No transfers", "Leaves any time"},
-        };
-        mpack_write_cstr(&writer, "grid");
-        mpack_start_array(&writer, 3);
-        mpack_write_cstr(&writer, "cd_0000000002");
-        mpack_start_array(&writer, 2);
-        for (size_t c = 0; c < 2; ++c) mpack_write_cstr(&writer, headings[c]);
-        mpack_finish_array(&writer);
-        mpack_start_array(&writer, 3);
-        for (size_t r = 0; r < 3; ++r) {
-            mpack_start_array(&writer, 2);
-            for (size_t c = 0; c < 2; ++c) mpack_write_cstr(&writer, cells[r][c]);
-            mpack_finish_array(&writer);
-        }
-        mpack_finish_array(&writer);
-        mpack_finish_array(&writer);
+    if (!sample->is_list) {
+        mpack_write_cstr(&writer, "item");
+        simulator_spark_write_item(&writer, sample->type, 0, sample->is_grid);
         mpack_finish_map(&writer);
         goto send;
     }
     mpack_write_cstr(&writer, "page");
-    mpack_start_map(&writer, sample->is_list && !sample->is_clear ? 6 : 5);
-    mpack_write_cstr(&writer, "kind");
-    mpack_write_cstr(&writer, sample->is_list ? "list" : "item");
+    mpack_start_map(&writer, 4);
     mpack_write_cstr(&writer, "title");
     mpack_write_cstr(&writer, simulator_spark_title(sample));
     mpack_write_cstr(&writer, "hint");
-    mpack_write_cstr(&writer, sample->is_list && !sample->is_clear ? "20 items" : "");
+    mpack_write_cstr(&writer, sample->is_clear ? "" : "20 items");
     mpack_write_cstr(&writer, "selected");
     mpack_write_u32(&writer, 0);
-    if (sample->is_list && !sample->is_clear) {
-        mpack_write_cstr(&writer, "rowGap");
-        mpack_write_u32(&writer, SPARK_DISPLAY_ROW_GAP);
-    }
-    mpack_write_cstr(&writer, "rows");
+    mpack_write_cstr(&writer, "items");
     mpack_start_array(&writer, (uint32_t)count);
     for (size_t i = 0; i < count; ++i) {
-        simulator_spark_type_t type = sample->is_mixed
-                                          ? (simulator_spark_type_t)(i % SPARK_DISPLAY_TYPE_COUNT)
-                                          : sample->type;
-        simulator_spark_write_row(&writer, sample, type, i, !sample->is_list);
+        // A mixed list shows every type in turn, its cards alternating text and grid.
+        spark_item_type_t type = sample->is_mixed
+                                     ? (spark_item_type_t)(i % SPARK_ITEM_TYPE_COUNT)
+                                     : sample->type;
+        simulator_spark_write_item(&writer, type, i, (i / SPARK_ITEM_TYPE_COUNT) % 2 == 1);
     }
     mpack_finish_array(&writer);
     mpack_finish_map(&writer);

@@ -140,7 +140,7 @@ static bool ack_current(msg_pack_t* msg) {
     if (s_report_after_ack) {
         const spark_display_t* current = spark_display_current();
         if (current != NULL && current->count != 0)
-            spark_display_report(current->kind == SPARK_DISPLAY_LIST ? "selected" : "opened", current->rows[current->selected].id);
+            spark_display_report(current->kind == SPARK_DISPLAY_LIST ? "selected" : "opened", current->items[current->selected].id);
         else
             spark_display_report(spark_reply_visible() ? "pageDismissed" : "dismissed", NULL);
     }
@@ -175,23 +175,19 @@ static bool spark_message(mpack_node_t data, msg_pack_t* msg) {
         return app_mpack_send_ack(msg, ErrBadParam);
     mpack_node_t page = mpack_node_map_cstr_optional(data, "page");
     mpack_node_t item = mpack_node_map_cstr_optional(data, "item");
-    mpack_node_t grid = mpack_node_map_cstr_optional(data, "grid");
-    mpack_node_t doc = mpack_node_map_cstr_optional(data, "doc");
     mpack_node_t reply = mpack_node_map_cstr_optional(data, "reply");
     mpack_node_t assistant = mpack_node_map_cstr_optional(data, "assistant");
     mpack_node_t screen = mpack_node_map_cstr_optional(data, "screen");
-    bool has_full_page = !mpack_node_is_missing(page);
+    bool has_list = !mpack_node_is_missing(page);
     bool has_item = !mpack_node_is_missing(item);
-    bool has_grid = !mpack_node_is_missing(grid);
-    bool has_doc = !mpack_node_is_missing(doc);
-    bool has_page = has_full_page || has_item || has_grid || has_doc;
+    bool has_page = has_list || has_item;
     bool has_reply = !mpack_node_is_missing(reply);
     bool has_assistant = !mpack_node_is_missing(assistant);
     // A phone dismiss clears the page and reply, then turns the screen off. Only "off"
     // is accepted; the screen is turned on by the glasses themselves.
     bool has_screen = !mpack_node_is_missing(screen);
     if (has_screen && !spark_node_is(screen, "off")) return app_mpack_send_ack(msg, ErrBadParam);
-    if (has_full_page + has_item + has_grid + has_doc > 1) return app_mpack_send_ack(msg, ErrBadParam);
+    if (has_list && has_item) return app_mpack_send_ack(msg, ErrBadParam);
     if (!has_page && !has_reply && !has_assistant && !has_screen)
         return app_mpack_send_ack(msg, ErrBadParam);
     if (new_display && !has_page) return app_mpack_send_ack(msg, ErrBadParam);
@@ -205,9 +201,7 @@ static bool spark_message(mpack_node_t data, msg_pack_t* msg) {
     if (has_assistant && !spark_assistant_parse(assistant, &next_assistant))
         return app_mpack_send_ack(msg, ErrBadParam);
     spark_display_t* next = has_item ? spark_display_parse_item(item) :
-        has_grid ? spark_display_parse_grid(grid) :
-        has_doc ? spark_display_parse_doc(doc) :
-        has_full_page ? spark_display_parse(page) : NULL;
+        has_list ? spark_display_parse(page) : NULL;
     char* text = has_reply ? mpack_node_utf8_cstr_alloc(reply, SPARK_DISPLAY_MAX_REPLY + 1) : NULL;
     if ((has_page && next == NULL) || (has_reply && text == NULL) || mpack_node_error(data) != mpack_ok) {
         spark_display_free(next);
@@ -224,7 +218,7 @@ static bool spark_message(mpack_node_t data, msg_pack_t* msg) {
     }
     if (!stale_navigation && !new_display && display_id[0] != '\0' && next != NULL &&
         next->kind != SPARK_DISPLAY_LIST &&
-        !spark_display_is_selected(next->rows[0].id)) {
+        !spark_display_is_selected(next->items[0].id)) {
         spark_display_free(next);
         free(text);
         return app_mpack_send_ack(msg, ErrNotReady);

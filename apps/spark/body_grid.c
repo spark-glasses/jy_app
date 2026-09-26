@@ -51,7 +51,7 @@ static void reset(void) {
 }
 
 static void render(const spark_display_t* display) {
-    const spark_display_grid_t* grid = &display->body.grid;
+    const spark_display_grid_t* grid = &display->items[0].card->grid;
     lv_obj_t* content = lv_obj_get_parent(s_grid);
     lv_obj_remove_flag(s_grid, LV_OBJ_FLAG_HIDDEN);
     lv_obj_update_layout(content);

@@ -17,16 +17,11 @@ static bool same_text(const char* a, const char* b) {
 
 static bool same_list(const spark_display_t* a, const spark_display_t* b) {
     if (a == NULL || a->kind != SPARK_DISPLAY_LIST || b->kind != SPARK_DISPLAY_LIST ||
-        a->count != b->count || a->page_count != b->page_count || a->row_gap != b->row_gap ||
+        a->count != b->count || a->page_count != b->page_count ||
         !same_text(a->title, b->title) || !same_text(a->hint, b->hint)) return false;
     if (memcmp(a->page_starts, b->page_starts, sizeof(a->page_starts)) != 0) return false;
     for (size_t i = 0; i < a->count; ++i) {
-        const spark_display_row_t* x = &a->rows[i];
-        const spark_display_row_t* y = &b->rows[i];
-        if (x->layout != y->layout || x->height != y->height || !same_text(x->id, y->id) ||
-            !same_text(x->mark, y->mark) || !same_text(x->primary, y->primary) ||
-            !same_text(x->secondary, y->secondary) || !same_text(x->meta, y->meta) ||
-            !same_text(x->address, y->address) || !same_text(x->subject, y->subject)) return false;
+        if (!spark_item_equal(&a->items[i], &b->items[i])) return false;
     }
     return true;
 }
@@ -47,14 +42,14 @@ static void select_index(size_t next) {
         spark_view_render(s_display);
     } else {
         size_t start = s_display->page_starts[page];
-        spark_body_list_select(old - start, &s_display->rows[old], false);
-        spark_body_list_select(next - start, &s_display->rows[next], true);
+        spark_body_list_select(old - start, &s_display->items[old], false);
+        spark_body_list_select(next - start, &s_display->items[next], true);
     }
     spark_display_paint();
 }
 
 bool spark_display_is_selected(const char* id) {
-    return showing() && strcmp(s_display->rows[s_display->selected].id, id) == 0;
+    return showing() && strcmp(s_display->items[s_display->selected].id, id) == 0;
 }
 
 bool spark_display_apply(spark_display_t* display, bool new_display) {
@@ -92,12 +87,12 @@ void spark_navigation_move(bool forward) {
     if (forward && next + 1 < s_display->count) ++next;
     if (!forward && next > 0) --next;
     select_index(next);
-    spark_display_report("selected", s_display->rows[next].id);
+    spark_display_report("selected", s_display->items[next].id);
 }
 
 void spark_navigation_open(void) {
     if (!showing() || s_display->kind != SPARK_DISPLAY_LIST || s_open_pending) return;
-    s_open_pending = spark_display_report("open", s_display->rows[s_display->selected].id);
+    s_open_pending = spark_display_report("open", s_display->items[s_display->selected].id);
 }
 
 void spark_navigation_back(void) {
@@ -109,7 +104,7 @@ void spark_navigation_back(void) {
     spark_view_render(s_display);
     spark_display_free(old);
     spark_display_paint();
-    spark_display_report("selected", s_display->rows[s_display->selected].id);
+    spark_display_report("selected", s_display->items[s_display->selected].id);
 }
 
 void spark_navigation_dismiss(void) {
